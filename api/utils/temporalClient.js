@@ -1,5 +1,5 @@
 const {
-  logger: logger
+  logger
 } = require('@librechat/data-schemas');
 
 // /opt/open-webui/api/utils/temporalClient.js
@@ -51,12 +51,31 @@ async function enqueueMemoryTask(payload) {
 }
 
 async function enqueueGraphTask(payload) {
-  return publishWithFallback(
+  const conversationId = payload?.conversation_id ?? 'unknown';
+  const messageId = payload?.message_id ?? 'unknown';
+  const fallbackPath = '/temporal/graph/run';
+  const via = isNatsEnabled() ? 'nats' : 'http-fallback';
+  const fallbackUrl = process.env.TOOLS_GATEWAY_URL
+    ? `${process.env.TOOLS_GATEWAY_URL}${fallbackPath}`
+    : 'unknown';
+  const fallbackDetails = via === 'http-fallback' ? `, fallbackUrl=${fallbackUrl}` : '';
+
+  logger.info(
+    `[TemporalClient] enqueueGraphTask start (conversation=${conversationId}, message=${messageId}, via=${via}${fallbackDetails})`
+  );
+
+  const result = await publishWithFallback(
     'NATS_GRAPH_SUBJECT',
     payload,
-    '/temporal/graph/run',
+    fallbackPath,
     'GraphWorkflow',
   );
+
+  logger.info(
+    `[TemporalClient] enqueueGraphTask success (conversation=${conversationId}, message=${messageId}, via=${via}${fallbackDetails})`
+  );
+
+  return result;
 }
 
 async function enqueueSummaryTask(payload) {
