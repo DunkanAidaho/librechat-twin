@@ -1064,6 +1064,7 @@ if (req.body.files && req.body.files.length > 0) {
                 user_id: req.user.id,
                 conversation_id: conversationId,
                 message_id: response.messageId,
+		role: response?.role || 'assistant',
                 content: assistantText,
                 created_at: response?.createdAt || new Date().toISOString(),
                 reasoning_text: response?.reasoningText || null,
