@@ -1,4 +1,7 @@
+const natsClient = require('~/utils/natsClient');
 // /opt/open-webui/request.js - ИСПРАВЛЕННАЯ ВЕРСИЯ
+
+const { withTimeout, retryAsync } = require('~/utils/async');
 const {
   observeSendMessage,
   incSendMessageFailure,
@@ -15,8 +18,7 @@ const {
 
 const { sendEvent } = require('@librechat/api');
 const { logger } = require('@librechat/data-schemas');
-const natsClient = require('~/utils/natsClient');
-const { retryAsync, withTimeout } = require('~/utils/async');
+const { Constants } = require('librechat-data-provider');
 
 const {
   handleAbortError,
@@ -47,15 +49,7 @@ const GOOGLE_NOSTREAM_THRESHOLD = parseInt(process.env.GOOGLE_NOSTREAM_THRESHOLD
 const SUMMARIZATION_THRESHOLD = parseInt(process.env.SUMMARIZATION_THRESHOLD || '10', 10);
 const MAX_MESSAGES_PER_SUMMARY = parseInt(process.env.MAX_MESSAGES_PER_SUMMARY || '40', 10);
 const SUMMARIZATION_LOCK_TTL = parseInt(process.env.SUMMARIZATION_LOCK_TTL || '20', 10);
-const TEMPORAL_SUMMARY_REASON = 'summary_queue';
-const TEMPORAL_GRAPH_REASON = 'graph_queue';
 
-  /**
-   * @description Parses environment variable as integer with fallback.
-   * @param {string} name - Environment variable name.
-   * @param {number} defaultValue - Default value if parsing fails.
-   * @returns {number} Parsed integer or default.
-   */
 const getEnvInt = (name, defaultValue) => {
   const raw = process.env[name];
   if (raw == null || raw === '') {
@@ -66,12 +60,6 @@ const getEnvInt = (name, defaultValue) => {
   return Number.isNaN(parsed) ? defaultValue : parsed;
 };
 
-  /**
-   * @description Parses environment variable as float with fallback.
-   * @param {string} name - Environment variable name.
-   * @param {number} defaultValue - Default value if parsing fails.
-   * @returns {number} Parsed float or default.
-   */
 const getEnvFloat = (name, defaultValue) => {
   const raw = process.env[name];
   if (raw == null || raw === '') {
@@ -114,11 +102,6 @@ const RESILIENCE_CONFIG = Object.freeze({
   },
 });
 
-  /**
-   * @description Retrieves resilience configuration for a given operation key.
-   * @param {string} key - Configuration key (e.g., 'sendMessage').
-   * @returns {Object} Configuration object with timeoutMs and retries.
-   */
 const getResilienceConfig = (key) => {
   const config = RESILIENCE_CONFIG[key];
   if (!config) {
@@ -127,25 +110,6 @@ const getResilienceConfig = (key) => {
   return { ...config };
 };
 
-  /**
-   * @description Executes a function with resilience (retries, timeout, backoff).
-   * @param {string} operationName - Name of the operation for logging.
-   * @param {function} fn - Function to execute, receives {attempt}.
-   * @param {Object} [options] - Resilience options.
-   * @param {number} [options.timeoutMs=0] - Timeout in milliseconds.
-   * @param {number} [options.retries=0] - Number of retries.
-   * @param {string} [options.timeoutMessage] - Custom timeout message.
-   * @param {AbortSignal} [options.signal] - Abort signal.
-   * @param {number} [options.minDelay] - Min delay for retries.
-   * @param {number} [options.maxDelay] - Max delay for retries.
-   * @param {number} [options.factor] - Backoff factor.
-   * @param {number} [options.jitter] - Jitter for randomization.
-   * @param {function} [options.onRetry] - Callback on retry.
-   * @returns {Promise<any>} Result of the function.
-   * @throws {Error} If all attempts fail.
-   * @example
-   * await runWithResilience('sendMessage', async () => send(), { retries: 2 });
-   */
 async function runWithResilience(operationName, fn, options = {}) {
   const {
     timeoutMs = 0,
@@ -201,7 +165,7 @@ async function runWithResilience(operationName, fn, options = {}) {
         error?.message || error,
       );
       if (typeof onRetry === 'function') {
-        try {
+  try {
           await onRetry(error, nextAttempt);
         } catch (hookErr) {
           logger.error(
@@ -212,7 +176,8 @@ async function runWithResilience(operationName, fn, options = {}) {
           throw hookErr;
         }
       }
-    },
+    }
+  },
   };
 
   try {
@@ -237,12 +202,6 @@ async function runWithResilience(operationName, fn, options = {}) {
   }
 }
 
-  /**
-   * @description Normalizes a label value, trimming and providing fallback.
-   * @param {string} value - Value to normalize.
-   * @param {string} [fallback='unknown'] - Fallback if value is invalid.
-   * @returns {string} Normalized value or fallback.
-   */
 const normalizeLabelValue = (value, fallback = 'unknown') => {
   if (typeof value === 'string') {
     const trimmed = value.trim();
@@ -253,26 +212,27 @@ const normalizeLabelValue = (value, fallback = 'unknown') => {
   return fallback;
 };
 
-  /**
-   * @description Enqueues memory tasks with resilience and metrics.
-   * @param {Array} tasks - Array of tasks to enqueue.
-   * @param {Object} [meta={}] - Metadata for tasks.
-   * @param {Object} [options={}] - Additional resilience options.
-   * @returns {Promise<any>} Enqueue result.
-   * @throws {Error} If enqueue fails after retries.
-   */
 async function enqueueMemoryTasksWithResilience(tasks, meta = {}, options = {}) {
   const startedAt = Date.now();
   const reasonLabel = normalizeLabelValue(meta?.reason);
   const config = getResilienceConfig('memoryQueue');
   const mergedOptions = { ...config, ...options };
 
-  try {
+    try {
     const result = await runWithResilience(
       'enqueueMemoryTasks',
       () => enqueueMemoryTasks(tasks, meta),
       mergedOptions,
     );
+  if (result.status === 'queued') {
+    const dedupeKey = meta.dedupeKey || 'unknown';
+    if (dedupeKey !== 'unknown') {
+      await natsClient.publish('tasks.clear', { action: 'clearIngestedMark', key: dedupeKey });
+      logger.info('[enqueue] NATS published clear for key=%s', dedupeKey);
+    } else {
+      logger.warn('[enqueue] No dedupeKey in meta, no publish');
+    }
+  }
     observeMemoryQueueLatency({ reason: reasonLabel, status: 'success' }, Date.now() - startedAt);
     return result;
   } catch (error) {
@@ -282,13 +242,6 @@ async function enqueueMemoryTasksWithResilience(tasks, meta = {}, options = {}) 
   }
 }
 
-  /**
-   * @description Enqueues summary task with resilience and metrics.
-   * @param {Object} job - Job payload for summary.
-   * @param {Object} [options={}] - Additional resilience options.
-   * @returns {Promise<any>} Enqueue result.
-   * @throws {Error} If enqueue fails after retries.
-   */
 async function enqueueSummaryTaskWithResilience(job, options = {}) {
   const startedAt = Date.now();
   const config = getResilienceConfig('summaryEnqueue');
@@ -300,25 +253,17 @@ async function enqueueSummaryTaskWithResilience(job, options = {}) {
       () => enqueueSummaryTask(job),
       mergedOptions,
     );
-    incSummaryEnqueueTotal();
-    setTemporalStatus(TEMPORAL_SUMMARY_REASON, true);
     observeSummaryEnqueue({ status: 'success' }, Date.now() - startedAt);
+    incSummaryEnqueueTotal();
     return result;
   } catch (error) {
-    setTemporalStatus(TEMPORAL_SUMMARY_REASON, false);
+    setTemporalStatus('summary_enqueue', false);
     observeSummaryEnqueue({ status: 'failure' }, Date.now() - startedAt);
     incSummaryEnqueueFailure(normalizeLabelValue(error?.code || error?.name || error?.message));
     throw error;
   }
 }
 
-  /**
-   * @description Enqueues graph task with resilience and metrics.
-   * @param {Object} payload - Payload for graph task.
-   * @param {Object} [options={}] - Additional resilience options.
-   * @returns {Promise<any>} Enqueue result.
-   * @throws {Error} If enqueue fails after retries.
-   */
 async function enqueueGraphTaskWithResilience(payload, options = {}) {
   const startedAt = Date.now();
   const config = getResilienceConfig('graphEnqueue');
@@ -330,27 +275,17 @@ async function enqueueGraphTaskWithResilience(payload, options = {}) {
       () => enqueueGraphTask(payload),
       mergedOptions,
     );
-    incGraphEnqueueTotal();
-    setTemporalStatus(TEMPORAL_GRAPH_REASON, true);
     observeGraphEnqueue({ status: 'success' }, Date.now() - startedAt);
+    incGraphEnqueueTotal();
     return result;
   } catch (error) {
-    setTemporalStatus(TEMPORAL_GRAPH_REASON, false);
+    setTemporalStatus('graph_enqueue', false);
     observeGraphEnqueue({ status: 'failure' }, Date.now() - startedAt);
     incGraphEnqueueFailure(normalizeLabelValue(error?.code || error?.name || error?.message));
     throw error;
   }
 }
 
-  /**
-   * @description Saves conversation with resilience.
-   * @param {Object} req - Request object.
-   * @param {Object} data - Conversation data.
-   * @param {Object} [options={}] - Save options.
-   * @param {Object} [resilienceOptions={}] - Resilience options.
-   * @returns {Promise<any>} Save result.
-   * @throws {Error} If save fails after retries.
-   */
 async function saveConvoWithResilience(req, data, options = {}, resilienceOptions = {}) {
   const config = getResilienceConfig('saveConvo');
   const mergedOptions = { ...config, ...resilienceOptions };
@@ -362,11 +297,6 @@ async function saveConvoWithResilience(req, data, options = {}, resilienceOption
 }
 
 const summarizationLocks = new Map();
-  /**
-   * @description Acquires a lock for summarization to prevent duplicates.
-   * @param {string} conversationId - Conversation ID.
-   * @returns {boolean} True if lock acquired, false if already locked.
-   */
 function acquireSummarizationLock(conversationId) {
   const ttlMs = Math.max(1, SUMMARIZATION_LOCK_TTL) * 1000;
   const now = Date.now();
@@ -381,11 +311,6 @@ function acquireSummarizationLock(conversationId) {
   summarizationLocks.set(conversationId, { timestamp: now, timeout });
   return true;
 }
-  /**
-   * @description Releases the summarization lock.
-   * @param {string} conversationId - Conversation ID.
-   * @returns {void}
-   */
 function releaseSummarizationLock(conversationId) {
   const entry = summarizationLocks.get(conversationId);
   if (entry?.timeout) {
@@ -394,47 +319,31 @@ function releaseSummarizationLock(conversationId) {
   summarizationLocks.delete(conversationId);
 }
 
-  /**
-   * @description Extracts deduplication keys from tasks.
-   * @param {Array} [tasks=[]] - Array of tasks.
-   * @returns {Array<string>} Array of dedupe keys.
-   */
-const extractDedupeKeys = (tasks = []) => {
-  if (!Array.isArray(tasks) || tasks.length === 0) {
-    return [];
+async function enqueueMemoryTasksSafe(tasks, meta = {}, options = {}) {
+  try {
+    await enqueueMemoryTasksWithResilience(tasks, meta, options);
+    return { success: true, error: null };
+  } catch (err) {
+    logger.error(
+      `[MemoryQueue] Ошибка постановки задачи: причина=%s, диалог=%s, сообщение=%s.`,
+      meta?.reason,
+      meta?.conversationId,
+      err?.message || err,
+    );
+    return { success: false, error: err }; // No clear on fail, leave pending, publish after queued // No clear on fail, leave pending
   }
-  const keys = [];
-  for (const task of tasks) {
-    if (!task || typeof task !== 'object') continue;
-    const payload = task.payload && typeof task.payload === 'object' ? task.payload : task;
-      const key = task.meta?.dedupe_key || payload?.ingest_dedupe_key;
-    if (key) keys.push(key);
-  }
-  return keys;
-};
-
+}
 
 // Note: retrieveContext function is no longer needed here as logic is moved to client.js
 
-  /**
-   * @description Checks if response is writable.
-   * @param {Object} res - Response object.
-   * @returns {boolean} True if writable.
-   */
 function canWrite(res) {
   return Boolean(res) && res.writable !== false && !res.writableEnded;
 }
-  /**
-   * @description Creates a detachable response wrapper.
-   * @param {Object} res - Original response object.
-   * @returns {Object} Detachable response object.
-   */
 function makeDetachableRes(res) {
   let detached = false;
   return {
     setDetached(v = true) { detached = v; },
     write(...args) { if (!detached && canWrite(res)) { try { return res.write(...args); } catch(_) { return true; } } return true; },
-
     end(...args) { if (!detached && canWrite(res)) { try { return res.end(...args); } catch(_) {} } },
     flushHeaders() { if (!detached && typeof res.flushHeaders === 'function') { try { res.flushHeaders(); } catch(_) {} } },
     get headersSent() { return detached ? true : res.headersSent; },
@@ -444,27 +353,9 @@ function makeDetachableRes(res) {
   };
 }
 
-  /**
-   * @description Checks if response is finalized.
-   * @param {Object} resLike - Response-like object.
-   * @returns {boolean} True if finalized.
-   */
-function isResponseFinalized(resLike) {
-  if (!resLike) return false;
-  return Boolean(resLike.finished || resLike.headersSent);
-}
-
 // Генерим заголовок только при первом обмене и если title пустой/"New Chat"
-  /**
-   * @description Determines if title should be generated for conversation.
-   * @param {Object} req - Request object.
-   * @param {string} conversationId - Conversation ID.
-   * @returns {Promise<boolean>} True if title should be generated.
-   * @throws {Error} If check fails.
-   */
 async function shouldGenerateTitle(req, conversationId) {
   try {
-
     const convo = await getConvo(req.user.id, conversationId);
     const title = (convo?.title || '').trim();
     if (title && !/new chat/i.test(title)) return false;
@@ -476,16 +367,6 @@ async function shouldGenerateTitle(req, conversationId) {
   }
 }
 
-  /**
-   * @description Main controller for agent requests, handling messages, RAG, and streaming.
-   * @param {Object} req - Express request object.
-   * @param {Object} res - Express response object.
-   * @param {function} next - Express next function.
-   * @param {function} initializeClient - Function to initialize client.
-   * @param {function} addTitle - Function to add title.
-   * @returns {Promise<void>}
-   * @throws {Error} If processing fails.
-   */
 const AgentController = async (req, res, next, initializeClient, addTitle) => {
   let {
     text,
@@ -500,51 +381,8 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
   } = req.body;
 
   let conversationId = initialConversationId;
-  const pendingIngestMarks = new Set();
-    /**
-     * @description Safely enqueues memory tasks with dedupe key management.
-     * @param {Array} tasks - Array of tasks to enqueue.
-     * @param {Object} [meta={}] - Metadata for tasks.
-     * @param {Object} [options={}] - Additional options.
-     * @returns {Promise<Object>} Result with success and error fields.
-     */
-  const enqueueMemoryTasksSafe = async (tasks, meta = {}, options = {}) => {
-    const dedupeKeys = extractDedupeKeys(tasks);
-    try {
-      const result = await enqueueMemoryTasksWithResilience(tasks, meta, options);
-      if (result?.status === 'queued' && dedupeKeys.length > 0) {
-        for (const key of dedupeKeys) {
-          try {
-            if (natsClient) {
-              await natsClient.publish('tasks.clear', { action: 'clearIngestedMark', key });
-            }
-            await ingestDeduplicator.clearIngestedMark(key);
-            pendingIngestMarks.delete(key);
-          } catch (err) {
-            logger.warn('[MemoryQueue] Не удалось очистить дедуп-ключ %s: %s', key, err?.message || err);
-          }
-        }
-      }
-      return { success: true, error: null };
-    } catch (err) {
-      logger.error(
-        `[MemoryQueue] Ошибка постановки задачи: причина=%s, диалог=%s, сообщение=%s.`,
-        meta?.reason,
-        meta?.conversationId,
-        err?.message || err,
-      );
-      return { success: false, error: err };
-    }
-  };
+    const pendingIngestMarks = new Set();
 
-
-      /**
-       * @description Initializes client with resilience (retries, timeout).
-       * @param {Object} args - Arguments for client initialization.
-       * @param {Object} [resilienceOptions={}] - Resilience options.
-       * @returns {Promise<any>} Initialized client.
-       * @throws {Error} If initialization fails after retries.
-       */
     const initializeClientWithResilience = async (args, resilienceOptions = {}) => {
       const config = getResilienceConfig('initializeClient');
       const mergedOptions = { ...config, ...resilienceOptions };
@@ -593,10 +431,6 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       }
     };
 
-      /**
-       * @description Resolves labels for send message metrics.
-       * @returns {Object} Object with endpoint and model labels.
-       */
     const resolveSendMessageLabels = () => ({
       endpoint:
         endpointOption?.endpoint ||
@@ -656,19 +490,15 @@ if (req.body.files && req.body.files.length > 0) {
 
         pendingIngestMarks.add(dedupeKey);
         try {
-          const enqueueResult = await enqueueMemoryTasksSafe(
-            [task],
-            {
-              reason: 'index_file',
-              conversationId,
-              userId,
-              fileId: file.file_id,
-              textLength: textToIndex.length,
-            },
-          );
-          if (!enqueueResult.success) {
-            throw enqueueResult.error || new Error('Memory queue enqueue failed');
-          }
+          await enqueueMemoryTasksWithResilience([task], {
+            reason: 'index_file',
+            conversationId,
+            userId,
+            fileId: file.file_id,
+            textLength: textToIndex.length,
+            dedupeKey,
+          });
+          pendingIngestMarks.delete(dedupeKey);
         } catch (err) {
           logger.error(
             '[Pre-emptive Ingest] Ошибка постановки задачи (file=%s, conversation=%s): %s',
@@ -700,7 +530,6 @@ if (req.body.files && req.body.files.length > 0) {
   let getAbortData;
   let client = null;
   let cleanupHandlers = [];
-  let responseFinalized = false;
 
   let getReqData = (data = {}) => {
     for (let key in data) {
@@ -721,42 +550,37 @@ if (req.body.files && req.body.files.length > 0) {
     }
   };
 
-      /**
-       * @description Performs cleanup of resources and pending tasks.
-       * @returns {Promise<void>}
-       * @throws {Error} If cleanup handlers fail.
-       */
-    const performCleanup = async () => {
-      if (Array.isArray(cleanupHandlers)) {
-        for (const handler of cleanupHandlers) {
-          try {
-            if (typeof handler === 'function') {
-              handler();
-            }
-          } catch (e) {
-            logger.error('[AgentController] Ошибка в обработчике очистки.', e);
+  const performCleanup = () => {
+    if (Array.isArray(cleanupHandlers)) {
+      for (const handler of cleanupHandlers) {
+        try {
+          if (typeof handler === 'function') {
+            handler();
           }
+        } catch (e) {
+          logger.error('[AgentController] Ошибка в обработчике очистки.', e);
         }
       }
-      if (pendingIngestMarks.size > 0) {
-        for (const key of Array.from(pendingIngestMarks)) {
-          try {
-            if (natsClient) {
-              await natsClient.publish('tasks.clear', { action: 'clearIngestedMark', key });
-            }
-            await ingestDeduplicator.clearIngestedMark(key);
-          } catch (err) {
-            logger.warn('[AgentController] Не удалось очистить дедуп-ключ %s: %s', key, err?.message || err);
-          }
-        }
-        pendingIngestMarks.clear();
+    }
+
+    if (pendingIngestMarks.size > 0) {
+      for (const key of pendingIngestMarks) {
+        ingestDeduplicator
+          .clearIngestedMark(key)
+          .catch((err) =>
+            logger.warn('[AgentController] Не удалось очистить дедуп-ключ %s: %s', key, err?.message || err),
+          );
       }
-      requestDataMap.delete(req);
-      if (client) {
-        disposeClient(client);
-        client = null;
-      }
-    };
+      pendingIngestMarks.clear();
+    }
+
+    requestDataMap.delete(req);
+
+    if (client) {
+      disposeClient(client);
+      client = null;
+    }
+  };
 
   try {
     const originalUserText = text || '';
@@ -788,19 +612,15 @@ if (req.body.files && req.body.files.length > 0) {
 
             pendingIngestMarks.add(dedupeKey);
             try {
-              const enqueueResult = await enqueueMemoryTasksSafe(
-                tasks,
-                {
-                  reason: 'index_file',
-                  conversationId: convId,
-                  userId,
-                  fileId,
-                  textLength: originalUserText.length,
-                },
-              );
-              if (!enqueueResult.success) {
-                throw enqueueResult.error || new Error('Memory queue enqueue failed');
-              }
+              await enqueueMemoryTasksWithResilience(tasks, {
+                reason: 'index_file',
+                conversationId: convId,
+                userId,
+                fileId,
+                textLength: originalUserText.length,
+                dedupeKey,
+              });
+              pendingIngestMarks.delete(dedupeKey);
             } catch (err) {
               logger.error(
                 '[AgentController][large-text] Не удалось поставить задачу на индексацию (conversation=%s): %s',
@@ -845,317 +665,245 @@ if (req.body.files && req.body.files.length > 0) {
     const originalTextForDisplay = text || '';
     // -----------------------------------------------------------------
 
-    logger.info('[DEBUG-request] conversationId before build=%s', conversationId);
-      if (!HEADLESS_STREAM) {
-        const isGoogleEndpoint = (option) => option && option.endpoint === 'google';
-        const prelimAbortController = new AbortController();
-        const prelimCloseHandler = () => { try { prelimAbortController.abort(); } catch {} };
-        res.once('close', prelimCloseHandler);
-        req.once('aborted', prelimCloseHandler);
+    if (!HEADLESS_STREAM) {
+      let prelimAbortController = new AbortController();
+      const prelimCloseHandler = () => { try { prelimAbortController.abort(); } catch {} };
+      res.once('close', prelimCloseHandler);
+      req.once('aborted', prelimCloseHandler);
 
-        try {
-          const approxLen = text?.length || 0;
-          if (isGoogleEndpoint(endpointOption) && approxLen > GOOGLE_NOSTREAM_THRESHOLD) {
-            endpointOption.model_parameters = endpointOption.model_parameters || {};
-            endpointOption.model_parameters.streaming = false;
-            logger.info('[AgentController] Google: потоковый режим выключен (превышен лимит размера).');
-          }
-        } catch (_) {}
+          // Если google и большой payload, отключаем стрим заранее
+    try {
+      const approxLen = (text?.length || 0);
+      function isGoogleEndpoint(endpointOption) {
+        return endpointOption && endpointOption.endpoint === 'google';
+      }
+      if (isGoogleEndpoint(endpointOption) && approxLen > GOOGLE_NOSTREAM_THRESHOLD) {
+        endpointOption.model_parameters = endpointOption.model_parameters || {};
+        endpointOption.model_parameters.streaming = false;
+        logger.info(`[AgentController] Google: потоковый режим выключен (превышен лимит размера).`);
+      }
+    } catch(_) {}
 
-        let initResult = await initializeClientWithResilience(
-          { req, res, endpointOption, signal: prelimAbortController.signal },
-          { signal: prelimAbortController.signal },
-        );
+      let initResult = await initializeClientWithResilience(
+        { req, res, endpointOption, signal: prelimAbortController.signal },
+        { signal: prelimAbortController.signal },
+      );
 
-        try {
-          res.removeListener('close', prelimAbortController);
-          req.removeListener('aborted', prelimAbortController);
-        } catch (_) {}
+      try { res.removeListener('close', prelimAbortController); req.removeListener('aborted', prelimAbortController); } catch (_) {}
 
-        if (!initResult || !initResult.client) throw new Error('Failed to initialize client (no result or client)');
-        if (prelimAbortController.signal?.aborted) throw new Error('Request aborted before init');
+      if (!initResult || !initResult.client) throw new Error('Failed to initialize client (no result or client)');
+      if (prelimAbortController.signal?.aborted) throw new Error('Request aborted before init');
 
-        client = initResult.client;
-        if (clientRegistry) clientRegistry.register(client, { userId }, client);
-        requestDataMap.set(req, { client });
+      client = initResult.client;
+      if (clientRegistry) clientRegistry.register(client, { userId }, client);
+      requestDataMap.set(req, { client });
 
-        const contentRef = new WeakRef(client.contentParts || []);
-        getAbortData = () => ({
+      const contentRef = new WeakRef(client.contentParts || []);
+      getAbortData = () => {
+        const content = contentRef.deref();
+        return {
           sender,
-          content: contentRef.deref() || [],
+          content: content || [],
           userMessage,
           promptTokens,
           conversationId,
           userMessagePromise,
           messageId: responseMessageId,
           parentMessageId: overrideParentMessageId ?? userMessageId,
-        });
-
-        const { abortController, onStart } = createAbortController(req, res, getAbortData, getReqData);
-
-        const onClose = () => {
-          const closedAfterFinalize = responseFinalized || isResponseFinalized(res);
-          if (closedAfterFinalize) {
-            logger.debug('[AgentController] client connection closed after finalize (non-headless).');
-            return;
-          }
-          if (!abortController.signal.aborted) {
-            try {
-              abortController.abort();
-            } catch {}
-            logger.info('[AgentController] Клиент разорвал соединение (аналог HTTP 499).');
-          }
         };
-        res.once('close', onClose);
-        req.once('aborted', onClose);
-        cleanupHandlers.push(() => {
-          try { res.removeListener('close', onClose); } catch {}
-          try { req.removeListener('aborted', onClose); } catch {}
-        });
+      };
 
-        const messageOptions = {
-          user: userId,
-          onStart,
-          getReqData,
-          isContinued,
-          isRegenerate,
-          editedContent,
-          conversationId,
-          parentMessageId,
-          abortController,
-          overrideParentMessageId,
-          isEdited: !!editedContent,
-          userMCPAuthMap: initResult.userMCPAuthMap,
-          responseMessageId: editedResponseMessageId,
-          progressOptions: { res },
-        };
+      const { abortController, onStart } = createAbortController(req, res, getAbortData, getReqData);
 
-        const sendMessageLabels = resolveSendMessageLabels();
+      const onClientAbort = () => {
+        if (!abortController.signal.aborted) { try { abortController.abort(); } catch {} logger.info(`[AgentController] Клиент разорвал соединение (аналог HTTP 499).`); }
+      };
+      res.once('close', onClientAbort);
+      req.once('aborted', onClientAbort);
+      cleanupHandlers.push(() => { try { res.removeListener('close', onClientAbort); } catch {} try { req.removeListener('aborted', onClientAbort); } catch {} });
 
-        try {
+      const messageOptions = {
+        user: userId,
+        onStart,
+        getReqData,
+        isContinued,
+        isRegenerate,
+        editedContent,
+        conversationId,
+        parentMessageId,
+        abortController,
+        overrideParentMessageId,
+        isEdited: !!editedContent,
+        userMCPAuthMap: initResult.userMCPAuthMap,
+        responseMessageId: editedResponseMessageId,
+        progressOptions: { res },
+      };
+
+      const sendMessageLabels = resolveSendMessageLabels();
+
+      try {
+        response = await sendMessageWithResilience(
+          client,
+          text,
+          messageOptions,
+          sendMessageLabels,
+          { signal: abortController.signal },
+        );
+      } catch (e) {
+        const msg = String(e && (e.message || e));
+        function isGoogleEndpoint(endpointOption) {
+          return endpointOption && endpointOption.endpoint === 'google';
+        }
+        function disableGoogleStreaming(endpointOption) {
+          if (endpointOption && isGoogleEndpoint(endpointOption)) {
+            endpointOption.model_parameters = endpointOption.model_parameters || {};
+            endpointOption.model_parameters.streaming = false;
+          }
+        }
+        if (
+          isGoogleEndpoint(endpointOption) &&
+          (msg.includes('Symbol(Symbol.asyncIterator)') || msg.includes('ERR_INTERNAL_ASSERTION'))
+        ) {
+          logger.error('[AgentController] google stream error, retry non-stream once');
+          try {
+            disableGoogleStreaming(endpointOption);
+          } catch (_) {}
+          const reinit = await initializeClientWithResilience(
+            { req, res, endpointOption, signal: prelimAbortController.signal },
+            { signal: prelimAbortController.signal },
+          );
+          if (!reinit || !reinit.client) throw e;
+          initResult = reinit;
+          client = reinit.client;
+          if (clientRegistry) {
+            clientRegistry.register(client, { userId }, client);
+          }
+          requestDataMap.set(req, { client });
           response = await sendMessageWithResilience(
             client,
             text,
             messageOptions,
-            sendMessageLabels,
+            resolveSendMessageLabels(),
             { signal: abortController.signal },
           );
-        } catch (e) {
-          const msg = String(e && (e.message || e));
-          const disableGoogleStreaming = (option) => {
-            if (isGoogleEndpoint(option)) {
-              option.model_parameters = option.model_parameters || {};
-              option.model_parameters.streaming = false;
-            }
-          };
-
-          if (
-            isGoogleEndpoint(endpointOption) &&
-            (msg.includes('Symbol(Symbol.asyncIterator)') || msg.includes('ERR_INTERNAL_ASSERTION'))
-          ) {
-            logger.error('[AgentController] google stream error, retry non-stream once');
-            try {
-              disableGoogleStreaming(endpointOption);
-            } catch (_) {}
-            const reinit = await initializeClientWithResilience(
-              { req, res, endpointOption, signal: prelimAbortController.signal },
-              { signal: prelimAbortController.signal },
-            );
-            if (!reinit || !reinit.client) throw e;
-            initResult = reinit;
-            client = reinit.client;
-            if (clientRegistry) {
-              clientRegistry.register(client, { userId }, client);
-            }
-            requestDataMap.set(req, { client });
-            response = await sendMessageWithResilience(
-              client,
-              text,
-              messageOptions,
-              resolveSendMessageLabels(),
-              { signal: abortController.signal },
-            );
-          } else {
-            throw e;
-          }
+        } else {
+          throw e;
         }
-
-        const safeEndpoint =
-          (endpointOption && endpointOption.endpoint) ||
-          initResult?.endpoint ||
-          client?.options?.endpoint ||
-          client?.endpoint ||
-          'unknown';
-        if (response) response.endpoint = safeEndpoint;
-
-        if (!abortController.signal.aborted && response && canWrite(res)) {
-          const databasePromise = response.databasePromise;
-          delete response.databasePromise;
-
-          const { conversation: convoData = {} } = await databasePromise;
-          const conversation = { ...convoData };
-          conversation.title = conversation?.title || (await getConvoTitle(req.user.id, conversationId));
-
-          if (req.body.files && client.options?.attachments && userMessage) {
-            userMessage.files = [];
-            const messageFiles = new Set(req.body.files.map((f) => f.file_id));
-            for (const attachment of client.options.attachments) {
-              if (messageFiles.has(attachment.file_id)) userMessage.files.push({ ...attachment });
-            }
-            delete userMessage.image_urls;
-          }
-
-          if (userMessage && text !== originalTextForDisplay) userMessage.text = originalTextForDisplay;
-
-          if (useRagMemory) {
-            const tasks = [];
-            const userContent = userMessage ? (userMessage.text || '') : '';
-            let assistantText = response ? (response.text || '') : '';
-            if (!assistantText && Array.isArray(response?.content)) {
-              assistantText = response.content
-                .filter((p) => p.type === 'text' && p.text)
-                .map((p) => p.text)
-                .join('\n');
-            }
-
-            const userCreatedAt = userMessage?.createdAt || new Date().toISOString();
-            const assistantCreatedAt = response?.createdAt || new Date().toISOString();
-
-            if (userContent) {
-              tasks.push({
-                type: 'add_turn',
-                payload: {
-                  conversation_id: conversationId,
-                  message_id: userMessage.messageId,
-                  role: 'user',
-                  content: userContent,
-                  user_id: req.user.id,
-                  created_at: userCreatedAt,
-                },
-              });
-            }
-
-            if (assistantText) {
-              tasks.push({
-                type: 'add_turn',
-                payload: {
-                  conversation_id: conversationId,
-                  message_id: response.messageId,
-                  role: 'assistant',
-                  content: assistantText,
-                  user_id: req.user.id,
-                  created_at: assistantCreatedAt,
-                },
-              });
-            }
-
-            if (tasks.length > 0) {
-              await enqueueMemoryTasksSafe(tasks, {
-                reason: 'regular_turn',
-                conversationId,
-                userId: req.user.id,
-                fileId: null,
-                textLength: (userContent?.length || 0) + (assistantText?.length || 0),
-              });
-            }
-
-            if (assistantText) {
-              const graphPayload = {
-                user_id: req.user.id,
-                conversation_id: conversationId,
-                message_id: response.messageId,
-                content: assistantText,
-                created_at: response?.createdAt || new Date().toISOString(),
-                reasoning_text: response?.reasoningText || null,
-                context_flags: response?.contextFlags || [],
-              };
-
-              try {
-                logger.info(
-                  `[GraphWorkflow] ветка Graph запущена (conversation=${conversationId}, message=${response.messageId}, USE_GRAPH_CONTEXT=${process.env.USE_GRAPH_CONTEXT ?? 'unset'}, GRAPH_CONTEXT_MODE=${process.env.GRAPH_CONTEXT_MODE ?? 'unset'}, MEMORY_GRAPHWORKFLOW_ENABLED=${process.env.MEMORY_GRAPHWORKFLOW_ENABLED ?? 'unset'})`
-                );
-
-                logger.info(
-                  `[GraphWorkflow] enqueueGraphTaskWithResilience start (conversation=${conversationId}, message=${response.messageId})`
-                );
-
-                await enqueueGraphTaskWithResilience(graphPayload);
-
-                logger.info(
-                  `[GraphWorkflow] enqueueGraphTaskWithResilience complete (conversation=${conversationId}, message=${response.messageId})`
-                );
-
-                logger.info(`[GraphWorkflow] started for message ${response.messageId}`);
-              } catch (err) {
-                logger.error(
-                  `[GraphWorkflow] Ошибка постановки/выполнения (conversation=${conversationId}, message=${response?.messageId}): ${err?.message || err}`,
-                );
-              }
-            }
-          }
-
-          try {
-            if (userMessage && !client.skipSaveUserMessage) await saveMessage(req, userMessage);
-            if (response) await saveMessage(req, { ...response, user: userId });
-          } catch (e) {
-            logger.error(`[AgentController] Ошибка при сохранении сообщений.`, e);
-          }
-
-          if (!abortController.signal.aborted && typeof addTitle === 'function') {
-            try {
-              const need = await shouldGenerateTitle(req, conversationId);
-              if (need) {
-                const titleSourceText = (userMessage?.text || originalTextForDisplay || req.body?.text || '').slice(0, 500);
-                await addTitle(req, {
-                  text: titleSourceText,
-                  input: titleSourceText,
-                  abortController,
-                  conversationId,
-                  endpoint: safeEndpoint,
-                  client,
-                  response,
-                  endpointOption,
-                });
-              }
-            } catch (e) {
-              logger.error(`[AgentController] Ошибка генерации заголовка.`, e);
-            }
-          }
-
-          if (response) {
-            sendEvent(res, {
-              final: true,
-              conversation,
-              title: conversation.title,
-              requestMessage: userMessage,
-              responseMessage: response,
-            });
-            responseFinalized = true;
-            try { res.end(); } catch {}
-          }
-
-          if (useRagMemory) {
-            triggerSummarization(req, conversationId).catch((err) =>
-              logger.error(`[Суммаризатор] Фоновый запуск завершился ошибкой`, err),
-            );
-          }
-        }
-        return;
       }
+
+      const safeEndpoint =
+        (endpointOption && endpointOption.endpoint) ||
+        initResult?.endpoint ||
+        client?.options?.endpoint ||
+        client?.endpoint ||
+        'unknown';
+      if (response) response.endpoint = safeEndpoint;
+
+      if (!abortController.signal.aborted && response && canWrite(res)) {
+        const databasePromise = response.databasePromise;
+        delete response.databasePromise;
+
+        const { conversation: convoData = {} } = await databasePromise;
+        const conversation = { ...convoData };
+        conversation.title = conversation?.title || (await getConvoTitle(req.user.id, conversationId));
+
+        if (req.body.files && client.options?.attachments && userMessage) {
+          userMessage.files = [];
+          const messageFiles = new Set(req.body.files.map((f) => f.file_id));
+          for (let attachment of client.options.attachments) {
+            if (messageFiles.has(attachment.file_id)) userMessage.files.push({ ...attachment });
+          }
+          delete userMessage.image_urls;
+        }
+
+        // показываем исходный текст
+        if (userMessage && text !== originalTextForDisplay) userMessage.text = originalTextForDisplay;
+
+        // Память RAG
+        if (useRagMemory) {
+          const tasks = [];
+          const userContent = userMessage ? (userMessage.text || '') : '';
+          let assistantText = response ? (response.text || '') : '';
+          if (!assistantText && Array.isArray(response?.content)) {
+            assistantText = response.content.filter((p) => p.type === 'text' && p.text).map((p) => p.text).join('\n');
+          }
+
+          // Проверяем наличие createdAt в userMessage и response
+          const userCreatedAt = userMessage?.createdAt || new Date().toISOString();
+          const assistantCreatedAt = response?.createdAt || new Date().toISOString();
+
+          if (userContent) tasks.push({ type: 'add_turn', payload: { conversation_id: conversationId, message_id: userMessage.messageId, role: 'user', content: userContent, user_id: req.user.id, created_at: userCreatedAt } });
+          if (assistantText) tasks.push({ type: 'add_turn', payload: { conversation_id: conversationId, message_id: response.messageId, role: 'assistant', content: assistantText, user_id: req.user.id, created_at: assistantCreatedAt } });
+          }
+          if (tasks.length > 0) {
+            const turnKey = `ingest:turn:${conversationId}:${userMessage?.messageId || response?.messageId}`;
+            await enqueueMemoryTasksSafe(tasks, {
+              reason: 'regular_turn',
+              conversationId,
+              userId: req.user.id,
+              fileId: null,
+              textLength: (userContent?.length || 0) + (assistantText?.length || 0),
+              dedupeKey: turnKey,
+            });
+          }
+
+          if (assistantText) {
+            const graphPayload = {
+              user_id: req.user.id,
+              conversation_id: conversationId,
+              message_id: response.messageId,
+              content: assistantText,
+              created_at: response?.createdAt || new Date().toISOString(),
+              reasoning_text: response?.reasoningText || null,
+              context_flags: response?.contextFlags || [],
+            };
+
+            try {
+              await enqueueGraphTaskWithResilience(graphPayload);
+              logger.info(`[GraphWorkflow] started for message ${response.messageId}`);
+            } catch (err) {
+              logger.error(`[GraphWorkflow] Не удалось запустить для %s: %s.`, response.messageId, err?.message || err);
+            }
+          }
+        }
+
+        try {
+          if (userMessage && !client.skipSaveUserMessage) await saveMessage(req, userMessage);
+          if (response) await saveMessage(req, { ...response, user: userId });
+        } catch (e) {
+          logger.error(`[AgentController] Ошибка при сохранении сообщений.`, e);
+        }
+
+        // ТОЛЬКО ПРИ ПЕРВОМ ОБМЕНЕ и без названия
+        if (response && typeof addTitle === 'function') {
+          try {
+            const need = await shouldGenerateTitle(req, conversationId);
+            if (need) {
+              const titleSourceText = (userMessage?.text || originalTextForDisplay || req.body?.text || '').slice(0, 500);
+              await addTitle(req, { text: titleSourceText, input: titleSourceText, abortController, conversationId, endpoint: safeEndpoint, client, response, endpointOption });
+            }
+          } catch (e) {
+            logger.error(`[AgentController] Ошибка генерации заголовка.`, e);
+          }
+        }
+
+        if (response) {
+          sendEvent(res, { final: true, conversation, title: conversation.title, requestMessage: userMessage, responseMessage: response });
+          try { res.end(); } catch {}
+        }
+
+        if (useRagMemory) {
+          triggerSummarization(req, conversationId).catch((err) => logger.error(`[Суммаризатор] Фоновый запуск завершился ошибкой`, err));
+        }
+      }
+      return;
+    }
+
     // HEADLESS_STREAM (detach)
     const dres = makeDetachableRes(res);
     let detached = false;
     const onClose = () => {
-      const closedAfterFinalize = responseFinalized || isResponseFinalized(dres);
-      if (closedAfterFinalize) {
-        logger.debug('[AgentController] client connection closed after finalize (headless).');
-        return;
-      }
-      if (!detached) {
-        dres.setDetached(true);
-        detached = true;
-        logger.info('[AgentController] client disconnected, detach streaming');
-      }
+      if (!detached) { dres.setDetached(true); detached = true; logger.info('[AgentController] client disconnected, detach streaming'); }
     };
     res.once('close', onClose);
     req.once('aborted', onClose);
@@ -1224,7 +972,7 @@ if (req.body.files && req.body.files.length > 0) {
     }
 
     // ТОЛЬКО ПРИ ПЕРВОМ ОБМЕНЕ
-    if (!abortController.signal.aborted && response && typeof addTitle === 'function') {
+    if (response && typeof addTitle === 'function') {
       try {
         const need = await shouldGenerateTitle(req, conversationId);
         if (need) {
@@ -1238,10 +986,8 @@ if (req.body.files && req.body.files.length > 0) {
 
     if (!detached && canWrite(dres) && response) {
       sendEvent(dres, { final: true, conversation: {}, title: undefined, requestMessage: userMessage, responseMessage: response });
-      responseFinalized = true;
       try { dres.end(); } catch {}
     } else {
-      responseFinalized = true;
       logger.info(`[AgentController] Ответ сформирован в фоне — клиент уже отключился.`);
     }
 
@@ -1251,19 +997,10 @@ if (req.body.files && req.body.files.length > 0) {
   } catch (error) {
     handleAbortError(res, req, error, { conversationId, sender, messageId: responseMessageId, parentMessageId: overrideParentMessageId ?? userMessageId ?? parentMessageId, userMessageId });
   } finally {
-      await performCleanup();
+    performCleanup();
   }
 };
 
-  /**
-   * @description Triggers summarization workflow for a conversation if conditions are met.
-   * @param {Object} req - Express request object.
-   * @param {string} conversationId - Unique identifier of the conversation.
-   * @returns {Promise<void>}
-   * @throws {Error} If summarization enqueue or save fails.
-   * @example
-   * await triggerSummarization(req, 'conv123');
-   */
 async function triggerSummarization(req, conversationId) {
   const userId = req.user.id;
 
