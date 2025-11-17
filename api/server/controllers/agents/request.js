@@ -689,6 +689,116 @@ if (req.body.files && req.body.files.length > 0) {
 // =================================================================
   const useRagMemory = process.env.USE_CONVERSATION_MEMORY === 'true';
   const userId = req.user.id;
+  
+  const processConversationArtifacts = async ({ userMessage: localUserMessage, response: localResponse, conversationId: localConversationId }) => {
+    if (!useRagMemory) {
+      return;
+    }
+
+    logger.info('[GraphWorkflow] guard check', {
+      useRagMemory,
+      hasAssistantText: Boolean(
+        (localResponse && localResponse.text) ||
+        (Array.isArray(localResponse?.content) && localResponse.content.some((part) => part.type === 'text' && part.text)),
+      ),
+      conversationId: localConversationId,
+      assistantMessageId: localResponse && localResponse.messageId,
+    });
+
+    const tasks = [];
+    const userContent = localUserMessage ? (localUserMessage.text || '') : '';
+    let assistantText = localResponse ? (localResponse.text || '') : '';
+
+    if (!assistantText && Array.isArray(localResponse?.content)) {
+      assistantText = localResponse.content
+        .filter((part) => part.type === 'text' && part.text)
+        .map((part) => part.text)
+        .join('\n');
+    }
+
+    const userCreatedAt = localUserMessage?.createdAt || new Date().toISOString();
+    const assistantCreatedAt = localResponse?.createdAt || new Date().toISOString();
+
+    if (userContent) {
+      tasks.push({
+        type: 'add_turn',
+        payload: {
+          conversation_id: localConversationId,
+          message_id: localUserMessage.messageId,
+          role: 'user',
+          content: userContent,
+          user_id: userId,
+          created_at: userCreatedAt,
+        },
+      });
+    }
+
+    if (assistantText) {
+      tasks.push({
+        type: 'add_turn',
+        payload: {
+          conversation_id: localConversationId,
+          message_id: localResponse?.messageId,
+          role: localResponse?.role || 'assistant',
+          content: assistantText,
+          user_id: userId,
+          created_at: assistantCreatedAt,
+        },
+      });
+    }
+
+    if (tasks.length > 0) {
+      await enqueueMemoryTasksSafe(tasks, {
+        reason: 'regular_turn',
+        conversationId: localConversationId,
+        userId,
+        fileId: null,
+        textLength: (userContent?.length || 0) + (assistantText?.length || 0),
+      });
+    }
+
+    if (!assistantText || !assistantText.trim()) {
+      logger.info('[GraphWorkflow] пропуск Graph (нет текста ассистента)', {
+        conversationId: localConversationId,
+        assistantMessageId: localResponse?.messageId,
+      });
+      return;
+    }
+
+    const graphPayload = {
+      user_id: userId,
+      conversation_id: localConversationId,
+      message_id: localResponse?.messageId,
+      role: localResponse?.role || 'assistant',
+      content: assistantText,
+      created_at: localResponse?.createdAt || new Date().toISOString(),
+      reasoning_text: localResponse?.reasoningText || null,
+      context_flags: localResponse?.contextFlags || [],
+    };
+
+    try {
+      logger.info(
+        `[GraphWorkflow] ветка Graph запущена (conversation=${localConversationId}, message=${localResponse?.messageId}, USE_GRAPH_CONTEXT=${process.env.USE_GRAPH_CONTEXT ?? 'unset'}, GRAPH_CONTEXT_MODE=${process.env.GRAPH_CONTEXT_MODE ?? 'unset'}, MEMORY_GRAPHWORKFLOW_ENABLED=${process.env.MEMORY_GRAPHWORKFLOW_ENABLED ?? 'unset'})`,
+      );
+
+      logger.info(
+        `[GraphWorkflow] enqueueGraphTaskWithResilience start (conversation=${localConversationId}, message=${localResponse?.messageId})`,
+      );
+
+      await enqueueGraphTaskWithResilience(graphPayload);
+
+      logger.info(
+        `[GraphWorkflow] enqueueGraphTaskWithResilience complete (conversation=${localConversationId}, message=${localResponse?.messageId})`,
+      );
+
+      logger.info(`[GraphWorkflow] started for message ${localResponse?.messageId}`);
+    } catch (err) {
+      logger.error(
+        `[GraphWorkflow] Ошибка постановки/выполнения (conversation=${localConversationId}, message=${localResponse?.messageId}): ${err?.message || err}`,
+      );
+    }
+  };
+  
 
   let sender;
   let userMessage;
@@ -1007,101 +1117,21 @@ if (req.body.files && req.body.files.length > 0) {
 
           if (userMessage && text !== originalTextForDisplay) userMessage.text = originalTextForDisplay;
 
+          logger.info('[GraphWorkflow1] pre-guard', {
+            useRagMemory,
+            hasResponse: Boolean(response),
+            responseKeys: response ? Object.keys(response) : [],
+            assistantTextPreview: typeof response?.text === 'string' ? response.text.slice(0, 80) : null,
+            responseContentTypes: Array.isArray(response?.content) ? response.content.map((part) => part.type) : null,
+          });
           if (useRagMemory) {
-            const tasks = [];
-            const userContent = userMessage ? (userMessage.text || '') : '';
-            let assistantText = response ? (response.text || '') : '';
-            if (!assistantText && Array.isArray(response?.content)) {
-              assistantText = response.content
-                .filter((p) => p.type === 'text' && p.text)
-                .map((p) => p.text)
-                .join('\n');
-            }
-
-            logger.info('[GraphWorkflow] guard check', {
-              useRagMemory: useRagMemory,
-              hasAssistantText: Boolean(assistantText && assistantText.trim()),
-              conversationId: conversationId,
-              assistantMessageId: response && response.messageId
+            await processConversationArtifacts({
+              userMessage,
+              response,
+              conversationId,
             });
-
-            const userCreatedAt = userMessage?.createdAt || new Date().toISOString();
-            const assistantCreatedAt = response?.createdAt || new Date().toISOString();
-
-            if (userContent) {
-              tasks.push({
-                type: 'add_turn',
-                payload: {
-                  conversation_id: conversationId,
-                  message_id: userMessage.messageId,
-                  role: 'user',
-                  content: userContent,
-                  user_id: req.user.id,
-                  created_at: userCreatedAt,
-                },
-              });
-            }
-
-            if (assistantText) {
-              tasks.push({
-                type: 'add_turn',
-                payload: {
-                  conversation_id: conversationId,
-                  message_id: response.messageId,
-                  role: 'assistant',
-                  content: assistantText,
-                  user_id: req.user.id,
-                  created_at: assistantCreatedAt,
-                },
-              });
-            }
-
-            if (tasks.length > 0) {
-              await enqueueMemoryTasksSafe(tasks, {
-                reason: 'regular_turn',
-                conversationId,
-                userId: req.user.id,
-                fileId: null,
-                textLength: (userContent?.length || 0) + (assistantText?.length || 0),
-              });
-            }
-
-            if (assistantText) {
-              const graphPayload = {
-                user_id: req.user.id,
-                conversation_id: conversationId,
-                message_id: response.messageId,
-		role: response?.role || 'assistant',
-                content: assistantText,
-                created_at: response?.createdAt || new Date().toISOString(),
-                reasoning_text: response?.reasoningText || null,
-                context_flags: response?.contextFlags || [],
-              };
-
-              try {
-                logger.info(
-                  `[GraphWorkflow] ветка Graph запущена (conversation=${conversationId}, message=${response.messageId}, USE_GRAPH_CONTEXT=${process.env.USE_GRAPH_CONTEXT ?? 'unset'}, GRAPH_CONTEXT_MODE=${process.env.GRAPH_CONTEXT_MODE ?? 'unset'}, MEMORY_GRAPHWORKFLOW_ENABLED=${process.env.MEMORY_GRAPHWORKFLOW_ENABLED ?? 'unset'})`
-                );
-
-                logger.info(
-                  `[GraphWorkflow] enqueueGraphTaskWithResilience start (conversation=${conversationId}, message=${response.messageId})`
-                );
-
-                await enqueueGraphTaskWithResilience(graphPayload);
-
-                logger.info(
-                  `[GraphWorkflow] enqueueGraphTaskWithResilience complete (conversation=${conversationId}, message=${response.messageId})`
-                );
-
-                logger.info(`[GraphWorkflow] started for message ${response.messageId}`);
-              } catch (err) {
-                logger.error(
-                  `[GraphWorkflow] Ошибка постановки/выполнения (conversation=${conversationId}, message=${response?.messageId}): ${err?.message || err}`,
-                );
-              }
-            }
           }
-
+          
           try {
             if (userMessage && !client.skipSaveUserMessage) await saveMessage(req, userMessage);
             if (response) await saveMessage(req, { ...response, user: userId });
@@ -1142,6 +1172,13 @@ if (req.body.files && req.body.files.length > 0) {
             try { res.end(); } catch {}
           }
 
+          logger.info('[GraphWorkflow2] pre-guard', {
+            useRagMemory,
+            hasResponse: Boolean(response),
+            responseKeys: response ? Object.keys(response) : [],
+            assistantTextPreview: typeof response?.text === 'string' ? response.text.slice(0, 80) : null,
+            responseContentTypes: Array.isArray(response?.content) ? response.content.map((part) => part.type) : null,
+          });
           if (useRagMemory) {
             triggerSummarization(req, conversationId).catch((err) =>
               logger.error(`[Суммаризатор] Фоновый запуск завершился ошибкой`, err),
@@ -1253,7 +1290,19 @@ if (req.body.files && req.body.files.length > 0) {
       logger.info(`[AgentController] Ответ сформирован в фоне — клиент уже отключился.`);
     }
 
+    logger.info('[GraphWorkflow333] pre-guard', {
+      useRagMemory,
+      hasResponse: Boolean(response),
+      responseKeys: response ? Object.keys(response) : [],
+      assistantTextPreview: typeof response?.text === 'string' ? response.text.slice(0, 80) : null,
+      responseContentTypes: Array.isArray(response?.content) ? response.content.map((part) => part.type) : null,
+    });
     if (useRagMemory) {
+      await processConversationArtifacts({
+        userMessage,
+        response,
+        conversationId,
+      });
       triggerSummarization(req, conversationId).catch((err) => logger.error(`[Суммаризатор] Фоновый запуск завершился ошибкой`, err));
     }
   } catch (error) {
