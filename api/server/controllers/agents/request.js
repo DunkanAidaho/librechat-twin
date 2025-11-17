@@ -1018,6 +1018,13 @@ if (req.body.files && req.body.files.length > 0) {
                 .join('\n');
             }
 
+            logger.info('[GraphWorkflow] guard check', {
+              useRagMemory: useRagMemory,
+              hasAssistantText: Boolean(assistantText && assistantText.trim()),
+              conversationId: conversationId,
+              assistantMessageId: response && response.messageId
+            });
+
             const userCreatedAt = userMessage?.createdAt || new Date().toISOString();
             const assistantCreatedAt = response?.createdAt || new Date().toISOString();
 
@@ -1326,6 +1333,7 @@ async function triggerSummarization(req, conversationId) {
       .map((m) => ({
         role: m.isCreatedByUser ? 'user' : 'assistant',
         content: extractText(m),
+        message_id: m.messageId,
       }))
       .filter((m) => m.content);
 
