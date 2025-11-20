@@ -1,90 +1,91 @@
-const {
-  logger
-} = require('@librechat/data-schemas');
+'use strict';
 
-// /opt/open-webui/api/utils/temporalClient.js
 const fetch = require('node-fetch');
+const { logger } = require('@librechat/data-schemas');
+const config = require('~/server/services/Config/ConfigService');
 const { publish } = require('./natsClient');
 
-function isNatsEnabled() {
-  return (process.env.NATS_ENABLED || '').toLowerCase() === 'true';
+function getQueueConfig() {
+  return config.getSection('queues');
 }
 
-async function publishWithFallback(subjectEnvName, payload, fallbackPath, workflowLabel) {
-  const subject = process.env[subjectEnvName];
-  if (!subject) {
-    throw new Error(`Переменная ${subjectEnvName} не задана.`);
-  }
+function isNatsEnabled() {
+  return config.get('nats.enabled') === true;
+}
 
-  if (isNatsEnabled()) {
+async function publishWithFallback(subjectKey, payload, fallbackPath, workflowLabel) {
+  const queueConfig = getQueueConfig();
+  const subject = queueConfig.subjects[subjectKey];
+
+  if (isNatsEnabled() && subject) {
     try {
       await publish(subject, payload);
       return { status: 'queued', via: 'nats' };
     } catch (err) {
-      console.error(`[JetStream] Ошибка публикации (${workflowLabel}):`, err);
+      logger.error(
+        '[TemporalClient] Ошибка публикации в NATS (%s): %s',
+        workflowLabel,
+        err?.message || err,
+      );
     }
   }
 
-  const url = `${process.env.TOOLS_GATEWAY_URL}${fallbackPath}`;
-  const res = await fetch(url, {
+  const baseUrl = queueConfig.toolsGatewayUrl;
+  if (!baseUrl) {
+    throw new Error('TOOLS_GATEWAY_URL не настроен, HTTP fallback невозможен.');
+  }
+
+  const url = `${baseUrl}${fallbackPath}`;
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
-    timeout: 15_000,
+    timeout: queueConfig.httpTimeoutMs,
   });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`[HTTP fallback] ${workflowLabel} → ${url} вернул ${res.status}: ${text}`);
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`[HTTP fallback] ${workflowLabel} → ${url} вернул ${response.status}: ${text}`);
   }
 
-  return res.json();
+  return response.json();
 }
 
 async function enqueueMemoryTask(payload) {
-  return publishWithFallback(
-    'NATS_MEMORY_SUBJECT',
-    payload,
-    '/temporal/memory/run',
-    'MemoryWorkflow',
-  );
+  return publishWithFallback('memory', payload, '/temporal/memory/run', 'MemoryWorkflow');
 }
 
 async function enqueueGraphTask(payload) {
   const conversationId = payload?.conversation_id ?? 'unknown';
   const messageId = payload?.message_id ?? 'unknown';
-  const fallbackPath = '/temporal/graph/run';
   const via = isNatsEnabled() ? 'nats' : 'http-fallback';
-  const fallbackUrl = process.env.TOOLS_GATEWAY_URL
-    ? `${process.env.TOOLS_GATEWAY_URL}${fallbackPath}`
+  const queueConfig = getQueueConfig();
+  const fallbackUrl = queueConfig.toolsGatewayUrl
+    ? `${queueConfig.toolsGatewayUrl}/temporal/graph/run`
     : 'unknown';
-  const fallbackDetails = via === 'http-fallback' ? `, fallbackUrl=${fallbackUrl}` : '';
 
   logger.info(
-    `[TemporalClient] enqueueGraphTask start (conversation=${conversationId}, message=${messageId}, via=${via}${fallbackDetails})`
+    '[TemporalClient] enqueueGraphTask start (conversation=%s, message=%s, via=%s%s)',
+    conversationId,
+    messageId,
+    via,
+    via === 'http-fallback' ? `, fallbackUrl=${fallbackUrl}` : '',
   );
 
-  const result = await publishWithFallback(
-    'NATS_GRAPH_SUBJECT',
-    payload,
-    fallbackPath,
-    'GraphWorkflow',
-  );
+  const result = await publishWithFallback('graph', payload, '/temporal/graph/run', 'GraphWorkflow');
 
   logger.info(
-    `[TemporalClient] enqueueGraphTask success (conversation=${conversationId}, message=${messageId}, via=${via}${fallbackDetails})`
+    '[TemporalClient] enqueueGraphTask success (conversation=%s, message=%s, via=%s)',
+    conversationId,
+    messageId,
+    via,
   );
 
   return result;
 }
 
 async function enqueueSummaryTask(payload) {
-  return publishWithFallback(
-    'NATS_SUMMARY_SUBJECT',
-    payload,
-    '/temporal/summary/run',
-    'SummaryWorkflow',
-  );
+  return publishWithFallback('summary', payload, '/temporal/summary/run', 'SummaryWorkflow');
 }
 
 module.exports = {

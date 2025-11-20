@@ -11,7 +11,7 @@ WORKDIR /app
 # - npm cache clean: уменьшает итоговый слой
 RUN set -eux; \
     npm ci --omit=dev; \
-    npm install --no-save \
+    cd api && npm install --no-save \
         @google-cloud/vertexai@1.10.0 \
         p-limit@7.2.0 \
         @temporalio/client@1.11.8 \
@@ -32,6 +32,7 @@ COPY api/db/                       /app/api/db/
 COPY api/server/routes/            /app/api/server/routes/
 COPY api/server/middleware/requestValidators.js /app/api/server/middleware/requestValidators.js
 COPY api/server/services/RAG/      /app/api/server/services/RAG/
+COPY api/server/services/Config/ /app/api/server/services/Config/
 COPY api/models/                   /app/api/models/
 COPY api/utils/                    /app/api/utils/
 COPY api/manage_summaries.js       /app/api/manage_summaries.js

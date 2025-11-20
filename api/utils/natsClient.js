@@ -1,27 +1,33 @@
 'use strict';
 
-const {
-  connect,
-  StringCodec,
-  StorageType,
-} = require('nats');
+const { connect, StringCodec, StorageType } = require('nats');
 const { logger } = require('@librechat/data-schemas');
 const { retryAsync } = require('~/utils/async');
-
-const isEnabled =
-  (process.env.NATS_ENABLED || '').toLowerCase() === 'true';
+const config = require('~/server/services/Config/ConfigService');
 
 const sc = StringCodec();
-
-const DEFAULT_RETRIES = parseInt(process.env.NATS_CONNECT_RETRIES || '5', 10);
-const BASE_DELAY_MS = parseInt(process.env.NATS_RETRY_DELAY_MS || '1000', 10);
-const MAX_DELAY_MS = parseInt(process.env.NATS_RETRY_MAX_DELAY_MS || '15000', 10);
 
 let connectionPromise = null;
 let nc = null;
 let js = null;
 let jsm = null;
 let shuttingDown = false;
+
+function getNatsConfig() {
+  return config.getSection('nats');
+}
+
+function getRetrySettings(runtimeConfig = getNatsConfig()) {
+  return {
+    connectRetries: runtimeConfig.connectRetries,
+    retryDelayMs: runtimeConfig.retryDelayMs,
+    retryMaxDelayMs: runtimeConfig.retryMaxDelayMs,
+    retryFactor: runtimeConfig.retryFactor,
+    retryJitter: runtimeConfig.retryJitter,
+  };
+}
+
+const isEnabled = getNatsConfig().enabled;
 
 function resetConnectionState() {
   connectionPromise = null;
@@ -30,27 +36,20 @@ function resetConnectionState() {
   jsm = null;
 }
 
-async function connectOnce() {
-  const servers = (process.env.NATS_SERVERS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-
+async function connectOnce(runtimeConfig) {
+  const servers = runtimeConfig.servers;
   if (!servers.length) {
     logger.warn('[natsClient] NATS_ENABLED=true, но NATS_SERVERS не задан');
     throw new Error('NATS_SERVERS is empty');
   }
 
-  const reconnectTimeWait = parseInt(process.env.NATS_RECONNECT_WAIT_MS || '2000', 10);
-  const name = process.env.NATS_CLIENT_NAME || 'librechat-api';
-
   const connection = await connect({
     servers,
-    name,
-    reconnectTimeWait,
+    name: runtimeConfig.clientName,
+    reconnectTimeWait: runtimeConfig.reconnectTimeWait,
     maxReconnectAttempts: -1,
-    user: process.env.NATS_USER || undefined,
-    pass: process.env.NATS_PASSWORD || undefined,
+    user: runtimeConfig.auth.user,
+    pass: runtimeConfig.auth.password,
   });
 
   connection.closed().then((err) => {
@@ -67,7 +66,8 @@ async function connectOnce() {
 }
 
 async function ensureConnection() {
-  if (!isEnabled || shuttingDown) {
+  const runtimeConfig = getNatsConfig();
+  if (!runtimeConfig.enabled || shuttingDown) {
     return null;
   }
 
@@ -76,19 +76,21 @@ async function ensureConnection() {
   }
 
   if (!connectionPromise) {
+    const retrySettings = getRetrySettings(runtimeConfig);
     connectionPromise = retryAsync(
       async () => {
         if (shuttingDown) {
           throw new Error('NATS shutdown in progress');
         }
-        return connectOnce();
+        const freshConfig = getNatsConfig();
+        return connectOnce(freshConfig);
       },
       {
-        retries: DEFAULT_RETRIES,
-        minDelay: BASE_DELAY_MS,
-        maxDelay: MAX_DELAY_MS,
-        factor: 2,
-        jitter: 0.4,
+        retries: retrySettings.connectRetries,
+        minDelay: retrySettings.retryDelayMs,
+        maxDelay: retrySettings.retryMaxDelayMs,
+        factor: retrySettings.retryFactor,
+        jitter: retrySettings.retryJitter,
         onRetry: async (error, attempt) => {
           logger.warn(
             '[natsClient] попытка #%d подключения не удалась: %s',
@@ -136,17 +138,17 @@ function ttlToNanosNumber(ttlMs) {
   if (!ttlMs || ttlMs <= 0) {
     return undefined;
   }
-  return ttlMs * 1e6; // миллисекунды → наносекунды (в формате number)
+  return ttlMs * 1e6;
 }
 
-async function getOrCreateStream(config) {
+async function getOrCreateStream(configInput) {
   const manager = await getJetStreamManager();
   if (!manager) {
     return null;
   }
 
   try {
-    return await manager.streams.info(config.name);
+    return await manager.streams.info(configInput.name);
   } catch (error) {
     const message = error.message || '';
     if (
@@ -154,9 +156,9 @@ async function getOrCreateStream(config) {
       error.code === '503' ||
       /stream .+ not found/i.test(message)
     ) {
-      logger.info('[natsClient] Создаём стрим %s', config.name);
-      await manager.streams.add(config);
-      return manager.streams.info(config.name);
+      logger.info('[natsClient] Создаём стрим %s', configInput.name);
+      await manager.streams.add(configInput);
+      return manager.streams.info(configInput.name);
     }
     throw error;
   }
@@ -185,8 +187,8 @@ async function getOrCreateKV(name, options = {}) {
     }
   }
 
-  const replicas = options.replicaCount
-    || parseInt(process.env.NATS_STREAM_REPLICAS || '1', 10);
+  const runtimeConfig = getNatsConfig();
+  const replicas = options.replicaCount ?? runtimeConfig.streamReplicas;
 
   const bucketConfig = {
     name,
