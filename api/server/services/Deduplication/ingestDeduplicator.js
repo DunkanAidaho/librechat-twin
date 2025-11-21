@@ -3,6 +3,7 @@
 const LRU = require('lru-cache');
 const { StringCodec, KVOperation } = require('nats');
 const { logger } = require('@librechat/data-schemas');
+const config = require('~/server/services/Config/ConfigService');
 const {
   getJetStream,
   getOrCreateKV,
@@ -15,10 +16,12 @@ const {
 
 const sc = StringCodec();
 
-const DEFAULT_BUCKET = process.env.INGEST_DEDUP_BUCKET_NAME || 'ingest_dedupe';
-const LOCAL_TTL = parseInt(process.env.INGEST_DEDUP_LOCAL_TTL_MS || '600000', 10);
-const LOCAL_MAX = parseInt(process.env.INGEST_DEDUP_LOCAL_MAX || '5000', 10);
-const KV_TTL_MS = parseInt(process.env.INGEST_DEDUP_KV_TTL_MS || '259200000', 10);
+const ingestionConfig = config.getSection('ingestion');
+
+const DEDUPE_BUCKET = ingestionConfig.dedupeBucket;
+const LOCAL_TTL_MS = ingestionConfig.dedupeLocalTtlMs;
+const LOCAL_MAX_ITEMS = ingestionConfig.dedupeLocalMax;
+const KV_TTL_MS = ingestionConfig.dedupeKvTtlMs;
 const KV_TTL_NS = KV_TTL_MS > 0 ? KV_TTL_MS * 1e6 : undefined;
 
 let kvBucket = null;
@@ -32,8 +35,8 @@ const stats = {
 };
 
 const cache = new LRU({
-  max: Number.isFinite(LOCAL_MAX) && LOCAL_MAX > 0 ? LOCAL_MAX : 5000,
-  ttl: Number.isFinite(LOCAL_TTL) && LOCAL_TTL > 0 ? LOCAL_TTL : 600000,
+  max: Number.isFinite(LOCAL_MAX_ITEMS) && LOCAL_MAX_ITEMS > 0 ? LOCAL_MAX_ITEMS : 5000,
+  ttl: Number.isFinite(LOCAL_TTL_MS) && LOCAL_TTL_MS > 0 ? LOCAL_TTL_MS : 600000,
   updateAgeOnGet: true,
 });
 
@@ -47,7 +50,7 @@ function markHit(mode) {
   try {
     recordIngestDedupeHit(label);
   } catch (error) {
-    logger.warn('[ingestDeduplicator] Ошибка отправки метрики hit: %s', error.message);
+    logger.warn(`[ingestDeduplicator] Ошибка отправки метрики hit: ${error.message}`);
   }
 }
 
@@ -57,7 +60,7 @@ function markMiss(mode) {
   try {
     recordIngestDedupeMiss(label);
   } catch (error) {
-    logger.warn('[ingestDeduplicator] Ошибка отправки метрики miss: %s', error.message);
+    logger.warn(`[ingestDeduplicator] Ошибка отправки метрики miss: ${error.message}`);
   }
 }
 
@@ -66,7 +69,7 @@ async function stopWatcher() {
     try {
       await watcherHandle.stop();
     } catch (error) {
-      logger.warn('[ingestDeduplicator] Ошибка при остановке watcher: %s', error.message);
+      logger.warn(`[ingestDeduplicator] Ошибка при остановке watcher: ${error.message}`);
     }
     watcherHandle = null;
   }
@@ -100,24 +103,26 @@ async function startWatcher() {
               cache.set(entry.key, true);
             }
           } catch (error) {
-            logger.warn('[ingestDeduplicator] Не удалось декодировать KV значение %s: %s', entry.key, error.message);
+            logger.warn(
+              `[ingestDeduplicator] Не удалось декодировать KV значение ${entry.key}: ${error.message}`,
+            );
           }
         }
       } catch (error) {
-        logger.warn('[ingestDeduplicator] Watcher завершился с ошибкой: %s', error.message);
+        logger.warn(`[ingestDeduplicator] Watcher завершился с ошибкой: ${error.message}`);
         initialized = false;
         kvBucket = null;
       } finally {
         watcherHandle = null;
       }
     })().catch((error) => {
-      logger.error('[ingestDeduplicator] Watcher аварийно завершился: %s', error.message);
+      logger.error(`[ingestDeduplicator] Watcher аварийно завершился: ${error.message}`);
       initialized = false;
       kvBucket = null;
       watcherHandle = null;
     });
   } catch (error) {
-    logger.error('[ingestDeduplicator] Не удалось запустить watcher: %s', error.message);
+    logger.error(`[ingestDeduplicator] Не удалось запустить watcher: ${error.message}`);
     initialized = false;
     kvBucket = null;
   }
@@ -134,7 +139,7 @@ async function initialize() {
 
   initializingPromise = (async () => {
     if (!isNatsEnabled()) {
-      logger.warn('[ingestDeduplicator] NATS отключён -> работаем только локально');
+      logger.warn('[ingestDeduplicator] NATS отключён → работаем только локально');
       initialized = false;
       kvBucket = null;
       return false;
@@ -142,14 +147,14 @@ async function initialize() {
 
     const jetstream = await getJetStream();
     if (!jetstream) {
-      logger.warn('[ingestDeduplicator] JetStream недоступен -> fallback на локальный кэш');
+      logger.warn('[ingestDeduplicator] JetStream недоступен → fallback на локальный кеш');
       initialized = false;
       kvBucket = null;
       return false;
     }
 
     try {
-      kvBucket = await getOrCreateKV(DEFAULT_BUCKET, {
+      kvBucket = await getOrCreateKV(DEDUPE_BUCKET, {
         ttl: KV_TTL_MS,
         history: 1,
         maxValueSize: 64,
@@ -162,10 +167,10 @@ async function initialize() {
 
       await startWatcher();
       initialized = true;
-      logger.info('[ingestDeduplicator] Инициализация завершена (bucket=%s)', DEFAULT_BUCKET);
+      logger.info(`[ingestDeduplicator] Инициализация завершена (bucket=${DEDUPE_BUCKET})`);
       return true;
     } catch (error) {
-      logger.error('[ingestDeduplicator] Ошибка инициализации KV: %s', error.message);
+      logger.error(`[ingestDeduplicator] Ошибка инициализации KV: ${error.message}`);
       initialized = false;
       kvBucket = null;
       return false;
@@ -210,7 +215,7 @@ async function markAsIngested(key) {
     cache.set(key, true);
     return { deduplicated: false, mode: 'jetstream' };
   } catch (error) {
-    logger.warn('[ingestDeduplicator] Ошибка KV при markAsIngested(%s): %s', key, error.message);
+    logger.warn(`[ingestDeduplicator] Ошибка KV при markAsIngested(${key}): ${error.message}`);
     markMiss('fallback');
     cache.set(key, true);
     return { deduplicated: false, mode: 'fallback' };
@@ -231,7 +236,7 @@ async function clearIngestedMark(key) {
   try {
     await kvBucket.delete(key);
   } catch (error) {
-    logger.warn('[ingestDeduplicator] Не удалось удалить KV ключ %s: %s', key, error.message);
+    logger.warn(`[ingestDeduplicator] Не удалось удалить KV ключ ${key}: ${error.message}`);
   }
 }
 
