@@ -15,6 +15,7 @@ const {
 
 const { sendEvent } = require('@librechat/api');
 const { logger } = require('@librechat/data-schemas');
+const config = require('~/server/services/Config/ConfigService');
 const natsClient = require('~/utils/natsClient');
 const { retryAsync, withTimeout } = require('~/utils/async');
 
@@ -38,87 +39,56 @@ const { enqueueGraphTask, enqueueSummaryTask } = require('~/utils/temporalClient
 
 
 
-const HEADLESS_STREAM = (process.env.HEADLESS_STREAM || 'false').toLowerCase() === 'true';
-const MAX_USER_MSG_TO_MODEL_CHARS = parseInt(process.env.MAX_USER_MSG_TO_MODEL_CHARS || '200000', 10);
-const RAG_CONTEXT_MAX_CHARS = parseInt(process.env.RAG_CONTEXT_MAX_CHARS || '60000', 10);
-const RAG_CONTEXT_TOPK = parseInt(process.env.RAG_CONTEXT_TOPK || '12', 10);
-const GOOGLE_NOSTREAM_THRESHOLD = parseInt(process.env.GOOGLE_NOSTREAM_THRESHOLD || '120000', 10);
+const featuresConfig = config.getSection('features');
+const ragConfig = config.getSection('rag');
+const ragContextConfig = ragConfig.context;
+const agentsConfig = config.getSection('agents');
+const agentsResilienceConfig = agentsConfig.resilience;
+const agentsThresholdsConfig = agentsConfig.thresholds;
+const summariesConfig = config.getSection('summaries');
+const memoryConfig = config.getSection('memory');
 
-const SUMMARIZATION_THRESHOLD = parseInt(process.env.SUMMARIZATION_THRESHOLD || '10', 10);
-const MAX_MESSAGES_PER_SUMMARY = parseInt(process.env.MAX_MESSAGES_PER_SUMMARY || '40', 10);
-const SUMMARIZATION_LOCK_TTL = parseInt(process.env.SUMMARIZATION_LOCK_TTL || '20', 10);
+const HEADLESS_STREAM = Boolean(featuresConfig.headlessStream);
+const MAX_USER_MSG_TO_MODEL_CHARS = agentsThresholdsConfig.maxUserMessageChars;
+const RAG_CONTEXT_MAX_CHARS = ragContextConfig.maxChars;
+const RAG_CONTEXT_TOPK = ragContextConfig.topK;
+const GOOGLE_NOSTREAM_THRESHOLD = agentsThresholdsConfig.googleNoStreamThreshold;
+
+const SUMMARIZATION_THRESHOLD = summariesConfig.threshold;
+const MAX_MESSAGES_PER_SUMMARY = summariesConfig.maxMessagesPerSummary;
+const SUMMARIZATION_LOCK_TTL = summariesConfig.lockTtlSeconds;
 const TEMPORAL_SUMMARY_REASON = 'summary_queue';
 const TEMPORAL_GRAPH_REASON = 'graph_queue';
 
-  /**
-   * @description Parses environment variable as integer with fallback.
-   * @param {string} name - Environment variable name.
-   * @param {number} defaultValue - Default value if parsing fails.
-   * @returns {number} Parsed integer or default.
-   */
-const getEnvInt = (name, defaultValue) => {
-  const raw = process.env[name];
-  if (raw == null || raw === '') {
-    return defaultValue;
-  }
+const RETRY_MIN_DELAY_MS = Math.max(0, agentsResilienceConfig.minDelayMs ?? 200);
+const RETRY_MAX_DELAY_MS = Math.max(RETRY_MIN_DELAY_MS, agentsResilienceConfig.maxDelayMs ?? 5000);
+const RETRY_BACKOFF_FACTOR = Math.max(1, agentsResilienceConfig.backoffFactor ?? 2);
+const RETRY_JITTER = Math.min(Math.max(0, agentsResilienceConfig.jitter ?? 0.2), 1);
 
-  const parsed = parseInt(raw, 10);
-  return Number.isNaN(parsed) ? defaultValue : parsed;
+const operationsConfig = agentsResilienceConfig.operations || {};
+const DEFAULT_OPERATION_CONFIG = {
+  initializeClient: { timeoutMs: 15000, retries: 2 },
+  sendMessage: { timeoutMs: 120000, retries: 1 },
+  memoryQueue: { timeoutMs: 15000, retries: 2 },
+  summaryEnqueue: { timeoutMs: 15000, retries: 2 },
+  graphEnqueue: { timeoutMs: 15000, retries: 2 },
+  saveConvo: { timeoutMs: 10000, retries: 1 },
 };
 
-  /**
-   * @description Parses environment variable as float with fallback.
-   * @param {string} name - Environment variable name.
-   * @param {number} defaultValue - Default value if parsing fails.
-   * @returns {number} Parsed float or default.
-   */
-const getEnvFloat = (name, defaultValue) => {
-  const raw = process.env[name];
-  if (raw == null || raw === '') {
-    return defaultValue;
-  }
-
-  const parsed = parseFloat(raw);
-  return Number.isNaN(parsed) ? defaultValue : parsed;
-};
-
-const RETRY_MIN_DELAY_MS = Math.max(0, getEnvInt('AGENT_RETRY_MIN_DELAY_MS', 200));
-const RETRY_MAX_DELAY_MS = Math.max(RETRY_MIN_DELAY_MS, getEnvInt('AGENT_RETRY_MAX_DELAY_MS', 5000));
-const RETRY_BACKOFF_FACTOR = Math.max(1, getEnvFloat('AGENT_RETRY_BACKOFF_FACTOR', 2));
-const RETRY_JITTER = Math.min(Math.max(0, getEnvFloat('AGENT_RETRY_JITTER', 0.2)), 1);
-
-const RESILIENCE_CONFIG = Object.freeze({
-  initializeClient: {
-    timeoutMs: Math.max(0, getEnvInt('AGENT_INIT_CLIENT_TIMEOUT_MS', 15000)),
-    retries: Math.max(0, getEnvInt('AGENT_INIT_CLIENT_RETRIES', 2)),
-  },
-  sendMessage: {
-    timeoutMs: Math.max(0, getEnvInt('AGENT_SEND_MESSAGE_TIMEOUT_MS', 120000)),
-    retries: Math.max(0, getEnvInt('AGENT_SEND_MESSAGE_RETRIES', 1)),
-  },
-  memoryQueue: {
-    timeoutMs: Math.max(0, getEnvInt('AGENT_MEMORY_QUEUE_TIMEOUT_MS', 15000)),
-    retries: Math.max(0, getEnvInt('AGENT_MEMORY_QUEUE_RETRIES', 2)),
-  },
-  summaryEnqueue: {
-    timeoutMs: Math.max(0, getEnvInt('AGENT_SUMMARY_ENQUEUE_TIMEOUT_MS', 15000)),
-    retries: Math.max(0, getEnvInt('AGENT_SUMMARY_ENQUEUE_RETRIES', 2)),
-  },
-  graphEnqueue: {
-    timeoutMs: Math.max(0, getEnvInt('AGENT_GRAPH_ENQUEUE_TIMEOUT_MS', 15000)),
-    retries: Math.max(0, getEnvInt('AGENT_GRAPH_ENQUEUE_RETRIES', 2)),
-  },
-  saveConvo: {
-    timeoutMs: Math.max(0, getEnvInt('AGENT_SAVE_CONVO_TIMEOUT_MS', 10000)),
-    retries: Math.max(0, getEnvInt('AGENT_SAVE_CONVO_RETRIES', 1)),
-  },
+const getOperationConfig = (name) => ({
+  ...DEFAULT_OPERATION_CONFIG[name],
+  ...(operationsConfig[name] || {}),
 });
 
-  /**
-   * @description Retrieves resilience configuration for a given operation key.
-   * @param {string} key - Configuration key (e.g., 'sendMessage').
-   * @returns {Object} Configuration object with timeoutMs and retries.
-   */
+const RESILIENCE_CONFIG = Object.freeze({
+  initializeClient: getOperationConfig('initializeClient'),
+  sendMessage: getOperationConfig('sendMessage'),
+  memoryQueue: getOperationConfig('memoryQueue'),
+  summaryEnqueue: getOperationConfig('summaryEnqueue'),
+  graphEnqueue: getOperationConfig('graphEnqueue'),
+  saveConvo: getOperationConfig('saveConvo'),
+});
+
 const getResilienceConfig = (key) => {
   const config = RESILIENCE_CONFIG[key];
   if (!config) {
@@ -521,18 +491,13 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
             await ingestDeduplicator.clearIngestedMark(key);
             pendingIngestMarks.delete(key);
           } catch (err) {
-            logger.warn('[MemoryQueue] Не удалось очистить дедуп-ключ %s: %s', key, err?.message || err);
+            logger.warn(`[MemoryQueue] Не удалось очистить дедуп-ключ ${key}: ${err?.message || err}`);
           }
         }
       }
       return { success: true, error: null };
     } catch (err) {
-      logger.error(
-        `[MemoryQueue] Ошибка постановки задачи: причина=%s, диалог=%s, сообщение=%s.`,
-        meta?.reason,
-        meta?.conversationId,
-        err?.message || err,
-      );
+      logger.error(`[MemoryQueue] Ошибка постановки задачи: причина=${meta?.reason}, диалог=${meta?.conversationId}, сообщение=${err?.message || err}.`);
       return { success: false, error: err };
     }
   };
@@ -630,14 +595,14 @@ if (req.body.files && req.body.files.length > 0) {
 
     const textToIndex = isTextLike ? ocrText : null;
     if (!textToIndex) {
-      logger.info('[Pre-emptive Ingest] file_id=%s пропущен (тип=%s, текст отсутствует).', file?.file_id, file?.type);
+      logger.info(`[Pre-emptive Ingest] file_id=${file?.file_id} пропущен (тип=${file?.type}, текст отсутствует).`);
     } else if (!conversationId) {
-      logger.warn('[Pre-emptive Ingest] нет conversationId для file_id=%s, user=%s.', file.file_id, userId);
+      logger.warn(`[Pre-emptive Ingest] нет conversationId для file_id=${file.file_id}, user=${userId}.`);
     } else {
       const dedupeKey = `ingest:file:${file.file_id}`;
       const dedupeResult = await ingestDeduplicator.markAsIngested(dedupeKey);
       if (dedupeResult.deduplicated) {
-        logger.info('[Pre-emptive Ingest][dedup] file_id=%s пропущен (mode=%s).', file.file_id, dedupeResult.mode);
+        logger.info(`[Pre-emptive Ingest][dedup] file_id=${file.file_id} пропущен (mode=${dedupeResult.mode}).`);
       } else {
         const task = {
           type: 'index_file',
@@ -687,7 +652,7 @@ if (req.body.files && req.body.files.length > 0) {
 // =================================================================
 // [КОНЕЦ ПАТЧА v2]
 // =================================================================
-  const useRagMemory = process.env.USE_CONVERSATION_MEMORY === 'true';
+  const useRagMemory = Boolean(featuresConfig.useConversationMemory);
   const userId = req.user.id;
   
   const processConversationArtifacts = async ({ userMessage: localUserMessage, response: localResponse, conversationId: localConversationId }) => {
@@ -778,7 +743,7 @@ if (req.body.files && req.body.files.length > 0) {
 
     try {
       logger.info(
-        `[GraphWorkflow] ветка Graph запущена (conversation=${localConversationId}, message=${localResponse?.messageId}, USE_GRAPH_CONTEXT=${process.env.USE_GRAPH_CONTEXT ?? 'unset'}, GRAPH_CONTEXT_MODE=${process.env.GRAPH_CONTEXT_MODE ?? 'unset'}, MEMORY_GRAPHWORKFLOW_ENABLED=${process.env.MEMORY_GRAPHWORKFLOW_ENABLED ?? 'unset'})`,
+        `[GraphWorkflow] ветка Graph запущена (conversation=${localConversationId}, message=${localResponse?.messageId}, USE_GRAPH_CONTEXT=${memoryConfig.useGraphContext}, GRAPH_CONTEXT_MODE=${memoryConfig.graphContextMode ?? 'unset'}, MEMORY_GRAPHWORKFLOW_ENABLED=${memoryConfig.graphWorkflowEnabled})`,
       );
 
       logger.info(
@@ -879,7 +844,7 @@ if (req.body.files && req.body.files.length > 0) {
           const dedupeResult = await ingestDeduplicator.markAsIngested(dedupeKey);
 
           if (dedupeResult.deduplicated) {
-            logger.info('[AgentController][large-text] Текст уже в обработке (dedupe mode=%s).', dedupeResult.mode);
+            logger.info(`[AgentController][large-text] Текст уже в обработке (dedupe mode=${dedupeResult.mode}).`);
           } else {
             const tasks = [{
               type: 'index_file',
@@ -955,7 +920,7 @@ if (req.body.files && req.body.files.length > 0) {
     const originalTextForDisplay = text || '';
     // -----------------------------------------------------------------
 
-    logger.info('[DEBUG-request] conversationId before build=%s', conversationId);
+    logger.info(`[DEBUG-request] conversationId before build=${conversationId}`);
       if (!HEADLESS_STREAM) {
         const isGoogleEndpoint = (option) => option && option.endpoint === 'google';
         const prelimAbortController = new AbortController();

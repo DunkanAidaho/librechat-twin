@@ -206,9 +206,9 @@ class ConfigService {
           l2: z.object({
             ttlSeconds: z.number().int().nonnegative(),
           }),
+        }),
       }),
-    }),
-});
+    });
 
     const ragSchema = z.object({
       url: z.string().url().nullable(),
