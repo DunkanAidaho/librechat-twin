@@ -1,6 +1,7 @@
 // /opt/open-webui/client.js - Финальная версия с исправленной логикой индексации и RAG через tools-gateway
 require('events').EventEmitter.defaultMaxListeners = 100;
 const { logger } = require('@librechat/data-schemas');
+const configService = require('~/server/services/Config/ConfigService');
 const axios = require('axios');
 const { condenseContext: ragCondenseContext, getCondenseProvidersPreview } = require('~/server/services/RAG/condense');
 const { DynamicStructuredTool } = require('@langchain/core/tools');
@@ -189,13 +190,13 @@ function parseUsdRate(value) {
  * @param {object|undefined} pricingConfig
  * @returns {{ promptUsdPer1k: number|null, completionUsdPer1k: number|null, source: string }}
  */
-function resolvePricingRates(modelName, pricingConfig) {
+function resolvePricingRates(modelName, overrideConfig) {
   const sources = new Set();
   let promptUsdPer1k = null;
   let completionUsdPer1k = null;
 
-  if (pricingConfig && typeof pricingConfig === 'object') {
-    const modelsConfig = pricingConfig.models;
+  if (overrideConfig && typeof overrideConfig === 'object') {
+    const modelsConfig = overrideConfig.models;
     if (modelsConfig && typeof modelsConfig === 'object') {
       const modelPricing = modelsConfig[modelName] || modelsConfig.default;
       if (modelPricing && typeof modelPricing === 'object') {
@@ -204,9 +205,48 @@ function resolvePricingRates(modelName, pricingConfig) {
         );
         if (promptCandidate != null) {
           promptUsdPer1k = promptCandidate;
-          sources.add('config.models.prompt');
+          sources.add('request.models.prompt');
         }
 
+        const completionCandidate = parseUsdRate(
+          modelPricing.completion ?? modelPricing.output ?? modelPricing.completionUsdPer1k,
+        );
+        if (completionCandidate != null) {
+          completionUsdPer1k = completionCandidate;
+          sources.add('request.models.completion');
+        }
+      }
+    }
+
+    const rootPrompt = parseUsdRate(overrideConfig.promptUsdPer1k);
+    if (promptUsdPer1k == null && rootPrompt != null) {
+      promptUsdPer1k = rootPrompt;
+      sources.add('request.promptUsdPer1k');
+    }
+
+    const rootCompletion = parseUsdRate(overrideConfig.completionUsdPer1k);
+    if (completionUsdPer1k == null && rootCompletion != null) {
+      completionUsdPer1k = rootCompletion;
+      sources.add('request.completionUsdPer1k');
+    }
+  }
+
+  const globalConfig = pricingConfig && typeof pricingConfig === 'object' ? pricingConfig : {};
+  const globalModels = globalConfig.models;
+  if (globalModels && typeof globalModels === 'object' && (promptUsdPer1k == null || completionUsdPer1k == null)) {
+    const modelPricing = globalModels[modelName] || globalModels.default;
+    if (modelPricing && typeof modelPricing === 'object') {
+      if (promptUsdPer1k == null) {
+        const promptCandidate = parseUsdRate(
+          modelPricing.prompt ?? modelPricing.input ?? modelPricing.promptUsdPer1k,
+        );
+        if (promptCandidate != null) {
+          promptUsdPer1k = promptCandidate;
+          sources.add('config.models.prompt');
+        }
+      }
+
+      if (completionUsdPer1k == null) {
         const completionCandidate = parseUsdRate(
           modelPricing.completion ?? modelPricing.output ?? modelPricing.completionUsdPer1k,
         );
@@ -216,15 +256,19 @@ function resolvePricingRates(modelName, pricingConfig) {
         }
       }
     }
+  }
 
-    const rootPrompt = parseUsdRate(pricingConfig.promptUsdPer1k);
-    if (promptUsdPer1k == null && rootPrompt != null) {
+  if (promptUsdPer1k == null) {
+    const rootPrompt = parseUsdRate(globalConfig.promptUsdPer1k);
+    if (rootPrompt != null) {
       promptUsdPer1k = rootPrompt;
       sources.add('config.promptUsdPer1k');
     }
+  }
 
-    const rootCompletion = parseUsdRate(pricingConfig.completionUsdPer1k);
-    if (completionUsdPer1k == null && rootCompletion != null) {
+  if (completionUsdPer1k == null) {
+    const rootCompletion = parseUsdRate(globalConfig.completionUsdPer1k);
+    if (rootCompletion != null) {
       completionUsdPer1k = rootCompletion;
       sources.add('config.completionUsdPer1k');
     }
@@ -426,48 +470,44 @@ const omitTitleOptions = new Set([
   'additionalModelRequestFields',
 ]);
 
+const featuresConfig = configService.getSection('features');
+const memoryStaticConfig = configService.getSection('memory');
+const agentsConfig = configService.getSection('agents');
+const pricingConfig = configService.getSection('pricing');
+
+const getBoolean = (path, fallback) => configService.getBoolean(path, fallback);
+const getNumber = (path, fallback) => configService.getNumber(path, fallback);
+const getString = (path, fallback) => {
+  const value = configService.get(path, fallback);
+  return value == null ? fallback : value;
+};
+
 const DEBUG_SSE = (process.env.DEBUG_SSE || 'false').toLowerCase() === 'true';
-  /**
-   * @description Checks if the response stream is writable and not ended.
-   * @param {Object} res - Express response object.
-   * @returns {boolean} True if writable, false otherwise.
-   */
-function canWrite(res) {
-  return Boolean(res) && res.writable !== false && !res.writableEnded;
-}
-  /**
-   * @description Sends debug payload via Server-Sent Events if DEBUG_SSE is enabled.
-   * @param {Object} res - Express response object.
-   * @param {*} payload - Data to send in the debug event.
-   * @returns {void}
-   */
-function sseDebug(res, payload) {
-  if (!DEBUG_SSE) return;
-  try {
-    if (canWrite(res)) {
-      res.write(`event: message\ndata: ${JSON.stringify({ event: 'debug', data: payload })}\n\n`);
-    }
-  } catch (_) {}
-}
 
 const IngestedHistory = new Set();
+
 const HIST_LONG_USER_TO_RAG = parseInt(process.env.HIST_LONG_USER_TO_RAG || '20000', 10);
-const OCR_TO_RAG_THRESHOLD = parseInt(process.env.OCR_TO_AG_THRESHOLD || '15000', 10);
+const OCR_TO_RAG_THRESHOLD = parseInt(process.env.OCR_TO_RAG_THRESHOLD || '15000', 10);
 const WAIT_FOR_RAG_INGEST_MS = parseInt(process.env.WAIT_FOR_RAG_INGEST_MS || '0', 10);
 const ASSIST_LONG_TO_RAG = parseInt(process.env.ASSIST_LONG_TO_RAG || '15000', 10);
 const ASSIST_SNIPPET_CHARS = parseInt(process.env.ASSIST_SNIPPET_CHARS || '1500', 10);
+
 const GOOGLE_CHAIN_BUFFER = (process.env.GOOGLE_CHAIN_BUFFER || 'off').toLowerCase();
 const GEMINI_CHAIN_WINDOW = parseInt(process.env.GEMINI_CHAIN_WINDOW || '5', 10);
-const USE_GRAPH_CONTEXT = (process.env.USE_GRAPH_CONTEXT || 'true').toLowerCase() !== 'false';
-const GRAPH_RELATIONS_LIMIT = parseInt(process.env.GRAPH_RELATIONS_LIMIT || '40', 10);
-const GRAPH_CONTEXT_LINE_LIMIT = parseInt(process.env.GRAPH_CONTEXT_LINE_LIMIT || '20', 10);
-const GRAPH_REQUEST_TIMEOUT_MS = parseInt(process.env.GRAPH_REQUEST_TIMEOUT_MS || '10000', 10);
-const GRAPH_QUERY_HINT_MAX_CHARS = parseInt(process.env.GRAPH_QUERY_HINT_MAX_CHARS || '2000', 10);
-const RAG_QUERY_MAX_CHARS = parseInt(process.env.RAG_QUERY_MAX_CHARS || '6000', 10);
 
+const USE_GRAPH_CONTEXT =
+  typeof memoryStaticConfig.useGraphContext === 'boolean'
+    ? memoryStaticConfig.useGraphContext
+    : (process.env.USE_GRAPH_CONTEXT || 'true').toLowerCase() !== 'false';
 
-const MEMORY_TASK_TIMEOUT_MS = parseInt(String(process.env.MEMORY_TASK_TIMEOUT_MS ?? '30000'), 10);
-const DEFAULT_ENCODING = process.env.DEFAULT_TOKENIZER_ENCODING ?? 'o200k_base';
+const GRAPH_RELATIONS_LIMIT = getNumber('memory.graphContext.maxLines', parseInt(process.env.GRAPH_RELATIONS_LIMIT || '40', 10));
+const GRAPH_CONTEXT_LINE_LIMIT = getNumber('memory.graphContext.maxLineChars', parseInt(process.env.GRAPH_CONTEXT_LINE_LIMIT || '20', 10));
+const GRAPH_REQUEST_TIMEOUT_MS = getNumber('memory.graphContext.requestTimeoutMs', parseInt(process.env.GRAPH_REQUEST_TIMEOUT_MS || '10000', 10));
+const GRAPH_QUERY_HINT_MAX_CHARS = getNumber('memory.graphContext.summaryHintMaxChars', parseInt(process.env.GRAPH_QUERY_HINT_MAX_CHARS || '2000', 10));
+const RAG_QUERY_MAX_CHARS = getNumber('memory.ragQuery.maxChars', parseInt(process.env.RAG_QUERY_MAX_CHARS || '6000', 10));
+
+const MEMORY_TASK_TIMEOUT_MS = getNumber('memory.queue.taskTimeoutMs', parseInt(String(process.env.MEMORY_TASK_TIMEOUT_MS ?? '30000'), 10));
+const DEFAULT_ENCODING = getString('agents.defaultTokenizerEncoding', process.env.DEFAULT_TOKENIZER_ENCODING ?? 'o200k_base');
 
 /**
  * Provides safe logger methods with environment-aware fallbacks.
@@ -848,19 +888,33 @@ class AgentClient extends BaseClient {
     const TRACE_PIPELINE = (process.env.TRACE_PIPELINE || 'false').toLowerCase() === 'true';
     this.trace = (label, data = {}) => {
       try {
-        if (!TRACE_PIPELINE) return;
-        const meta = { label, cid: this.conversationId, rid: this.responseMessageId, pid: process.pid };
+        if (!TRACE_PIPELINE) {
+          return;
+        }
+        const meta = {
+          label,
+          cid: this.conversationId,
+          rid: this.responseMessageId,
+          pid: process.pid,
+        };
         const safe = (v) => {
           try {
-            if (typeof v === 'string' && v.length > 500) return v.slice(0,250) + ' … ' + v.slice(-150);
+            if (typeof v === 'string' && v.length > 500) {
+              return `${v.slice(0, 250)} … ${v.slice(-150)}`;
+            }
             return v;
-          } catch { return v; }
+          } catch {
+            return v;
+          }
         };
         const cleaned = {};
-        for (const [k, v] of Object.entries(data || {})) cleaned[k] = safe(v);
-        const { logger } = require('@librechat/data-schemas');
+        for (const [k, v] of Object.entries(data || {})) {
+          cleaned[k] = safe(v);
+        }
         logger.info(`[trace] ${JSON.stringify(Object.assign(meta, cleaned))}`);
-      } catch {}
+      } catch (error) {
+        logger.warn('[trace] failed to emit trace log: %s', error?.message || error);
+      }
     };
   }
 
@@ -1451,7 +1505,7 @@ Graph hints: ${graphQueryHint}`;
       msg: '[config.history]',
       conversationId: this.conversationId,
       dontShrinkLastN: runtimeCfg?.history?.dontShrinkLastN,
-      historyTokenBudget: runtimeCfg?.history?.tokenBudget ?? parseInt(process.env.HISTORY_TOKEN_BUDGET || '0', 10),
+      historyTokenBudget: runtimeCfg?.history?.tokenBudget ?? getNumber('memory.history.tokenBudget', parseInt(process.env.HISTORY_TOKEN_BUDGET || '0', 10)),
     });
     ragCacheTtlMs = Math.max(Number(runtimeCfg?.ragCacheTtl) * 1000, 0);
     const endpointOption = this.options?.req?.body?.endpointOption ?? this.options?.endpointOption ?? {};
