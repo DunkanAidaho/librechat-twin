@@ -1,18 +1,26 @@
-// /opt/open-webui/manage_summaries.js – Temporal/NATS версия (без Redis)
+/**
+ * manage_summaries.js
+ * Административный скрипт для пересчёта суммаризаций диалогов.
+ * Подключается к MongoDB, формирует окна сообщений и ставит задачи в Temporal/NATS.
+ * Используется вручную (reset / resummarize) для обслуживания пайплайна RAG/summary.
+ */
+require('module-alias/register');
 
-require('dotenv').config({ path: '/app/.env' });
 const mongoose = require('mongoose');
 const { logger } = require('@librechat/data-schemas');
-const { enqueueSummaryTask } = require('./api/utils/temporalClient');
+const configService = require('~/server/services/Config/ConfigService');
+const { enqueueSummaryTask } = require('~/utils/temporalClient');
 
-const {
-  MONGO_URI,
-  SUMMARY_OVERLAP, // перекрытие окна
-} = process.env;
+const mongoUri = configService.get('mongo.uri', process.env.MONGO_URI);
+if (!mongoUri) {
+  logger.error('[MANAGE_SUMMARIES] mongo.uri не настроен. Завершаем работу.');
+  process.exit(1);
+}
 
-const SUMMARIZATION_THRESHOLD = parseInt(process.env.SUMMARIZATION_THRESHOLD || '10', 10);
-const MAX_MESSAGES_PER_SUMMARY = parseInt(process.env.MAX_MESSAGES_PER_SUMMARY || '40', 10);
-const OVERLAP = Math.max(0, parseInt(SUMMARY_OVERLAP || '5', 10));
+const summariesConfig = configService.getSection('summaries');
+const SUMMARIZATION_THRESHOLD = summariesConfig?.threshold ?? parseInt(process.env.SUMMARIZATION_THRESHOLD || '10', 10);
+const MAX_MESSAGES_PER_SUMMARY = summariesConfig?.maxMessagesPerSummary ?? parseInt(process.env.MAX_MESSAGES_PER_SUMMARY || '40', 10);
+const OVERLAP = Math.max(0, summariesConfig?.overlap ?? parseInt(process.env.SUMMARY_OVERLAP || '5', 10));
 
 const messageSchema = new mongoose.Schema(
   {
@@ -145,7 +153,7 @@ async function handleResummarize(filter) {
 
       await Conversation.updateOne(
         { conversationId },
-        { $set: { lastSummarizedIndex: newIndex } }
+        { $set: { lastSummarizedIndex: newIndex } },
       );
 
       console.log(`- Created task for messages [${currentIndex} - ${currentIndex + windowSize - 1}] (start=${startId}, end=${endId}), step=${step} → lastSummarizedIndex=${newIndex}`);
@@ -171,7 +179,7 @@ async function handleResummarize(filter) {
 (async () => {
   console.log('[MANAGE_SUMMARIES] Starting…');
   try {
-    await mongoose.connect(MONGO_URI);
+    await mongoose.connect(mongoUri);
     console.log('[MANAGE_SUMMARIES] Connected to MongoDB.');
   } catch (err) {
     console.error('[MANAGE_SUMMARIES] MongoDB connect failed:', err);
@@ -190,7 +198,11 @@ async function handleResummarize(filter) {
   } catch (err) {
     console.error('[MANAGE_SUMMARIES] Error:', err);
   } finally {
-    try { await mongoose.disconnect(); } catch {}
+    try {
+      await mongoose.disconnect();
+    } catch (disconnectErr) {
+      logger.warn('[MANAGE_SUMMARIES] Ошибка при отключении от MongoDB:', disconnectErr);
+    }
     console.log('[MANAGE_SUMMARIES] Done.');
   }
 })();

@@ -1,11 +1,22 @@
-// /opt/open-webui/sync_history.js — версия 3.1
-require('dotenv').config({ path: '/app/.env' });
+/**
+ * sync_history.js
+ * Административный скрипт для дозаливки истории диалогов в память.
+ * Подключается к MongoDB, находит сообщения без флага isMemoryStored
+ * и ставит батчи задач в Temporal/NATS через enqueueMemoryTasks.
+ */
+require('module-alias/register');
 
 const mongoose = require('mongoose');
-const { enqueueMemoryTasks } = require('./server/services/RAG/memoryQueue');
+const configService = require('~/server/services/Config/ConfigService');
+const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
 
-const { MONGO_URI } = process.env;
-const BATCH_SIZE = 20;
+const mongoUri = configService.get('mongo.uri', process.env.MONGO_URI);
+if (!mongoUri) {
+  console.error('[SYNC_HISTORY] mongo.uri не настроен. Завершаем работу.');
+  process.exit(1);
+}
+
+const BATCH_SIZE = configService.getNumber('memory.queue.historySyncBatchSize', 20);
 
 const messageSchema = new mongoose.Schema(
   {
@@ -68,7 +79,7 @@ async function main() {
   const targetConversationId = process.argv[2];
 
   try {
-    await mongoose.connect(MONGO_URI);
+    await mongoose.connect(mongoUri);
     console.log('[SYNC_HISTORY] MongoDB подключён.');
   } catch (err) {
     console.error('[SYNC_HISTORY] Ошибка подключения к MongoDB:', err);
@@ -165,8 +176,12 @@ async function main() {
     console.log('[SYNC_HISTORY] Завершено.');
     console.log(`[SYNC_HISTORY] Всего отправлено: ${totalSynced}`);
     console.log(`[SYNC_HISTORY] Всего пропущено: ${totalSkipped}`);
-    await mongoose.disconnect();
-    console.log('[SYNC_HISTORY] Соединение MongoDB закрыто.');
+    try {
+      await mongoose.disconnect();
+      console.log('[SYNC_HISTORY] Соединение MongoDB закрыто.');
+    } catch (disconnectErr) {
+      console.error('[SYNC_HISTORY] Ошибка при закрытии MongoDB:', disconnectErr);
+    }
   }
 }
 
