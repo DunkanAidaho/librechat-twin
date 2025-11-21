@@ -1,7 +1,13 @@
-// /opt/open-webui/api/server/services/RAG/memoryQueue.js
+'use strict';
+
 const axios = require('axios');
 const { logger } = require('@librechat/data-schemas');
-const { setTemporalStatus, incMemoryQueueSkipped, incMemoryQueueToolsGatewayFailure } = require('~/utils/metrics');
+const {
+  setTemporalStatus,
+  incMemoryQueueSkipped,
+  incMemoryQueueToolsGatewayFailure,
+} = require('~/utils/metrics');
+const config = require('~/server/services/Config/ConfigService');
 
 const REQUIRED_FIELDS = new Set([
   'conversation_id',
@@ -11,14 +17,24 @@ const REQUIRED_FIELDS = new Set([
   'content',
 ]);
 
-let temporalEnabled = (process.env.TEMPORAL_MEMORY_ENABLED || '').toLowerCase() === 'true';
-let temporalClient = null;
-
-const TOOLS_GATEWAY_URL = process.env.TOOLS_GATEWAY_URL || 'http://10.10.23.1:8000';
 const TEMPORAL_STATUS_REASON = 'memory_queue';
+
+let temporalClient = null;
+let temporalEnabled = Boolean(config.get('memory.temporalEnabled', false));
+
 setTemporalStatus(TEMPORAL_STATUS_REASON, temporalEnabled);
 
+function getToolsGatewayConfig() {
+  const url = config.get('queues.toolsGatewayUrl', null);
+  const timeoutMs = config.getNumber('queues.httpTimeoutMs', 15000);
+  return { url, timeoutMs };
+}
+
 function initTemporalClient() {
+  if (!temporalEnabled) {
+    return null;
+  }
+
   if (temporalClient) {
     return temporalClient;
   }
@@ -30,6 +46,7 @@ function initTemporalClient() {
     temporalClient = null;
     temporalEnabled = false;
     logger.error('[memoryQueue] Не удалось загрузить temporalClient, Temporal отключён.', error);
+    setTemporalStatus(TEMPORAL_STATUS_REASON, false);
   }
 
   return temporalClient;
@@ -43,12 +60,47 @@ function disableTemporal(reason) {
   }
 }
 
+async function callToolsGatewayDelete(conversationId, userId) {
+  const { url, timeoutMs } = getToolsGatewayConfig();
+  if (!url) {
+    logger.warn(
+      '[memoryQueue] Пропуск очистки через tools-gateway: toolsGatewayUrl не настроен (conversation=%s)',
+      conversationId,
+    );
+    incMemoryQueueSkipped('tools_gateway_missing');
+    return;
+  }
+
+  try {
+    await axios.post(
+      `${url}/neo4j/delete_conversation`,
+      {
+        conversation_id: conversationId,
+        user_id: userId ?? null,
+      },
+      { timeout: timeoutMs },
+    );
+    logger.info(
+      '[memoryQueue] Вызвана очистка через tools-gateway (/neo4j/delete_conversation, conversation=%s).',
+      conversationId,
+    );
+  } catch (error) {
+    incMemoryQueueToolsGatewayFailure();
+    logger.error(
+      '[memoryQueue] Ошибка вызова очистки tools-gateway:',
+      error?.response?.data || error?.message || error,
+    );
+  }
+}
+
 async function enqueueMemoryTasks(tasks = [], meta = {}) {
   if (!Array.isArray(tasks) || tasks.length === 0) {
+    incMemoryQueueSkipped('empty_tasks');
     return { status: 'skipped', reason: 'empty_tasks' };
   }
 
   if (!temporalEnabled) {
+    incMemoryQueueSkipped('temporal_disabled');
     logger.warn('[memoryQueue] Temporal выключен, задачи пропущены', meta);
     return { status: 'skipped', reason: 'temporal_disabled', count: tasks.length };
   }
@@ -63,36 +115,23 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
   try {
     let enqueued = 0;
     for (const task of tasks) {
-      const payload = task.payload || task;
+      const payload = task?.payload || task;
       if (!payload || !payload.conversation_id || !payload.message_id) {
         throw new Error('Invalid task payload: missing conversation_id/message_id');
       }
 
       const missing = [...REQUIRED_FIELDS].filter((key) => !(key in payload));
       if (missing.length) {
+        incMemoryQueueSkipped('missing_fields');
         logger.warn(
-          `[memoryQueue] Пропуск задачи для Temporal (conversation=${payload.conversation_id}, message=${payload.message_id}) — отсутствуют поля: ${missing.join(', ')}`,
+          '[memoryQueue] Пропуск задачи для Temporal (conversation=%s, message=%s) — отсутствуют поля: %s',
+          payload.conversation_id,
+          payload.message_id,
+          missing.join(', '),
           payload,
         );
 
-        try {
-          const body = {
-            conversation_id: payload.conversation_id,
-            user_id: payload.user_id || meta.userId || null,
-          };
-          await axios.post(`${TOOLS_GATEWAY_URL}/neo4j/delete_conversation`, body, {
-            timeout: 15000,
-          });
-          logger.info(
-            `[memoryQueue] Вызвана очистка через tools-gateway (/neo4j/delete_conversation, conversation=${payload.conversation_id}).`,
-          );
-        } catch (error) {
-          logger.error(
-            '[memoryQueue] Ошибка вызова очистки tools-gateway:',
-            error?.response?.data || error?.message || error,
-          );
-        }
-
+        await callToolsGatewayDelete(payload.conversation_id, payload.user_id || meta.userId);
         continue;
       }
 
@@ -109,7 +148,8 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
       enqueued += 1;
     }
 
-        if (enqueued === 0) {
+    if (enqueued === 0) {
+      incMemoryQueueSkipped('no_valid_payloads');
       return { status: 'skipped', reason: 'no_valid_payloads', count: 0 };
     }
 

@@ -65,20 +65,13 @@ async function enqueueGraphTask(payload) {
     : 'unknown';
 
   logger.info(
-    '[TemporalClient] enqueueGraphTask start (conversation=%s, message=%s, via=%s%s)',
-    conversationId,
-    messageId,
-    via,
-    via === 'http-fallback' ? `, fallbackUrl=${fallbackUrl}` : '',
+    `[TemporalClient] enqueueGraphTask start (conversation=${conversationId}, message=${messageId}, via=${via}${via === 'http-fallback' ? `, fallbackUrl=${fallbackUrl}` : ''})`
   );
 
   const result = await publishWithFallback('graph', payload, '/temporal/graph/run', 'GraphWorkflow');
 
   logger.info(
-    '[TemporalClient] enqueueGraphTask success (conversation=%s, message=%s, via=%s)',
-    conversationId,
-    messageId,
-    via,
+    `[TemporalClient] enqueueGraphTask success (conversation=${conversationId}, message=${messageId}, via=${via})`
   );
 
   return result;

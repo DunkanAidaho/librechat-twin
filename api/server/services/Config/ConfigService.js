@@ -57,6 +57,14 @@ function sanitizeUrl(value) {
   return trimmed.replace(/\/+$/, '');
 }
 
+function sanitizeOptionalString(value) {
+  if (value == null) {
+    return undefined;
+  }
+  const trimmed = String(value).trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 function deepFreeze(target) {
   if (!target || typeof target !== 'object' || Object.isFrozen(target)) {
     return target;
@@ -73,6 +81,34 @@ const agentOperationSchema = z.object({
   retries: z.number().int().nonnegative(),
 });
 
+const ragProvidersSchema = z
+  .object({
+    condenseProvider: z.string().min(1).optional(),
+    summarizerType: z.string().min(1).optional(),
+    fallbackProvider: z.string().min(1).optional(),
+    fallbackModel: z.string().min(1).optional(),
+    condenseModel: z.string().min(1).optional(),
+    allowLocalFallback: z.boolean().optional(),
+    openrouter: z
+      .object({
+        apiKey: z.string().min(1).optional(),
+        baseUrl: z.string().min(1).optional(),
+        summaryModel: z.string().min(1).optional(),
+        titleModel: z.string().min(1).optional(),
+        referer: z.string().min(1).optional(),
+        appName: z.string().min(1).optional(),
+      })
+      .optional(),
+    ollama: z
+      .object({
+        url: z.string().min(1).optional(),
+        model: z.string().min(1).optional(),
+        legacyFlag: z.boolean().optional(),
+      })
+      .optional(),
+  })
+  .optional();
+
 class ConfigService {
   constructor(env = process.env) {
     this.env = env;
@@ -86,6 +122,8 @@ class ConfigService {
     const coreSchema = z.object({
       environment: z.string().default('development'),
       logLevel: z.string().default('info'),
+      serverDomain: z.string().min(1).optional(),
+      publicServerDomain: z.string().min(1).optional(),
     });
 
     const mongoSchema = z.object({
@@ -168,9 +206,9 @@ class ConfigService {
           l2: z.object({
             ttlSeconds: z.number().int().nonnegative(),
           }),
-        }),
       }),
-    });
+    }),
+});
 
     const ragSchema = z.object({
       url: z.string().url().nullable(),
@@ -187,6 +225,7 @@ class ConfigService {
         cacheTtlSeconds: z.number().int().nonnegative(),
         debug: z.boolean(),
       }),
+      providers: ragProvidersSchema,
     });
 
     const summariesSchema = z.object({
@@ -247,6 +286,8 @@ class ConfigService {
         loader: () => ({
           environment: this.env.NODE_ENV || 'development',
           logLevel: this.env.LOG_LEVEL || 'info',
+          serverDomain: sanitizeOptionalString(this.env.SERVER_DOMAIN),
+          publicServerDomain: sanitizeOptionalString(this.env.PUBLIC_SERVER_DOMAIN),
         }),
       },
       mongo: {
@@ -268,10 +309,10 @@ class ConfigService {
           enabled: parseOptionalBool(this.env.NATS_ENABLED) ?? false,
           servers: splitStringList(this.env.NATS_SERVERS),
           auth: {
-            user: this.env.NATS_USER || undefined,
-            password: this.env.NATS_PASSWORD || undefined,
+            user: sanitizeOptionalString(this.env.NATS_USER),
+            password: sanitizeOptionalString(this.env.NATS_PASSWORD),
           },
-          clientName: this.env.NATS_CLIENT_NAME || 'librechat-api',
+          clientName: sanitizeOptionalString(this.env.NATS_CLIENT_NAME) || 'librechat-api',
           reconnectTimeWait: parseOptionalInt(this.env.NATS_RECONNECT_WAIT_MS) ?? 2000,
           connectRetries: parseOptionalInt(this.env.NATS_CONNECT_RETRIES) ?? 5,
           retryDelayMs: parseOptionalInt(this.env.NATS_RETRY_DELAY_MS) ?? 1000,
@@ -287,10 +328,10 @@ class ConfigService {
           toolsGatewayUrl: sanitizeUrl(this.env.TOOLS_GATEWAY_URL),
           httpTimeoutMs: parseOptionalInt(this.env.TOOLS_GATEWAY_TIMEOUT_MS) ?? 15000,
           subjects: {
-            memory: this.env.NATS_MEMORY_SUBJECT || null,
-            graph: this.env.NATS_GRAPH_SUBJECT || null,
-            summary: this.env.NATS_SUMMARY_SUBJECT || null,
-            delete: this.env.NATS_DELETE_SUBJECT || null,
+            memory: sanitizeOptionalString(this.env.NATS_MEMORY_SUBJECT) ?? null,
+            graph: sanitizeOptionalString(this.env.NATS_GRAPH_SUBJECT) ?? null,
+            summary: sanitizeOptionalString(this.env.NATS_SUMMARY_SUBJECT) ?? null,
+            delete: sanitizeOptionalString(this.env.NATS_DELETE_SUBJECT) ?? null,
           },
         }),
       },
@@ -301,31 +342,31 @@ class ConfigService {
             rag: {
               bucket: this.env.RAG_CACHE_BUCKET || 'rag_context',
               l1: {
-                ttlMs: parseOptionalInt(this.env.RAG_CACHE_L1_TTL_MS) ?? 5 * 60 * 1000,
+                ttlMs: parseOptionalInt(this.env.RAG_CACHE_L1_TTL_MS) ?? 300_000,
                 maxSize: parseOptionalInt(this.env.RAG_CACHE_L1_MAX) ?? 500,
               },
               l2: {
-                ttlSeconds: parseOptionalInt(this.env.RAG_CACHE_L2_TTL_SEC) ?? 24 * 60 * 60,
+                ttlSeconds: parseOptionalInt(this.env.RAG_CACHE_L2_TTL_SEC) ?? 86_400,
               },
             },
             graph: {
               bucket: this.env.GRAPH_CACHE_BUCKET || 'graph_context',
               l1: {
-                ttlMs: parseOptionalInt(this.env.GRAPH_CACHE_L1_TTL_MS) ?? 5 * 60 * 1000,
+                ttlMs: parseOptionalInt(this.env.GRAPH_CACHE_L1_TTL_MS) ?? 300_000,
                 maxSize: parseOptionalInt(this.env.GRAPH_CACHE_L1_MAX) ?? 500,
               },
               l2: {
-                ttlSeconds: parseOptionalInt(this.env.GRAPH_CACHE_L2_TTL_SEC) ?? 24 * 60 * 60,
+                ttlSeconds: parseOptionalInt(this.env.GRAPH_CACHE_L2_TTL_SEC) ?? 86_400,
               },
             },
             summaries: {
               bucket: this.env.SUMMARY_CACHE_BUCKET || 'rag_summaries',
               l1: {
-                ttlMs: parseOptionalInt(this.env.SUMMARY_CACHE_L1_TTL_MS) ?? 10 * 60 * 1000,
+                ttlMs: parseOptionalInt(this.env.SUMMARY_CACHE_L1_TTL_MS) ?? 600_000,
                 maxSize: parseOptionalInt(this.env.SUMMARY_CACHE_L1_MAX) ?? 200,
               },
               l2: {
-                ttlSeconds: parseOptionalInt(this.env.SUMMARY_CACHE_L2_TTL_SEC) ?? 7 * 24 * 60 * 60,
+                ttlSeconds: parseOptionalInt(this.env.SUMMARY_CACHE_L2_TTL_SEC) ?? 604_800,
               },
             },
           },
@@ -336,7 +377,7 @@ class ConfigService {
         loader: () => ({
           url: sanitizeUrl(this.env.RAG_URL || this.env.RAG_SERVICE_URL),
           context: {
-            maxChars: parseOptionalInt(this.env.RAG_CONTEXT_MAX_CHARS) ?? 60000,
+            maxChars: parseOptionalInt(this.env.RAG_CONTEXT_MAX_CHARS) ?? 60_000,
             topK: parseOptionalInt(this.env.RAG_CONTEXT_TOPK) ?? 12,
             summaryLineLimit: parseOptionalInt(this.env.GRAPH_CONTEXT_SUMMARY_LINE_LIMIT) ?? 10,
             summaryHintMaxChars:
@@ -345,10 +386,39 @@ class ConfigService {
               parseOptionalBool(this.env.GRAPH_CONTEXT_INCLUDE_IN_SUMMARY) ?? true,
           },
           condense: {
-            timeoutMs: parseOptionalInt(this.env.RAG_CONDENSE_TIMEOUT_MS) ?? 180000,
+            timeoutMs: parseOptionalInt(this.env.RAG_CONDENSE_TIMEOUT_MS) ?? 180_000,
             concurrency: parseOptionalInt(this.env.CONDENSE_CONCURRENCY) ?? 4,
-            cacheTtlSeconds: parseOptionalInt(this.env.CONDENSE_CACHE_TTL_SEC) ?? 604800,
+            cacheTtlSeconds: parseOptionalInt(this.env.CONDENSE_CACHE_TTL_SEC) ?? 604_800,
             debug: parseOptionalBool(this.env.DEBUG_CONDENSE) ?? false,
+          },
+          providers: {
+            condenseProvider: sanitizeOptionalString(this.env.RAG_CONDENSE_PROVIDER),
+            summarizerType: sanitizeOptionalString(this.env.RAG_SUMMARIZER_LLM_TYPE),
+            fallbackProvider: sanitizeOptionalString(this.env.RAG_FALLBACK_PROVIDER),
+            fallbackModel: sanitizeOptionalString(this.env.RAG_FALLBACK_MODEL),
+            condenseModel: sanitizeOptionalString(this.env.RAG_CONDENSE_MODEL),
+            allowLocalFallback: parseOptionalBool(this.env.RAG_ALLOW_LOCAL_FALLBACK),
+            openrouter: {
+              apiKey: sanitizeOptionalString(this.env.OPENROUTER_API_KEY),
+              baseUrl: sanitizeUrl(this.env.OPENROUTER_BASE_URL) || undefined,
+              summaryModel: sanitizeOptionalString(this.env.OPENROUTER_SUMMARY_MODEL),
+              titleModel: sanitizeOptionalString(this.env.OPENROUTER_TITLE_MODEL),
+              referer: sanitizeOptionalString(
+                this.env.OPENROUTER_REFERRER ||
+                this.env.SERVER_DOMAIN ||
+                this.env.PUBLIC_SERVER_DOMAIN,
+              ),
+              appName: sanitizeOptionalString(this.env.OPENROUTER_APP_NAME),
+            },
+            ollama: {
+              url: sanitizeUrl(
+                this.env.OLLAMA_SUMMARIZATION_URL ||
+                this.env.OLLAMA_URL ||
+                undefined,
+              ) || undefined,
+              model: sanitizeOptionalString(this.env.OLLAMA_SUMMARIZATION_MODEL_NAME),
+              legacyFlag: parseOptionalBool(this.env.USE_OLLAMA_FOR_SUMMARIZATION),
+            },
           },
         }),
       },
@@ -365,9 +435,9 @@ class ConfigService {
         schema: ingestionSchema,
         loader: () => ({
           dedupeBucket: this.env.INGEST_DEDUP_BUCKET_NAME || 'ingest_dedupe',
-          dedupeLocalTtlMs: parseOptionalInt(this.env.INGEST_DEDUP_LOCAL_TTL_MS) ?? 600000,
+          dedupeLocalTtlMs: parseOptionalInt(this.env.INGEST_DEDUP_LOCAL_TTL_MS) ?? 600_000,
           dedupeLocalMax: parseOptionalInt(this.env.INGEST_DEDUP_LOCAL_MAX) ?? 5000,
-          dedupeKvTtlMs: parseOptionalInt(this.env.INGEST_DEDUP_KV_TTL_MS) ?? 259200000,
+          dedupeKvTtlMs: parseOptionalInt(this.env.INGEST_DEDUP_KV_TTL_MS) ?? 259_200_000,
         }),
       },
       features: {
@@ -391,7 +461,7 @@ class ConfigService {
           graphWorkflowEnabled:
             parseOptionalBool(this.env.MEMORY_GRAPHWORKFLOW_ENABLED) ?? false,
           useGraphContext: parseOptionalBool(this.env.USE_GRAPH_CONTEXT) ?? true,
-          graphContextMode: this.env.GRAPH_CONTEXT_MODE ? String(this.env.GRAPH_CONTEXT_MODE) : null,
+          graphContextMode: sanitizeOptionalString(this.env.GRAPH_CONTEXT_MODE) || null,
         }),
       },
       agents: {
@@ -406,35 +476,35 @@ class ConfigService {
             jitter: parseOptionalFloat(this.env.AGENT_RETRY_JITTER) ?? 0.2,
             operations: {
               initializeClient: {
-                timeoutMs: parseOptionalInt(this.env.AGENT_INIT_CLIENT_TIMEOUT_MS) ?? 15000,
+                timeoutMs: parseOptionalInt(this.env.AGENT_INIT_CLIENT_TIMEOUT_MS) ?? 15_000,
                 retries: parseOptionalInt(this.env.AGENT_INIT_CLIENT_RETRIES) ?? 2,
               },
               sendMessage: {
-                timeoutMs: parseOptionalInt(this.env.AGENT_SEND_MESSAGE_TIMEOUT_MS) ?? 120000,
+                timeoutMs: parseOptionalInt(this.env.AGENT_SEND_MESSAGE_TIMEOUT_MS) ?? 120_000,
                 retries: parseOptionalInt(this.env.AGENT_SEND_MESSAGE_RETRIES) ?? 1,
               },
               memoryQueue: {
-                timeoutMs: parseOptionalInt(this.env.AGENT_MEMORY_QUEUE_TIMEOUT_MS) ?? 15000,
+                timeoutMs: parseOptionalInt(this.env.AGENT_MEMORY_QUEUE_TIMEOUT_MS) ?? 15_000,
                 retries: parseOptionalInt(this.env.AGENT_MEMORY_QUEUE_RETRIES) ?? 2,
               },
               summaryEnqueue: {
-               	timeoutMs: parseOptionalInt(this.env.AGENT_SUMMARY_ENQUEUE_TIMEOUT_MS) ?? 15000,
+                timeoutMs: parseOptionalInt(this.env.AGENT_SUMMARY_EN_QUEUE_TIMEOUT_MS) ?? 15_000,
                 retries: parseOptionalInt(this.env.AGENT_SUMMARY_ENQUEUE_RETRIES) ?? 2,
               },
               graphEnqueue: {
-                timeoutMs: parseOptionalInt(this.env.AGENT_GRAPH_ENQUEUE_TIMEOUT_MS) ?? 15000,
+                timeoutMs: parseOptionalInt(this.env.AGENT_GRAPH_ENQUEUE_TIMEOUT_MS) ?? 15_000,
                 retries: parseOptionalInt(this.env.AGENT_GRAPH_ENQUEUE_RETRIES) ?? 2,
               },
               saveConvo: {
-                timeoutMs: parseOptionalInt(this.env.AGENT_SAVE_CONVO_TIMEOUT_MS) ?? 10000,
+                timeoutMs: parseOptionalInt(this.env.AGENT_SAVE_CONVO_TIMEOUT_MS) ?? 10_000,
                 retries: parseOptionalInt(this.env.AGENT_SAVE_CONVO_RETRIES) ?? 1,
               },
             },
           },
           thresholds: {
-            maxUserMessageChars: parseOptionalInt(this.env.MAX_USER_MSG_TO_MODEL_CHARS) ?? 200000,
+            maxUserMessageChars: parseOptionalInt(this.env.MAX_USER_MSG_TO_MODEL_CHARS) ?? 200_000,
             googleNoStreamThreshold:
-              parseOptionalInt(this.env.GOOGLE_NOSTREAM_THRESHOLD) ?? 120000,
+              parseOptionalInt(this.env.GOOGLE_NOSTREAM_THRESHOLD) ?? 120_000,
           },
         }),
       },
@@ -476,19 +546,20 @@ class ConfigService {
 
   reloadAll() {
     this.cache.clear();
-    Object.keys(this.schemas).forEach((name) => {
-      this.#loadSection(name, { force: true });
+    Object.keys(this.schemas).forEach((section) => {
+      this.#loadSection(section, { force: true });
     });
   }
 
   getSection(name) {
-    return this.#loadSection(name, { force: false });
+    return this.#loadSection(name);
   }
 
   get(path, defaultValue = undefined) {
     if (!path || typeof path !== 'string') {
       return defaultValue;
     }
+
     const [sectionName, ...rest] = path.split('.');
     if (!sectionName) {
       return defaultValue;
@@ -536,7 +607,9 @@ class ConfigService {
     }
 
     if (this.env.MONGODB_URI && !this.env.MONGO_URI) {
-      logger.warn('[ConfigService] MONGODB_URI detected. Please migrate to MONGO_URI and remove the legacy variable.');
+      logger.warn(
+        '[ConfigService] MONGODB_URI detected. Please migrate to MONGO_URI and remove the legacy variable.',
+      );
     }
 
     const nats = this.getSection('nats');
@@ -553,7 +626,9 @@ class ConfigService {
 
     const rag = this.getSection('rag');
     if (!rag.url) {
-      logger.warn('[ConfigService] RAG service URL is not configured. RAG context enrichment may fail.');
+      logger.warn(
+        '[ConfigService] RAG service URL is not configured. RAG context enrichment may fail.',
+      );
     }
   }
 }
@@ -562,3 +637,4 @@ const configService = new ConfigService();
 
 module.exports = configService;
 module.exports.ConfigService = ConfigService;
+

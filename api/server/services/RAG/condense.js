@@ -2,6 +2,7 @@
 const { logger } = require('@librechat/data-schemas');
 const crypto = require('crypto');
 const axios = require('axios');
+const config = require('~/server/services/Config/ConfigService');
 
 let pLimitInstance;
 
@@ -15,12 +16,27 @@ async function getPLimit() {
 
 const { getRedisClient } = require('../../../utils/rag_redis');
 
-const DEBUG_CONDENSE = (process.env.DEBUG_CONDENSE || 'false').toLowerCase() === 'true';
-const GRAPH_CONTEXT_SUMMARY_LINE_LIMIT = parseInt(process.env.GRAPH_CONTEXT_SUMMARY_LINE_LIMIT || '10', 10);
-const GRAPH_CONTEXT_SUMMARY_HINT_MAX_CHARS = parseInt(process.env.GRAPH_CONTEXT_SUMMARY_HINT_MAX_CHARS || '1000', 10);
-const GRAPH_CONTEXT_INCLUDE_IN_SUMMARY = (process.env.GRAPH_CONTEXT_INCLUDE_IN_SUMMARY || 'true').toLowerCase() !== 'false';
+const ragConfig = config.getSection('rag');
+const featuresConfig = config.getSection('features');
+const coreConfig = config.getSection('core');
 
-const CONDENSE_TIMEOUT_MS = parseInt(process.env.RAG_CONDENSE_TIMEOUT_MS || '180000', 10);
+const condenseConfig = ragConfig.condense;
+const ragContextConfig = ragConfig.context;
+const providersConfig = ragConfig.providers || {};
+const openrouterConfig = providersConfig.openrouter || {};
+const ollamaConfig = providersConfig.ollama || {};
+
+const allowLocalFallbackConfig =
+  providersConfig.allowLocalFallback === undefined
+    ? true
+    : Boolean(providersConfig.allowLocalFallback);
+
+const DEBUG_CONDENSE = Boolean(condenseConfig.debug || featuresConfig.debugCondense);
+const GRAPH_CONTEXT_SUMMARY_LINE_LIMIT = ragContextConfig.summaryLineLimit;
+const GRAPH_CONTEXT_SUMMARY_HINT_MAX_CHARS = ragContextConfig.summaryHintMaxChars;
+const GRAPH_CONTEXT_INCLUDE_IN_SUMMARY = ragContextConfig.includeGraphInSummary;
+
+const CONDENSE_TIMEOUT_MS = condenseConfig.timeoutMs;
 const SUMMARY_SYSTEM_PROMPT =
   'Ты — аккуратный компрессор текста для LibreChat. Соблюдай формат инструкции и не добавляй лишних пояснений.';
 
@@ -52,7 +68,7 @@ function localFallback(text, budgetChars) {
     return text;
   }
   const half = Math.max(1, Math.floor(budgetChars / 2));
-  return `${text.slice(0, half)}\n...\n${text.slice(-half)}`;
+  return `${text.slice(0, half)}\\n...\\n${text.slice(-half)}`;
 }
 
 function describeProviderChain(chain) {
@@ -70,16 +86,16 @@ function splitIntoChunks(text, target = 12000, hardMax = 15000) {
     if (buffer.trim().length) parts.push(buffer);
     buffer = '';
   };
-  const para = text.split(/\n{2,}/g);
+  const para = text.split(/\\n{2,}/g);
   for (const p of para) {
-    if ((buffer + '\n\n' + p).length <= target) {
-      buffer = buffer ? buffer + '\n\n' + p : p;
+    if ((buffer + '\\n\\n' + p).length <= target) {
+      buffer = buffer ? buffer + '\\n\\n' + p : p;
     } else if (p.length <= hardMax) {
       flush();
       buffer = p;
       flush();
     } else {
-      const sents = p.split(/(?<=[.!?])\s+(?=[A-ZА-ЯЁ0-9])/g);
+      const sents = p.split(/(?<=[.!?])\\s+(?=[A-ZА-ЯЁ0-9])/g);
       for (const s of sents) {
         if ((buffer + ' ' + s).length <= target) {
           buffer = buffer ? buffer + ' ' + s : s;
@@ -119,10 +135,10 @@ function mapPrompt(userQuery, graphExtra) {
   }
 
   if (graphExtra && Array.isArray(graphExtra.lines) && graphExtra.lines.length) {
-    extras.push(`Графовые связи:\n${graphExtra.lines.join('\n')}`);
+    extras.push(`Графовые связи:\\n${graphExtra.lines.join('\\n')}`);
   }
 
-  return [basePrompt, ...extras].join('\n');
+  return [basePrompt, ...extras].join('\\n');
 }
 
 function reducePrompt(userQuery, budget, graphExtra) {
@@ -136,10 +152,10 @@ function reducePrompt(userQuery, budget, graphExtra) {
   }
 
   if (graphExtra && Array.isArray(graphExtra.lines) && graphExtra.lines.length) {
-    extras.push(`Графовые связи:\n${graphExtra.lines.join('\n')}`);
+    extras.push(`Графовые связи:\\n${graphExtra.lines.join('\\n')}`);
   }
 
-  return [basePrompt, ...extras].join('\n');
+  return [basePrompt, ...extras].join('\\n');
 }
 
 function sha1(s) {
@@ -181,8 +197,8 @@ function resolveSummarizerProviders({ includeLocalFallback = true } = {}) {
   const errors = [];
 
   const primaryRaw = resolveFirstNonEmpty(
-    process.env.RAG_CONDENSE_PROVIDER,
-    process.env.RAG_SUMMARIZER_LLM_TYPE,
+    providersConfig.condenseProvider,
+    providersConfig.summarizerType,
     'openrouter',
   );
   let primaryProvider = sanitizeProviderName(primaryRaw);
@@ -196,12 +212,13 @@ function resolveSummarizerProviders({ includeLocalFallback = true } = {}) {
     primaryProvider = 'openrouter';
   }
 
-  const fallbackProvider = sanitizeProviderName(process.env.RAG_FALLBACK_PROVIDER);
-  const fallbackModel = resolveFirstNonEmpty(process.env.RAG_FALLBACK_MODEL);
+  const fallbackProvider = sanitizeProviderName(providersConfig.fallbackProvider);
+  const fallbackModel = resolveFirstNonEmpty(providersConfig.fallbackModel);
+
   const defaultOpenRouterModel = resolveFirstNonEmpty(
-    process.env.RAG_CONDENSE_MODEL,
-    process.env.OPENROUTER_SUMMARY_MODEL,
-    process.env.OPENROUTER_TITLE_MODEL,
+    providersConfig.condenseModel,
+    openrouterConfig.summaryModel,
+    openrouterConfig.titleModel,
     'openrouter/meta-llama/llama-3.1-8b-instruct',
   );
 
@@ -217,55 +234,74 @@ function resolveSummarizerProviders({ includeLocalFallback = true } = {}) {
     }
 
     if (normalized === 'openrouter') {
-      const apiKey = resolveFirstNonEmpty(process.env.OPENROUTER_API_KEY);
+      const apiKey = resolveFirstNonEmpty(options.apiKey, openrouterConfig.apiKey);
       if (!apiKey) {
         errors.push('Отсутствует OPENROUTER_API_KEY для использования OpenRouter в Map-Reduce.');
         return false;
       }
 
-      const model = resolveFirstNonEmpty(modelValue, defaultOpenRouterModel);
+      const model = resolveFirstNonEmpty(
+        modelValue,
+        providersConfig.condenseModel,
+        openrouterConfig.summaryModel,
+        defaultOpenRouterModel,
+      );
+
       if (!model) {
-        errors.push('Не указана модель для OpenRouter (RAG_CONDENSE_MODEL или OPENROUTER_SUMMARY_MODEL).');
+        errors.push(
+          'Не указана модель для OpenRouter (rag.providers.condenseModel или openrouter.summaryModel).',
+        );
         return false;
       }
+
+      const baseURL = resolveFirstNonEmpty(
+        options.baseURL,
+        openrouterConfig.baseUrl,
+        'https://openrouter.ai/api/v1',
+      );
 
       descriptors.push({
         provider: 'openrouter',
         model,
         label: `openrouter:${model}`,
         options: {
-          baseURL: resolveFirstNonEmpty(process.env.OPENROUTER_BASE_URL, 'https://openrouter.ai/api/v1').replace(
-            /\/+$/,
-            '',
-          ),
+          baseURL,
           apiKey,
           timeout: CONDENSE_TIMEOUT_MS,
           referer: resolveFirstNonEmpty(
-            process.env.OPENROUTER_REFERRER,
-            process.env.SERVER_DOMAIN,
-            process.env.PUBLIC_SERVER_DOMAIN,
+            options.referer,
+            openrouterConfig.referer,
+            coreConfig.serverDomain,
+            coreConfig.publicServerDomain,
             'https://librechat.local',
           ),
-          appName: resolveFirstNonEmpty(process.env.OPENROUTER_APP_NAME, 'LibreChat RAG Condenser'),
+          appName: resolveFirstNonEmpty(
+            options.appName,
+            openrouterConfig.appName,
+            'LibreChat RAG Condenser',
+          ),
         },
       });
       return true;
     }
 
     if (normalized === 'ollama') {
-      const url = resolveFirstNonEmpty(options.url, process.env.OLLAMA_SUMMARIZATION_URL, process.env.OLLAMA_URL);
+      const url = resolveFirstNonEmpty(options.url, ollamaConfig.url);
       if (!url) {
-        errors.push('Для провайдера Ollama требуется OLLAMA_URL или OLLAMA_SUMMARIZATION_URL.');
+        errors.push(
+          'Для провайдера Ollama требуется указать URL (OLLAMA_URL или OLLAMA_SUMMARIZATION_URL).',
+        );
         return false;
       }
 
-      const model = resolveFirstNonEmpty(modelValue, process.env.OLLAMA_SUMMARIZATION_MODEL_NAME, 'gemma:7b-instruct');
+      const model = resolveFirstNonEmpty(modelValue, ollamaConfig.model, 'gemma:7b-instruct');
+
       descriptors.push({
         provider: 'ollama',
         model,
         label: `ollama:${model}`,
         options: {
-          url: url.replace(/\/+$/, ''),
+          url,
           timeout: CONDENSE_TIMEOUT_MS,
         },
       });
@@ -286,21 +322,18 @@ function resolveSummarizerProviders({ includeLocalFallback = true } = {}) {
     return false;
   };
 
-  addDescriptor(primaryProvider, process.env.RAG_CONDENSE_MODEL);
+  addDescriptor(primaryProvider, providersConfig.condenseModel);
 
   if (fallbackProvider) {
     addDescriptor(fallbackProvider, fallbackModel);
   }
 
-  const legacyOllama =
-    (process.env.USE_OLLAMA_FOR_SUMMARIZATION || 'false').toLowerCase() === 'true';
+  const legacyOllama = ollamaConfig.legacyFlag === true;
 
   if (legacyOllama && !descriptors.some((descriptor) => descriptor.provider === 'ollama')) {
-    addDescriptor('ollama', process.env.OLLAMA_SUMMARIZATION_MODEL_NAME, {
-      url: process.env.OLLAMA_SUMMARIZATION_URL,
-    });
+    addDescriptor('ollama', ollamaConfig.model, { url: ollamaConfig.url });
     warnings.push(
-      'Используется устаревший флаг USE_OLLAMA_FOR_SUMMARIZATION. Рекомендуется перейти на RAG_CONDENSE_PROVIDER/RAG_FALLBACK_PROVIDER.',
+      'Используется устаревший флаг USE_OLLAMA_FOR_SUMMARIZATION. Рекомендуется перейти на rag.providers.condenseProvider/rag.providers.fallbackProvider.',
     );
   }
 
@@ -316,7 +349,10 @@ function resolveSummarizerProviders({ includeLocalFallback = true } = {}) {
     (descriptor) => !['local', 'none', 'disabled'].includes(descriptor.provider),
   );
 
-  if (includeLocalFallback && hasActiveProvider && !descriptors.some((descriptor) => descriptor.provider === 'local')) {
+  const allowLocalFallback =
+    includeLocalFallback && allowLocalFallbackConfig !== false;
+
+  if (allowLocalFallback && hasActiveProvider && !descriptors.some((descriptor) => descriptor.provider === 'local')) {
     descriptors.push({
       provider: 'local',
       model: 'truncate',
@@ -480,8 +516,8 @@ async function condenseContext({
     }
 
     const r = getRedisClient();
-    const CONCURRENCY = parseInt(process.env.CONDENSE_CONCURRENCY || '4', 10);
-    const CACHE_TTL = parseInt(process.env.CONDENSE_CACHE_TTL_SEC || '604800', 10);
+    const CONCURRENCY = condenseConfig.concurrency;
+    const CACHE_TTL = condenseConfig.cacheTtlSeconds;
 
     const actualPLimit = await getPLimit();
     const limit = actualPLimit(CONCURRENCY);
@@ -494,10 +530,10 @@ async function condenseContext({
       chunks.map((chunk, index) =>
         limit(async () => {
           const chunkNumber = index + 1;
-          const prompt = `${mapPrompt(userQuery, graphExtra)}\n\n=== Текст чанка ===\n${chunk}`;
+          const prompt = `${mapPrompt(userQuery, graphExtra)}\\n\\n=== Текст чанка ===\\n${chunk}`;
           const cacheKey = cacheKeyChunk(chainSignature, budgetChars, userQuery, chunk, graphExtra);
 
-          if (r) {
+          if (r && CACHE_TTL > 0) {
             try {
               const cached = await r.get(cacheKey);
               if (cached) {
@@ -550,6 +586,7 @@ async function condenseContext({
 
           if (
             r &&
+            CACHE_TTL > 0 &&
             summaryText &&
             summaryProvider &&
             !summaryProvider.startsWith('local:') &&
@@ -578,7 +615,7 @@ async function condenseContext({
       ),
     );
 
-    const joined = summaries.filter(Boolean).join('\n\n---\n\n');
+    const joined = summaries.filter(Boolean).join('\\n\\n---\\n\\n');
     logger.info(
       `[RAG][condense] Map-Phase finished: ${summaries.length} chunks summarized into ${joined.length} chars. Wall-clock: ${(Date.now() - t0) / 1000}s`,
     );
@@ -602,7 +639,7 @@ async function condenseContext({
     }
 
     const reduceCacheKey = cacheKeyReduce(chainSignature, budgetChars, userQuery, joined, graphExtra);
-    if (r) {
+    if (r && CACHE_TTL > 0) {
       try {
         const cachedReduce = await r.get(reduceCacheKey);
         if (cachedReduce) {
@@ -630,7 +667,7 @@ async function condenseContext({
       }
     }
 
-    const reducePromptText = `${reducePrompt(userQuery, budgetChars, graphExtra)}\n\n=== Частичные выжимки ===\n${joined}`;
+    const reducePromptText = `${reducePrompt(userQuery, budgetChars, graphExtra)}\\n\\n=== Частичные выжимки ===\\n${joined}`;
     let { text: finalSummary, providerLabel: reduceProviderLabel } = await summarizeWithChain({
       chain: providerChain,
       prompt: reducePromptText,
@@ -656,7 +693,7 @@ async function condenseContext({
 
     let guard = 0;
     while (summaryText && summaryText.length > budgetChars && guard < 2) {
-      const guardPrompt = `Сожми ещё до ~${budgetChars} символов, сохранив ключевые факты и числа.\n\n=== Текст ===\n${summaryText}`;
+      const guardPrompt = `Сожми ещё до ~${budgetChars} символов, сохранив ключевые факты и числа.\\n\\n=== Текст ===\\n${summaryText}`;
       const { text: guardText, providerLabel: guardProvider } = await summarizeWithChain({
         chain: providerChain,
         prompt: guardPrompt,
@@ -683,7 +720,14 @@ async function condenseContext({
       );
     }
 
-    if (r && summaryText && summaryProvider && !summaryProvider.startsWith('local:') && summaryProvider !== 'none') {
+    if (
+      r &&
+      CACHE_TTL > 0 &&
+      summaryText &&
+      summaryProvider &&
+      !summaryProvider.startsWith('local:') &&
+      summaryProvider !== 'none'
+    ) {
       try {
         await r.setex(
           reduceCacheKey,
