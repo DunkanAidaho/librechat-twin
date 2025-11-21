@@ -1,9 +1,15 @@
 // /opt/open-webui/Message.js
 const { z } = require('zod');
 const { logger } = require('@librechat/data-schemas');
+const configService = require('~/server/services/Config/ConfigService');
 const { createTempChatExpirationDate } = require('@librechat/api');
 const { Message } = require('~/db/models');
 const branchLog = require('~/utils/branchLogger');
+
+const branchLoggingEnabled = configService.getBoolean(
+  'features.branchLogging',
+  (process.env.ENABLE_BRANCH_LOGGING || 'false').toLowerCase() === 'true',
+);
 
 const idSchema = z.string().uuid();
 
@@ -325,6 +331,63 @@ async function getMessages(filter, select) {
   }
 }
 
+async function getBranchCountsForConversations(conversationIds = [], userId) {
+  if (!Array.isArray(conversationIds) || conversationIds.length === 0) {
+    return {};
+  }
+
+  try {
+    if (branchLoggingEnabled) {
+      branchLog.debug(`[getBranchCountsForConversations] Counting branches for ${conversationIds.length} conversations (user=${userId})`);
+    }
+
+    const result = await Message.aggregate([
+      {
+        $match: {
+          conversationId: { $in: conversationIds },
+          user: userId,
+          parentMessageId: { $ne: null },
+        },
+      },
+      {
+        $group: {
+          _id: { conversationId: '$conversationId', parentMessageId: '$parentMessageId' },
+          childCount: { $sum: 1 },
+        },
+      },
+      {
+        $match: {
+          childCount: { $gt: 1 },
+        },
+      },
+      {
+        $group: {
+          _id: '$_id.conversationId',
+          branchingParents: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const counts = {};
+    for (const entry of result) {
+      counts[entry._id] = entry.branchingParents || 0;
+    }
+
+    if (branchLoggingEnabled) {
+      branchLog.debug(`[getBranchCountsForConversations] Aggregated branch counts: ${JSON.stringify(counts)}`);
+    }
+
+    return counts;
+  } catch (err) {
+    logger.error('Error aggregating branch counts:', err);
+    if (branchLoggingEnabled) {
+      branchLog.error('[getBranchCountsForConversations] Error aggregating branch counts', err);
+    }
+    throw err;
+  }
+}
+
+
 /**
  * Retrieves a single message from the database.
  * @async
@@ -379,53 +442,8 @@ async function deleteMessages(filter) {
  * @throws {Error} If there is an error in counting branches.
  */
 async function getBranchCountForConversation(conversationId, userId) {
-  try {
-    // Проверяем, включено ли логирование веток
-    const isBranchLoggingEnabled = process.env.ENABLE_BRANCH_LOGGING === 'true';
-
-    if (isBranchLoggingEnabled) {
-      branchLog.debug(`[getBranchCountForConversation] Starting branch count for convo: ${conversationId}, user: ${userId}`);
-    }
-
-    const result = await Message.aggregate([
-      {
-        $match: {
-          conversationId: conversationId,
-          user: userId,
-          parentMessageId: { $ne: null }, // Исключаем корневые сообщения, у них нет родителя
-        },
-      },
-      {
-        $group: {
-          _id: '$parentMessageId', // Группируем по parentMessageId
-          count: { $sum: 1 },     // Считаем количество дочерних сообщений для каждого родителя
-        },
-      },
-      {
-        $match: {
-          count: { $gt: 1 },      // Отбираем только те parentMessageId, у которых более одного дочернего сообщения
-        },
-      },
-      {
-        $count: 'branchingParents', // Считаем количество таких parentMessageId
-      },
-    ]);
-
-    const branchCount = result.length > 0 ? result[0].branchingParents : 0;
-
-    if (isBranchLoggingEnabled) {
-      branchLog.debug(`[getBranchCountForConversation] Found ${branchCount} branching parents for convo: ${conversationId}`);
-    }
-
-    return branchCount;
-  } catch (err) {
-    logger.error(`Error counting branches for conversation ${conversationId}:`, err);
-    // th1nk: Добавил проверку на наличие branchLog, чтобы не было ошибок, если он не инициализирован
-    if (process.env.ENABLE_BRANCH_LOGGING === 'true') {
-      branchLog.error(`[getBranchCountForConversation] Error counting branches for convo: ${conversationId}`, err);
-    }
-    throw err; // Перебрасываем ошибку дальше
-  }
+  const counts = await getBranchCountsForConversations([conversationId], userId);
+  return counts[conversationId] ?? 0;
 }
 
 module.exports = {
@@ -438,5 +456,6 @@ module.exports = {
   getMessages,
   getMessage,
   deleteMessages,
-  getBranchCountForConversation, // Экспортируем новую функцию
+  getBranchCountForConversation,
+  getBranchCountsForConversations,
 };

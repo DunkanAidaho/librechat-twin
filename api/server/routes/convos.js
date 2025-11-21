@@ -5,6 +5,7 @@ const express = require('express');
 const { sleep } = require('@librechat/agents');
 const { isEnabled } = require('@librechat/api');
 const { logger } = require('@librechat/data-schemas');
+const configService = require('~/server/services/Config/ConfigService');
 const { CacheKeys, EModelEndpoint } = require('librechat-data-provider');
 const {
   createImportLimiters,
@@ -13,7 +14,7 @@ const {
 } = require('~/server/middleware');
 const { getConvosByCursor, deleteConvos, getConvo, saveConvo, getConversations } = require('~/models/Conversation');
 // th1nk: Импортируем новую функцию и модель Message
-const { getMessages, getBranchCountForConversation } = require('~/models/Message');
+const { getMessages, getBranchCountsForConversations } = require('~/models/Message');
 // th1nk: Конец изменений импорта
 const { forkConversation, duplicateConversation } = require('~/server/utils/import/fork');
 const { storage, importFileFilter } = require('~/server/routes/files/multer');
@@ -26,6 +27,17 @@ const branchLog = require('~/utils/branchLogger');
 // Единый Redis-модуль
 const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
 const { getRedisClient } = require('~/utils/rag_redis');  // TODO: удалить после полного отказа от Redis
+
+
+const branchLoggingEnabled = configService.getBoolean(
+  'features.branchLogging',
+  (process.env.ENABLE_BRANCH_LOGGING || 'false').toLowerCase() === 'true',
+);
+
+const redisMemoryQueueName = configService.get(
+  'queues.redisMemoryQueueName',
+  process.env.REDIS_MEMORY_QUEUE_NAME || null,
+);
 
 const assistantClients = {
   [EModelEndpoint.azureAssistants]: require('~/server/services/Endpoints/azureAssistants'),
@@ -83,9 +95,8 @@ router.get('/', async (req, res) => {
 
   try {
     // th1nk: Добавил проверку на наличие branchLog, чтобы не было ошибок, если он не инициализирован
-    const isBranchLoggingEnabled = process.env.ENABLE_BRANCH_LOGGING === 'true';
-    if (isBranchLoggingEnabled) {
-      branchLog.debug('[CustomConvos] Fetching conversations for user:', req.user.id);
+    if (branchLoggingEnabled) {
+      branchLog.debug(`[CustomConvos] Fetching conversations for user ${req.user.id}`);
     }
 
     const result = await getConvosByCursor(req.user.id, {
@@ -100,18 +111,18 @@ router.get('/', async (req, res) => {
     // =========================================================================
     // НОВАЯ ЛОГИКА: Добавление информации о ветвлениях
     // =========================================================================
-    if (result && result.conversations && result.conversations.length > 0) {
-      const conversationsWithBranchInfo = await Promise.all(
-        result.conversations.map(async (convo) => {
-          const branchCount = await getBranchCountForConversation(convo.conversationId, req.user.id);
-          return {
-            ...convo,
-            branchCount: branchCount, // Добавляем количество веток
-            hasBranches: branchCount > 0, // Добавляем флаг наличия веток
-          };
-        })
-      );
-      result.conversations = conversationsWithBranchInfo;
+    if (result?.conversations?.length) {
+      const conversationIds = result.conversations.map((convo) => convo.conversationId);
+      const branchCounts = await getBranchCountsForConversations(conversationIds, req.user.id);
+
+      result.conversations = result.conversations.map((convo) => {
+        const branchCount = branchCounts[convo.conversationId] ?? 0;
+        return {
+          ...convo,
+          branchCount,
+          hasBranches: branchCount > 0,
+        };
+      });
     }
     // =========================================================================
 
@@ -119,8 +130,8 @@ router.get('/', async (req, res) => {
   } catch (error) {
     logger.error('Error fetching conversations', error);
     // th1nk: Добавил проверку на наличие branchLog, чтобы не было ошибок, если он не инициализирован
-    if (isBranchLoggingEnabled) {
-      branchLog.error('[CustomConvos] Error fetching conversations:', error);
+    if (branchLoggingEnabled) {
+      branchLog.error(`[CustomConvos] Error fetching conversations: ${error?.message || error}`);
     }
     res.status(500).json({ error: 'Error fetching conversations' });
   }
@@ -156,9 +167,8 @@ router.post('/gen_title', async (req, res) => {
 
   try {
     // th1nk: Добавил проверку на наличие branchLog, чтобы не было ошибок, если он не инициализирован
-    const isBranchLoggingEnabled = process.env.ENABLE_BRANCH_LOGGING === 'true';
-    if (isBranchLoggingEnabled) {
-      branchLog.debug('[CustomConvos] Generating title for conversation:', conversationId);
+    if (branchLoggingEnabled) {
+      branchLog.debug(`[CustomConvos] Generating title for conversation ${conversationId}`);
     }
 
     let finalTitle = stripQuotes(title);
@@ -175,8 +185,8 @@ router.post('/gen_title', async (req, res) => {
     // Сохраняем заголовок в БД, чтобы фронт не путался
     try {
       // th1nk: Добавил проверку на наличие branchLog, чтобы не было ошибок, если он не инициализирован
-      if (isBranchLoggingEnabled) {
-        branchLog.debug('[CustomConvos] Saving generated title:', finalTitle);
+      if (branchLoggingEnabled) {
+        branchLog.debug(`[CustomConvos] Saving generated title: ${finalTitle}`);
       }
       await saveConvo(req, { conversationId, title: finalTitle }, { context: 'gen_title_auto' });
     } catch (e) {
@@ -193,13 +203,12 @@ router.post('/gen_title', async (req, res) => {
 async function sendDeleteTaskToRedis(conversationId) {
   try {
     // th1nk: Добавил проверку на наличие branchLog, чтобы не было ошибок, если он не инициализирован
-    const isBranchLoggingEnabled = process.env.ENABLE_BRANCH_LOGGING === 'true';
-    if (isBranchLoggingEnabled) {
-      branchLog.debug('[CustomConvos] Sending delete task to Redis for conversation:', conversationId);
+    if (branchLoggingEnabled) {
+      branchLog.debug(`[CustomConvos] Sending delete task to Redis for conversation ${conversationId}`);
     }
-    const queueName = process.env.REDIS_MEMORY_QUEUE_NAME;
+    const queueName = redisMemoryQueueName;
     if (!queueName) {
-      logger.warn('[RAG] REDIS_MEMORY_QUEUE_NAME is not set. Skipping delete task.');
+      logger.warn('[RAG] redisMemoryQueueName is not configured. Skipping delete task.');
       return;
     }
     const client = getRedisClient();
@@ -236,9 +245,8 @@ router.delete('/', async (req, res) => {
     const { openai } = await assistantClients[endpoint].initializeClient({ req, res });
     try {
       // th1nk: Добавил проверку на наличие branchLog, чтобы не было ошибок, если он не инициализирован
-      const isBranchLoggingEnabled = process.env.ENABLE_BRANCH_LOGGING === 'true';
-      if (isBranchLoggingEnabled) {
-        branchLog.debug('[CustomConvos] Deleting OpenAI thread:', thread_id);
+            if (branchLoggingEnabled) {
+        branchLog.debug(`[CustomConvos] Deleting OpenAI thread ${thread_id}`);
       }
       const response = await openai.beta.threads.delete(thread_id);
       logger.debug('Deleted OpenAI thread:', response);
@@ -249,9 +257,8 @@ router.delete('/', async (req, res) => {
 
   try {
     // th1nk: Добавил проверку на наличие branchLog, чтобы не было ошибок, если он не инициализирован
-    const isBranchLoggingEnabled = process.env.ENABLE_BRANCH_LOGGING === 'true';
-    if (isBranchLoggingEnabled) {
-      branchLog.debug('[CustomConvos] Deleting conversation from DB:', conversationId);
+    if (branchLoggingEnabled) {
+      branchLog.debug(`[CustomConvos] Deleting conversation from DB ${conversationId}`);
     }
     const dbResponse = await deleteConvos(req.user.id, filter);
     await deleteToolCalls(req.user.id, filter.conversationId);
@@ -282,9 +289,8 @@ router.delete('/', async (req, res) => {
 router.delete('/all', async (req, res) => {
   try {
     // th1nk: Добавил проверку на наличие branchLog, чтобы не было ошибок, если он не инициализирован
-    const isBranchLoggingEnabled = process.env.ENABLE_BRANCH_LOGGING === 'true';
-    if (isBranchLoggingEnabled) {
-      branchLog.debug('[CustomConvos] Deleting all conversations for user:', req.user.id);
+    if (branchLoggingEnabled) {
+      branchLog.debug(`[CustomConvos] Deleting all conversations for user ${req.user.id}`);
     }
     const conversations = await getConversations(req.user.id);
     const convoIds = conversations.map(c => c.conversationId);
@@ -315,8 +321,7 @@ router.post('/update', async (req, res) => {
 
   try {
     // th1nk: Добавил проверку на наличие branchLog, чтобы не было ошибок, если он не инициализирован
-    const isBranchLoggingEnabled = process.env.ENABLE_BRANCH_LOGGING === 'true';
-    if (isBranchLoggingEnabled) {
+    if (branchLoggingEnabled) {
       branchLog.debug('[CustomConvos] Updating conversation:', update.conversationId);
     }
     const dbResponse = await saveConvo(req, update, {
@@ -342,9 +347,8 @@ router.post(
   async (req, res) => {
     try {
       // th1nk: Добавил проверку на наличие branchLog, чтобы не было ошибок, если он не инициализирован
-      const isBranchLoggingEnabled = process.env.ENABLE_BRANCH_LOGGING === 'true';
-      if (isBranchLoggingEnabled) {
-        branchLog.debug('[CustomConvos] Importing file:', req.file.path);
+            if (branchLoggingEnabled) {
+        branchLog.debug(`[CustomConvos] Importing file ${req.file.path}`);
       }
       await importConversations({ filepath: req.file.path, requestUserId: req.user.id });
       res.status(201).json({ message: 'Conversation(s) imported successfully' });
@@ -358,9 +362,8 @@ router.post(
 router.post('/fork', forkIpLimiter, forkUserLimiter, async (req, res) => {
   try {
     // th1nk: Добавил проверку на наличие branchLog, чтобы не было ошибок, если он не инициализирован
-    const isBranchLoggingEnabled = process.env.ENABLE_BRANCH_LOGGING === 'true';
-    if (isBranchLoggingEnabled) {
-      branchLog.debug('[CustomConvos] Forking conversation:', req.body.conversationId);
+    if (branchLoggingEnabled) {
+      branchLog.debug(`[CustomConvos] Forking conversation ${req.body.conversationId}`);
     }
     const { conversationId, messageId, option, splitAtTarget, latestMessageId } = req.body;
     const result = await forkConversation({
@@ -385,9 +388,8 @@ router.post('/duplicate', async (req, res) => {
 
   try {
     // th1nk: Добавил проверку на наличие branchLog, чтобы не было ошибок, если он не инициализирован
-    const isBranchLoggingEnabled = process.env.ENABLE_BRANCH_LOGGING === 'true';
-    if (isBranchLoggingEnabled) {
-      branchLog.debug('[CustomConvos] Duplicating conversation:', conversationId);
+    if (branchLoggingEnabled) {
+      branchLog.debug(`[CustomConvos] Duplicating conversation ${conversationId}`);
     }
     const result = await duplicateConversation({
       userId: req.user.id,

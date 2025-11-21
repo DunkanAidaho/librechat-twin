@@ -167,6 +167,7 @@ class ConfigService {
     const queuesSchema = z.object({
       toolsGatewayUrl: z.string().url().nullable(),
       httpTimeoutMs: z.number().int().positive(),
+      redisMemoryQueueName: z.string().min(1).nullable().optional(),
       subjects: z.object({
         memory: z.string().min(1).nullable(),
         graph: z.string().min(1).nullable(),
@@ -246,6 +247,7 @@ class ConfigService {
       useConversationMemory: z.boolean(),
       headlessStream: z.boolean(),
       debugCondense: z.boolean(),
+      branchLogging: z.boolean().optional(),
     });
 
     const pricingSchema = z.object({
@@ -327,6 +329,7 @@ class ConfigService {
         loader: () => ({
           toolsGatewayUrl: sanitizeUrl(this.env.TOOLS_GATEWAY_URL),
           httpTimeoutMs: parseOptionalInt(this.env.TOOLS_GATEWAY_TIMEOUT_MS) ?? 15000,
+          redisMemoryQueueName: sanitizeOptionalString(this.env.REDIS_MEMORY_QUEUE_NAME) ?? null,
           subjects: {
             memory: sanitizeOptionalString(this.env.NATS_MEMORY_SUBJECT) ?? null,
             graph: sanitizeOptionalString(this.env.NATS_GRAPH_SUBJECT) ?? null,
@@ -446,6 +449,7 @@ class ConfigService {
           useConversationMemory: parseOptionalBool(this.env.USE_CONVERSATION_MEMORY) ?? false,
           headlessStream: parseOptionalBool(this.env.HEADLESS_STREAM) ?? false,
           debugCondense: parseOptionalBool(this.env.DEBUG_CONDENSE) ?? false,
+          branchLogging: parseOptionalBool(this.env.ENABLE_BRANCH_LOGGING) ?? false,
         }),
       },
       pricing: {
