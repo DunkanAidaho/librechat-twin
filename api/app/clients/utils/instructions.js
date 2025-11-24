@@ -3,7 +3,7 @@
 const { logger } = require('@librechat/data-schemas');
 const { Tokenizer } = require('@librechat/api');
 
-const DEFAULT_ENCODING = process.env.DEFAULT_TOKENIZER_ENCODING ?? 'o200k_base';
+const DEFAULT_ENCODING = configService.get('agents.encoding.defaultTokenizerEncoding', 'o200k_base');
 
 /**
  * Преобразует произвольный формат инструкций в объект с содержимым и числом токенов.
