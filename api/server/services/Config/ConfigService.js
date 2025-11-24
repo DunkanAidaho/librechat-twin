@@ -269,6 +269,17 @@ class ConfigService {
       noSync: z.boolean(),
     });
 
+    const clientsSchema = z.object({
+      base: z.object({
+        timeoutMs: z.number().int().positive(),
+        retryCount: z.number().int().nonnegative(),
+        retryMinDelayMs: z.number().int().nonnegative(),
+        retryMaxDelayMs: z.number().int().nonnegative(),
+        retryFactor: z.number().positive(),
+        retryJitter: z.number().min(0).max(1),
+      }),
+    });
+
     const agentsSchema = z.object({
       resilience: z.object({
         minDelayMs: z.number().int().nonnegative(),
@@ -287,6 +298,9 @@ class ConfigService {
       thresholds: z.object({
         maxUserMessageChars: z.number().int().positive(),
         googleNoStreamThreshold: z.number().int().positive(),
+      }),
+      encoding: z.object({
+        defaultTokenizerEncoding: z.string().min(1),
       }),
     });
 
@@ -470,6 +484,19 @@ class ConfigService {
           branchLogging: parseOptionalBool(this.env.ENABLE_BRANCH_LOGGING) ?? false,
         }),
       },
+      clients: {
+        schema: clientsSchema,
+        loader: () => ({
+          base: {
+            timeoutMs: parseOptionalInt(this.env.LLM_CLIENT_TIMEOUT_MS) ?? 120000,
+            retryCount: parseOptionalInt(this.env.LLM_CLIENT_RETRY_COUNT) ?? 1,
+            retryMinDelayMs: parseOptionalInt(this.env.LLM_CLIENT_RETRY_MIN_DELAY_MS) ?? 200,
+            retryMaxDelayMs: parseOptionalInt(this.env.LLM_CLIENT_RETRY_MAX_DELAY_MS) ?? 2000,
+            retryFactor: parseOptionalFloat(this.env.LLM_CLIENT_RETRY_FACTOR) ?? 2,
+            retryJitter: parseOptionalFloat(this.env.LLM_CLIENT_RETRY_JITTER) ?? 0.2,
+          },
+        }),
+      },
       pricing: {
         schema: pricingSchema,
         loader: () => ({
@@ -527,6 +554,10 @@ class ConfigService {
             maxUserMessageChars: parseOptionalInt(this.env.MAX_USER_MSG_TO_MODEL_CHARS) ?? 200_000,
             googleNoStreamThreshold:
               parseOptionalInt(this.env.GOOGLE_NOSTREAM_THRESHOLD) ?? 120_000,
+          },
+          encoding: {
+            defaultTokenizerEncoding:
+              sanitizeOptionalString(this.env.DEFAULT_TOKENIZER_ENCODING) || 'o200k_base',
           },
         }),
       },
