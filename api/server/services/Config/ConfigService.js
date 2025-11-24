@@ -261,6 +261,14 @@ class ConfigService {
       graphContextMode: z.string().min(1).nullable(),
     });
 
+    const searchSchema = z.object({
+      enabled: z.boolean(),
+      host: z.string().min(1).nullable(),
+      masterKey: z.string().min(1).nullable(),
+      syncThreshold: z.number().int().nonnegative(),
+      noSync: z.boolean(),
+    });
+
     const agentsSchema = z.object({
       resilience: z.object({
         minDelayMs: z.number().int().nonnegative(),
@@ -322,6 +330,16 @@ class ConfigService {
           retryFactor: parseOptionalFloat(this.env.NATS_RETRY_FACTOR) ?? 2,
           retryJitter: parseOptionalFloat(this.env.NATS_RETRY_JITTER) ?? 0.4,
           streamReplicas: parseOptionalInt(this.env.NATS_STREAM_REPLICAS) ?? 1,
+        }),
+      },
+      search: {
+        schema: searchSchema,
+        loader: () => ({
+          enabled: parseOptionalBool(this.env.SEARCH) ?? false,
+          host: sanitizeOptionalString(this.env.MEILI_HOST) ?? null,
+          masterKey: sanitizeOptionalString(this.env.MEILI_MASTER_KEY) ?? null,
+          syncThreshold: parseOptionalInt(this.env.MEILI_SYNC_THRESHOLD) ?? 1000,
+          noSync: parseOptionalBool(this.env.MEILI_NO_SYNC) ?? false,
         }),
       },
       queues: {

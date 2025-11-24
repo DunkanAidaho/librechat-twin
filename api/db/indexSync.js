@@ -1,15 +1,21 @@
+require('module-alias/register');
 const mongoose = require('mongoose');
 const { MeiliSearch } = require('meilisearch');
 const { logger } = require('@librechat/data-schemas');
 const { CacheKeys } = require('librechat-data-provider');
+const configService = require('~/server/services/Config/ConfigService');
 const { isEnabled, FlowStateManager } = require('@librechat/api');
 const { getLogStores } = require('~/cache');
 
 const Conversation = mongoose.models.Conversation;
 const Message = mongoose.models.Message;
 
-const searchEnabled = isEnabled(process.env.SEARCH);
-const indexingDisabled = isEnabled(process.env.MEILI_NO_SYNC);
+const searchConfig = configService.getSection('search');
+const searchEnabled = Boolean(searchConfig.enabled);
+const indexingDisabled = Boolean(searchConfig.noSync);
+const meiliHost = searchConfig.host;
+const meiliApiKey = searchConfig.masterKey;
+const meiliSyncThreshold = searchConfig.syncThreshold;
 let currentTimeout = null;
 
 class MeiliSearchClient {
@@ -17,12 +23,12 @@ class MeiliSearchClient {
 
   static getInstance() {
     if (!MeiliSearchClient.instance) {
-      if (!process.env.MEILI_HOST || !process.env.MEILI_MASTER_KEY) {
+      if (!meiliHost || !meiliApiKey) {
         throw new Error('Meilisearch configuration is missing.');
       }
       MeiliSearchClient.instance = new MeiliSearch({
-        host: process.env.MEILI_HOST,
-        apiKey: process.env.MEILI_MASTER_KEY,
+        host: meiliHost,
+        apiKey: meiliApiKey,
       });
     }
     return MeiliSearchClient.instance;
@@ -232,7 +238,7 @@ async function performSync(flowManager, flowId, flowType) {
       // Check if we should do a full sync or incremental
       const messageCount = await Message.countDocuments();
       const messagesIndexed = messageProgress.totalProcessed;
-      const syncThreshold = parseInt(process.env.MEILI_SYNC_THRESHOLD || '1000', 10);
+      const syncThreshold = meiliSyncThreshold;
 
       if (messageCount - messagesIndexed > syncThreshold) {
         logger.info('[indexSync] Starting full message sync due to large difference');
@@ -258,7 +264,7 @@ async function performSync(flowManager, flowId, flowType) {
 
       const convoCount = await Conversation.countDocuments();
       const convosIndexed = convoProgress.totalProcessed;
-      const syncThreshold = parseInt(process.env.MEILI_SYNC_THRESHOLD || '1000', 10);
+      const syncThreshold = meiliSyncThreshold;
 
       if (convoCount - convosIndexed > syncThreshold) {
         logger.info('[indexSync] Starting full conversation sync due to large difference');

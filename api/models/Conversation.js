@@ -16,6 +16,11 @@ if (!Conversation.schema.path('lastSummarizedIndex')) {
   }
 }
 
+const expiredAtPath = Conversation.schema.path('expiredAt');
+if (expiredAtPath && expiredAtPath.defaultValue === null) {
+  expiredAtPath.default(undefined);
+}
+
 /**
  * Searches for a conversation by conversationId and returns a lean document with only conversationId and user.
  * @param {string} conversationId - The conversation's ID.
@@ -112,6 +117,8 @@ module.exports = {
         update.conversationId = newConversationId;
       }
 
+      let shouldUnsetExpiredAt = false;
+
       if (req?.body?.isTemporary) {
         try {
           const appConfig = req.config;
@@ -119,16 +126,23 @@ module.exports = {
         } catch (err) {
           logger.error('Error creating temporary chat expiration date:', err);
           logger.info(`---\`saveConvo\` context: ${metadata?.context}`);
-          update.expiredAt = null;
+          shouldUnsetExpiredAt = true;
         }
       } else {
-        update.expiredAt = null;
+        shouldUnsetExpiredAt = true;
       }
 
-      /** @type {{ $set: Partial<TConversation>; $unset?: Record<keyof TConversation, number> }} */
+      if (shouldUnsetExpiredAt) {
+        delete update.expiredAt;
+      }
+
       const updateOperation = { $set: update };
-      if (metadata && metadata.unsetFields && Object.keys(metadata.unsetFields).length > 0) {
-        updateOperation.$unset = metadata.unsetFields;
+      const unsetFields = { ...(metadata?.unsetFields || {}) };
+      if (shouldUnsetExpiredAt) {
+        unsetFields.expiredAt = '';
+      }
+      if (Object.keys(unsetFields).length > 0) {
+        updateOperation.$unset = unsetFields;
       }
 
       /** Note: the resulting Model object is necessary for Meilisearch operations */
