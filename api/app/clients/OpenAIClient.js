@@ -105,7 +105,7 @@ class OpenAIClient extends BaseClient {
     const omniPattern = /\b(o\d)\b/i;
     this.isOmni = omniPattern.test(this.modelOptions.model);
 
-    const { OPENAI_FORCE_PROMPT } = process.env ?? {};
+    const OPENAI_FORCE_PROMPT = openaiProviderConfig.forcePrompt;
     const { reverseProxyUrl: reverseProxy } = this.options;
 
     if (
@@ -129,9 +129,9 @@ class OpenAIClient extends BaseClient {
       this.FORCE_PROMPT = this.options.forcePrompt;
     }
 
-    if (this.azure && process.env.AZURE_OPENAI_DEFAULT_MODEL) {
+    if (this.azure && openaiProviderConfig.azureDefaultModel) {
       this.azureEndpoint = genAzureChatCompletion(this.azure, this.modelOptions.model, this);
-      this.modelOptions.model = process.env.AZURE_OPENAI_DEFAULT_MODEL;
+      this.modelOptions.model = openaiProviderConfig.azureDefaultModel;
     } else if (this.azure) {
       this.azureEndpoint = genAzureChatCompletion(this.azure, this.modelOptions.model, this);
     }
@@ -654,7 +654,7 @@ class OpenAIClient extends BaseClient {
 ||>Response:
 "${JSON.stringify(truncateText(responseText))}"`;
 
-    const { OPENAI_TITLE_MODEL } = process.env ?? {};
+    const OPENAI_TITLE_MODEL = openaiProviderConfig.titleModel;
 
     let model = this.options.titleModel ?? OPENAI_TITLE_MODEL ?? openAISettings.model.default;
     if (model === Constants.CURRENT_MODEL) {
@@ -713,7 +713,7 @@ class OpenAIClient extends BaseClient {
         modelOptions.model = model;
 
         if (this.azure) {
-          modelOptions.model = process.env.AZURE_OPENAI_DEFAULT_MODEL ?? modelOptions.model;
+          modelOptions.model = openaiProviderConfig.azureDefaultModel ?? modelOptions.model;
           this.azureEndpoint = genAzureChatCompletion(this.azure, modelOptions.model, this);
         }
 
@@ -848,7 +848,7 @@ ${convo}
     let prompt;
 
     // TODO: remove the gpt fallback and make it specific to endpoint
-    const { OPENAI_SUMMARY_MODEL = openAISettings.model.default } = process.env ?? {};
+    const OPENAI_SUMMARY_MODEL = openaiProviderConfig.summaryModel ?? openAISettings.model.default;
     let model = this.options.summaryModel ?? OPENAI_SUMMARY_MODEL;
     if (model === Constants.CURRENT_MODEL) {
       model = this.modelOptions.model;
@@ -1172,8 +1172,8 @@ ${convo}
         delete modelOptions.temperature;
       }
 
-      if (process.env.OPENAI_ORGANIZATION) {
-        opts.organization = process.env.OPENAI_ORGANIZATION;
+      if (openaiProviderConfig.organization) {
+        opts.organization = openaiProviderConfig.organization;
       }
 
       let chatCompletion;

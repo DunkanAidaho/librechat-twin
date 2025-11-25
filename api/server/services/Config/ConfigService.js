@@ -280,6 +280,26 @@ class ConfigService {
       }),
     });
 
+    const providersSchema = z.object({
+      openai: z.object({
+        apiKey: z.string().min(1).optional(),
+        organization: z.string().min(1).optional(),
+        azureDefaultModel: z.string().min(1).optional(),
+        forcePrompt: z.boolean(),
+        titleModel: z.string().min(1).optional(),
+        summaryModel: z.string().min(1).optional(),
+      }),
+      anthropic: z.object({
+        apiKey: z.string().min(1).optional(),
+        defaultModel: z.string().min(1).optional(),
+        titleModel: z.string().min(1).optional(),
+      }),
+      google: z.object({
+        location: z.string().min(1),
+        titleModel: z.string().min(1).optional(),
+      }),
+    });
+
     const agentsSchema = z.object({
       resilience: z.object({
         minDelayMs: z.number().int().nonnegative(),
@@ -301,6 +321,9 @@ class ConfigService {
       }),
       encoding: z.object({
         defaultTokenizerEncoding: z.string().min(1),
+      }),
+      titles: z.object({
+        enabled: z.boolean(),
       }),
     });
 
@@ -497,6 +520,28 @@ class ConfigService {
           },
         }),
       },
+      providers: {
+        schema: providersSchema,
+        loader: () => ({
+          openai: {
+            apiKey: sanitizeOptionalString(this.env.OPENAI_API_KEY),
+            organization: sanitizeOptionalString(this.env.OPENAI_ORGANIZATION),
+            azureDefaultModel: sanitizeOptionalString(this.env.AZURE_OPENAI_DEFAULT_MODEL),
+            forcePrompt: parseOptionalBool(this.env.OPENAI_FORCE_PROMPT) ?? false,
+            titleModel: sanitizeOptionalString(this.env.OPENAI_TITLE_MODEL),
+            summaryModel: sanitizeOptionalString(this.env.OPENAI_SUMMARY_MODEL),
+          },
+          anthropic: {
+            apiKey: sanitizeOptionalString(this.env.ANTHROPIC_API_KEY),
+            defaultModel: sanitizeOptionalString(this.env.ANTHROPIC_DEFAULT_MODEL),
+            titleModel: sanitizeOptionalString(this.env.ANTHROPIC_TITLE_MODEL),
+          },
+          google: {
+            location: sanitizeOptionalString(this.env.GOOGLE_LOC) || 'us-central1',
+            titleModel: sanitizeOptionalString(this.env.GOOGLE_TITLE_MODEL),
+          },
+        }),
+      },
       pricing: {
         schema: pricingSchema,
         loader: () => ({
@@ -558,6 +603,9 @@ class ConfigService {
           encoding: {
             defaultTokenizerEncoding:
               sanitizeOptionalString(this.env.DEFAULT_TOKENIZER_ENCODING) || 'o200k_base',
+          },
+          titles: {
+            enabled: parseOptionalBool(this.env.TITLE_CONVO) ?? true,
           },
         }),
       },

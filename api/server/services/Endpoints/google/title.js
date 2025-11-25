@@ -1,19 +1,23 @@
 const { isEnabled } = require('@librechat/api');
 const { logger } = require('@librechat/data-schemas');
+const configService = require('~/server/services/Config/ConfigService');
 const { EModelEndpoint, CacheKeys, Constants, googleSettings } = require('librechat-data-provider');
 const getLogStores = require('~/cache/getLogStores');
 const initializeClient = require('./initialize');
 const { saveConvo } = require('~/models');
 
 const addTitle = async (req, { text, response, client }) => {
-  const { TITLE_CONВО = 'true' } = process.env ?? {};
+  const titlesConfig = configService.getSection('agents').titles;
+  const providersConfig = configService.getSection('providers');
+  const googleProviderConfig = providersConfig.google;
+  const TITLE_CONВО = titlesConfig.enabled ? 'true' : 'false';
   if (!isEnabled(TITLE_CONВО)) {
     return;
   }
   if (client?.options?.titleConvo === false) {
     return;
   }
-  const { GOOGLE_TITLE_MODEL } = process.env ?? {};
+  const GOOGLE_TITLE_MODEL = googleProviderConfig.titleModel;
   const appConfig = req.config;
   const providerConfig = appConfig.endpoints?.[EModelEndpoint.google];
   let model =

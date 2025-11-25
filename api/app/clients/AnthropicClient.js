@@ -33,6 +33,7 @@ const {
 const { spendTokens, spendStructuredTokens } = require('~/models/spendTokens');
 const { encodeAndFormat } = require('~/server/services/Files/images/encode');
 const BaseClient = require('./BaseClient');
+const configService = require('~/server/services/Config/ConfigService');
 
 const HUMAN_PROMPT = '\n\nHuman:';
 const AI_PROMPT = '\n\nAssistant:';
@@ -53,11 +54,12 @@ function delayBeforeRetry(attempts, baseDelay = 1000) {
 
 const tokenEventTypes = new Set(['message_start', 'message_delta']);
 const { legacy } = anthropicSettings;
+const anthropicProviderConfig = configService.getSection('providers').anthropic;
 
 class AnthropicClient extends BaseClient {
   constructor(apiKey, options = {}) {
     super(apiKey, options);
-    this.apiKey = apiKey || process.env.ANTHROPIC_API_KEY;
+    this.apiKey = apiKey || anthropicProviderConfig.apiKey;
     this.userLabel = HUMAN_PROMPT;
     this.assistantLabel = AI_PROMPT;
     this.contextStrategy = options.contextStrategy
@@ -937,8 +939,7 @@ class AnthropicClient extends BaseClient {
   ${JSON.stringify(truncateText(responseText))}
   </response>`;
 
-    const { ANTHROPIC_TITLE_MODEL } = process.env ?? {};
-    const model = this.options.titleModel ?? ANTHROPIC_TITLE_MODEL ?? 'claude-3-haiku-20240307';
+    const model = this.options.titleModel ?? anthropicProviderConfig.titleModel ?? 'claude-3-haiku-20240307';
     const system = titleFunctionPrompt;
 
     const titleChatCompletion = async () => {

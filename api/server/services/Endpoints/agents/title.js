@@ -1,6 +1,7 @@
 const { observeAgentTitle, incAgentTitleFailure } = require('~/utils/metrics');
 const { isEnabled } = require('@librechat/api');
 const { logger } = require('@librechat/data-schemas');
+const configService = require('~/server/services/Config/ConfigService');
 const { CacheKeys } = require('librechat-data-provider');
 const getLogStores = require('~/cache/getLogStores');
 const { saveConvo } = require('~/models');
@@ -15,7 +16,12 @@ const { saveConvo } = require('~/models');
  * @returns {Promise<void>}
  */
 const addTitle = async (req, { text, response, client }) => {
-  const { TITLE_CONVO = true } = process.env ?? {};
+  const providersConfig = configService.getSection('providers');
+  const openaiConfig = providersConfig.openai;
+  const anthropicConfig = providersConfig.anthropic;
+  const googleConfig = providersConfig.google;
+  const titlesConfig = configService.getSection('agents').titles;
+  const TITLE_CONVO = titlesConfig.enabled;
   if (!isEnabled(TITLE_CONВО)) {
     return;
   }

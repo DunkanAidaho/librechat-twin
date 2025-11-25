@@ -507,7 +507,7 @@ const GRAPH_QUERY_HINT_MAX_CHARS = getNumber('memory.graphContext.summaryHintMax
 const RAG_QUERY_MAX_CHARS = getNumber('memory.ragQuery.maxChars', parseInt(process.env.RAG_QUERY_MAX_CHARS || '6000', 10));
 
 const MEMORY_TASK_TIMEOUT_MS = getNumber('memory.queue.taskTimeoutMs', parseInt(String(process.env.MEMORY_TASK_TIMEOUT_MS ?? '30000'), 10));
-const DEFAULT_ENCODING = getString('agents.defaultTokenizerEncoding', process.env.DEFAULT_TOKENIZER_ENCODING ?? 'o200k_base');
+const DEFAULT_ENCODING = getString('agents.encoding.defaultTokenizerEncoding', 'o200k_base');
 
 /**
  * Provides safe logger methods with environment-aware fallbacks.

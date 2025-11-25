@@ -1,5 +1,6 @@
 'use strict';
 
+const configService = require('~/server/services/Config/ConfigService');
 const { logger } = require('@librechat/data-schemas');
 const { Tokenizer } = require('@librechat/api');
 

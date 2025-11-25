@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const fetch = require('node-fetch');
 const { logger } = require('@librechat/data-schemas');
 const { getBalanceConfig, Tokenizer, TextStream } = require('@librechat/api');
+const configService = require('~/server/services/Config/ConfigService');
 const {
   supportsBalanceCheck,
   isAgentsEndpoint,
@@ -17,32 +18,14 @@ const { checkBalance } = require('~/models/balanceMethods');
 const { truncateToolCallOutputs } = require('./prompts');
 const { getFiles } = require('~/models/File');
 const { retryAsync, withTimeout } = require('../../utils/async');
-const DEFAULT_CLIENT_TIMEOUT_MS = parsePositiveInt(
-  process.env.LLM_CLIENT_TIMEOUT_MS,
-  120000,
-);
-const DEFAULT_CLIENT_RETRY_COUNT = parsePositiveInt(
-  process.env.LLM_CLIENT_RETRY_COUNT,
-  1,
-);
-const DEFAULT_CLIENT_RETRY_MIN_DELAY_MS = parsePositiveInt(
-  process.env.LLM_CLIENT_RETRY_MIN_DELAY_MS,
-  200,
-);
-const DEFAULT_CLIENT_RETRY_MAX_DELAY_MS = parsePositiveInt(
-  process.env.LLM_CLIENT_RETRY_MAX_DELAY_MS,
-  2000,
-);
-const DEFAULT_CLIENT_RETRY_FACTOR = Number.isFinite(
-  Number.parseFloat(process.env.LLM_CLIENT_RETRY_FACTOR),
-)
-  ? Number.parseFloat(process.env.LLM_CLIENT_RETRY_FACTOR)
-  : 2;
-const DEFAULT_CLIENT_RETRY_JITTER = Number.isFinite(
-  Number.parseFloat(process.env.LLM_CLIENT_RETRY_JITTER),
-)
-  ? Number.parseFloat(process.env.LLM_CLIENT_RETRY_JITTER)
-  : 0.2;
+const baseClientConfig = configService.getSection('clients').base;
+const historyConfig = configService.get('memory.history', {});
+const DEFAULT_CLIENT_TIMEOUT_MS = baseClientConfig.timeoutMs;
+const DEFAULT_CLIENT_RETRY_COUNT = baseClientConfig.retryCount;
+const DEFAULT_CLIENT_RETRY_MIN_DELAY_MS = baseClientConfig.retryMinDelayMs;
+const DEFAULT_CLIENT_RETRY_MAX_DELAY_MS = baseClientConfig.retryMaxDelayMs;
+const DEFAULT_CLIENT_RETRY_FACTOR = baseClientConfig.retryFactor;
+const DEFAULT_CLIENT_RETRY_JITTER = baseClientConfig.retryJitter;
 
 /**
  * Возвращает положительное целочисленное значение, либо значение по умолчанию.
@@ -105,7 +88,7 @@ class BaseClient {
     /** @type {import('librechat-data-provider').VisionModes | undefined} */
     if (!BaseClient._historyBudgetLogged) {
       BaseClient._historyBudgetLogged = true;
-      const historyTokenBudget = Number.parseInt(process.env.HISTORY_TOKEN_BUDGET || '0', 10);
+      const historyTokenBudget = historyConfig?.tokenBudget ?? 0;
       logger.info({
         msg: '[BaseClient] HISTORY_TOKEN_BUDGET',
         historyTokenBudget,

@@ -31,8 +31,9 @@ const {
   truncateText,
 } = require('./prompts');
 const BaseClient = require('./BaseClient');
+const configService = require('~/server/services/Config/ConfigService');
 
-const loc = process.env.GOOGLE_LOC || 'us-central1';
+const loc = configService.get('providers.google.location', 'us-central1');
 const publisher = 'google';
 const endpointPrefix =
   loc === 'global' ? 'aiplatform.googleapis.com' : `${loc}-aiplatform.googleapis.com`;
