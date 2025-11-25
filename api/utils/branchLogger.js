@@ -1,10 +1,13 @@
 // /app/api/utils/branchLogger.js
 const { createLogger, format, transports } = require('winston');
+const configService = require('~/server/services/Config/ConfigService');
 const { combine, timestamp, printf, colorize } = format;
 
-// Получаем переменные окружения
-const ENABLE_BRANCH_LOGGING = process.env.ENABLE_BRANCH_LOGGING === 'true';
-const BRANCH_LOG_LEVEL = process.env.BRANCH_LOG_LEVEL || 'info'; // По умолчанию 'info'
+// Получаем конфигурацию логирования
+const loggingConfig = configService.getSection('logging');
+const branchConfig = loggingConfig.branch;
+const ENABLE_BRANCH_LOGGING = branchConfig.enabled;
+const BRANCH_LOG_LEVEL = branchConfig.level;
 
 // Кастомный формат лога
 const logFormat = printf(({ level, message, timestamp }) => {

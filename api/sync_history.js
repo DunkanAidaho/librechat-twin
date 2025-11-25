@@ -10,7 +10,7 @@ const mongoose = require('mongoose');
 const configService = require('~/server/services/Config/ConfigService');
 const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
 
-const mongoUri = configService.get('mongo.uri', process.env.MONGO_URI);
+const mongoUri = configService.get('mongo.uri');
 if (!mongoUri) {
   console.error('[SYNC_HISTORY] mongo.uri не настроен. Завершаем работу.');
   process.exit(1);

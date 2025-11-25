@@ -6,10 +6,7 @@ const { createTempChatExpirationDate } = require('@librechat/api');
 const { Message } = require('~/db/models');
 const branchLog = require('~/utils/branchLogger');
 
-const branchLoggingEnabled = configService.getBoolean(
-  'features.branchLogging',
-  (process.env.ENABLE_BRANCH_LOGGING || 'false').toLowerCase() === 'true',
-);
+const branchLoggingEnabled = configService.getBoolean('logging.branch.enabled', false);
 
 const idSchema = z.string().uuid();
 

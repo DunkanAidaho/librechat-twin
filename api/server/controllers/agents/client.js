@@ -482,31 +482,30 @@ const getString = (path, fallback) => {
   return value == null ? fallback : value;
 };
 
-const DEBUG_SSE = (process.env.DEBUG_SSE || 'false').toLowerCase() === 'true';
+const DEBUG_SSE = configService.getBoolean('logging.debugSse', false);
 
 const IngestedHistory = new Set();
 
-const HIST_LONG_USER_TO_RAG = parseInt(process.env.HIST_LONG_USER_TO_RAG || '20000', 10);
-const OCR_TO_RAG_THRESHOLD = parseInt(process.env.OCR_TO_RAG_THRESHOLD || '15000', 10);
-const WAIT_FOR_RAG_INGEST_MS = parseInt(process.env.WAIT_FOR_RAG_INGEST_MS || '0', 10);
-const ASSIST_LONG_TO_RAG = parseInt(process.env.ASSIST_LONG_TO_RAG || '15000', 10);
-const ASSIST_SNIPPET_CHARS = parseInt(process.env.ASSIST_SNIPPET_CHARS || '1500', 10);
+const HIST_LONG_USER_TO_RAG = configService.getNumber('rag.history.histLongUserToRag', 20000);
+const OCR_TO_RAG_THRESHOLD = configService.getNumber('rag.history.ocrToRagThreshold', 15000);
+const WAIT_FOR_RAG_INGEST_MS = configService.getNumber('rag.history.waitForIngestMs', 0);
+const ASSIST_LONG_TO_RAG = configService.getNumber('rag.history.assistLongToRag', 15000);
+const ASSIST_SNIPPET_CHARS = configService.getNumber('rag.history.assistSnippetChars', 1500);
 
-const GOOGLE_CHAIN_BUFFER = (process.env.GOOGLE_CHAIN_BUFFER || 'off').toLowerCase();
-const GEMINI_CHAIN_WINDOW = parseInt(process.env.GEMINI_CHAIN_WINDOW || '5', 10);
+const GOOGLE_CHAIN_BUFFER = (configService.get('features.googleChainBuffer', 'off') || 'off').toLowerCase();
+const GEMINI_CHAIN_WINDOW = configService.getNumber('features.geminiChainWindow', 5);
 
-const USE_GRAPH_CONTEXT =
-  typeof memoryStaticConfig.useGraphContext === 'boolean'
-    ? memoryStaticConfig.useGraphContext
-    : (process.env.USE_GRAPH_CONTEXT || 'true').toLowerCase() !== 'false';
+const USE_GRAPH_CONTEXT = typeof memoryStaticConfig.useGraphContext === 'boolean'
+  ? memoryStaticConfig.useGraphContext
+  : configService.getBoolean('features.useGraphContext', true);
 
-const GRAPH_RELATIONS_LIMIT = getNumber('memory.graphContext.maxLines', parseInt(process.env.GRAPH_RELATIONS_LIMIT || '40', 10));
-const GRAPH_CONTEXT_LINE_LIMIT = getNumber('memory.graphContext.maxLineChars', parseInt(process.env.GRAPH_CONTEXT_LINE_LIMIT || '20', 10));
-const GRAPH_REQUEST_TIMEOUT_MS = getNumber('memory.graphContext.requestTimeoutMs', parseInt(process.env.GRAPH_REQUEST_TIMEOUT_MS || '10000', 10));
-const GRAPH_QUERY_HINT_MAX_CHARS = getNumber('memory.graphContext.summaryHintMaxChars', parseInt(process.env.GRAPH_QUERY_HINT_MAX_CHARS || '2000', 10));
-const RAG_QUERY_MAX_CHARS = getNumber('memory.ragQuery.maxChars', parseInt(process.env.RAG_QUERY_MAX_CHARS || '6000', 10));
+const GRAPH_RELATIONS_LIMIT = configService.getNumber('memory.graphContext.maxLines', 40);
+const GRAPH_CONTEXT_LINE_LIMIT = configService.getNumber('memory.graphContext.maxLineChars', 20);
+const GRAPH_REQUEST_TIMEOUT_MS = configService.getNumber('memory.graphContext.requestTimeoutMs', 10000);
+const GRAPH_QUERY_HINT_MAX_CHARS = configService.getNumber('memory.graphContext.summaryHintMaxChars', 2000);
+const RAG_QUERY_MAX_CHARS = configService.getNumber('memory.ragQuery.maxChars', 6000);
 
-const MEMORY_TASK_TIMEOUT_MS = getNumber('memory.queue.taskTimeoutMs', parseInt(String(process.env.MEMORY_TASK_TIMEOUT_MS ?? '30000'), 10));
+const MEMORY_TASK_TIMEOUT_MS = configService.getNumber('memory.queue.taskTimeoutMs', 30000);
 const DEFAULT_ENCODING = getString('agents.encoding.defaultTokenizerEncoding', 'o200k_base');
 
 /**
@@ -885,7 +884,7 @@ class AgentClient extends BaseClient {
     this.usage;
     this.indexTokenCountMap = {};
     this.processMemory;
-    const TRACE_PIPELINE = (process.env.TRACE_PIPELINE || 'false').toLowerCase() === 'true';
+    const TRACE_PIPELINE = configService.getBoolean('logging.tracePipeline', false);
     this.trace = (label, data = {}) => {
       try {
         if (!TRACE_PIPELINE) {
@@ -1505,7 +1504,7 @@ Graph hints: ${graphQueryHint}`;
       msg: '[config.history]',
       conversationId: this.conversationId,
       dontShrinkLastN: runtimeCfg?.history?.dontShrinkLastN,
-      historyTokenBudget: runtimeCfg?.history?.tokenBudget ?? getNumber('memory.history.tokenBudget', parseInt(process.env.HISTORY_TOKEN_BUDGET || '0', 10)),
+      historyTokenBudget: runtimeCfg?.history?.tokenBudget ?? configService.getNumber('memory.history.tokenBudget', 0),
     });
     ragCacheTtlMs = Math.max(Number(runtimeCfg?.ragCacheTtl) * 1000, 0);
     const endpointOption = this.options?.req?.body?.endpointOption ?? this.options?.endpointOption ?? {};
@@ -2404,8 +2403,8 @@ Graph hints: ${graphQueryHint}`;
           this.trace('trace:agent.run', {
             provider: agent?.provider,
             model: agent?.model_parameters?.model,
-            chainWindow: process.env.GEMINI_CHAIN_WINDOW || 'default',
-            chainBuffer: process.env.GOOGLE_CHAIN_BUFFER || 'off',
+            chainWindow: configService.get('features.geminiChainWindow', 'default'),
+            chainBuffer: configService.get('features.googleChainBuffer', 'off'),
             step: i
           });
         } catch {}
@@ -2731,9 +2730,10 @@ Graph hints: ${graphQueryHint}`;
      * @throws {Error} If title generation fails.
      */
   async titleConvo({ text, abortController }) {
-    const USE_OLLAMA_FOR_TITLES = (process.env.USE_OLLAMA_FOR_TITLES || 'false').toLowerCase() === 'true';
-    const OLLAMA_TITLE_URL = process.env.OLLAMA_TITLE_URL || process.env.OLLAMA_URL || 'http://172.16.15.219:11434';
-    const OLLAMA_TITLE_MODEL_NAME = process.env.OLLAMA_TITLE_MODEL_NAME || process.env.OLLAMA_ENTITY_EXTRACTION_MODEL_NAME || 'gemma:7b-instruct';
+    const ollamaConfig = configService.get('ollama', {});
+    const USE_OLLAMA_FOR_TITLES = configService.getBoolean('features.useOllamaForTitles', false);
+    const OLLAMA_TITLE_URL = ollamaConfig.titleUrl || ollamaConfig.url || 'http://127.0.0.1:11434';
+    const OLLAMA_TITLE_MODEL_NAME = this.options.titleModel || ollamaConfig.titleModel || 'gemma:7b-instruct';
 
     if (USE_OLLAMA_FOR_TITLES) {
         try {

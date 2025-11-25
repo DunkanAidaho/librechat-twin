@@ -29,15 +29,9 @@ const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
 const { getRedisClient } = require('~/utils/rag_redis');  // TODO: удалить после полного отказа от Redis
 
 
-const branchLoggingEnabled = configService.getBoolean(
-  'features.branchLogging',
-  (process.env.ENABLE_BRANCH_LOGGING || 'false').toLowerCase() === 'true',
-);
+const branchLoggingEnabled = configService.getBoolean('logging.branch.enabled', false);
 
-const redisMemoryQueueName = configService.get(
-  'queues.redisMemoryQueueName',
-  process.env.REDIS_MEMORY_QUEUE_NAME || null,
-);
+const redisMemoryQueueName = configService.get('queues.redisMemoryQueueName', null);
 
 const assistantClients = {
   [EModelEndpoint.azureAssistants]: require('~/server/services/Endpoints/azureAssistants'),

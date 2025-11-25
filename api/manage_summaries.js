@@ -11,16 +11,15 @@ const { logger } = require('@librechat/data-schemas');
 const configService = require('~/server/services/Config/ConfigService');
 const { enqueueSummaryTask } = require('~/utils/temporalClient');
 
-const mongoUri = configService.get('mongo.uri', process.env.MONGO_URI);
+const mongoUri = configService.get('mongo.uri');
 if (!mongoUri) {
   logger.error('[MANAGE_SUMMARIES] mongo.uri не настроен. Завершаем работу.');
   process.exit(1);
 }
 
-const summariesConfig = configService.getSection('summaries');
-const SUMMARIZATION_THRESHOLD = summariesConfig?.threshold ?? parseInt(process.env.SUMMARIZATION_THRESHOLD || '10', 10);
-const MAX_MESSAGES_PER_SUMMARY = summariesConfig?.maxMessagesPerSummary ?? parseInt(process.env.MAX_MESSAGES_PER_SUMMARY || '40', 10);
-const OVERLAP = Math.max(0, summariesConfig?.overlap ?? parseInt(process.env.SUMMARY_OVERLAP || '5', 10));
+const SUMMARIZATION_THRESHOLD = configService.getNumber('summaries.threshold', 10);
+const MAX_MESSAGES_PER_SUMMARY = configService.getNumber('summaries.maxMessagesPerSummary', 40);
+const OVERLAP = Math.max(0, configService.getNumber('summaries.overlap', 5));
 
 const messageSchema = new mongoose.Schema(
   {

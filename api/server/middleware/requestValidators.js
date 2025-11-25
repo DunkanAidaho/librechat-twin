@@ -1,6 +1,7 @@
 'use strict';
 
 const { logger } = require('@librechat/data-schemas');
+const configService = require('~/server/services/Config/ConfigService');
 
 /**
  * @typedef {import('express').Request} Request
@@ -16,7 +17,7 @@ const { logger } = require('@librechat/data-schemas');
  * @returns {number}
  */
 const getNumericEnv = (name, fallback) => {
-  const value = Number.parseInt(process.env[name] ?? '', 10);
+  const value = Number.parseInt(configService.get(`limits.request.${name}`) ?? '', 10);
   if (Number.isNaN(value) || value <= 0) {
     return fallback;
   }

@@ -5,10 +5,11 @@ const FormData = require('form-data');
 const multer = require('multer'); // ВАЖНО: свой multer, не общий
 const { requireJwtAuth } = require('~/server/middleware');
 const { logger } = require('~/config');
+const configService = require('~/server/services/Config/ConfigService');
 
 // ИЗМЕНЕНО: Теперь RAG_API_URL указывает на tools-gateway
-const TOOLS_GATEWAY_URL = process.env.TOOLS_GATEWAY_URL || 'http://10.10.23.1:8000';
-const INTERNAL_KEY = process.env.INTERNAL_RAG_PROXY_KEY || '';
+const TOOLS_GATEWAY_URL = configService.get('rag.gateway.url');
+const INTERNAL_KEY = configService.get('security.ragInternalKey', '');
 
 function internalOrJwtAuth() {
   return (req, res, next) => {
@@ -34,6 +35,12 @@ async function initialize() {
 
   // Только наша аутентификация
   router.use(internalOrJwtAuth());
+
+  if (!TOOLS_GATEWAY_URL) {
+    logger.error('[/files/rag] rag.gateway.url отсутствует в конфигурации. Запрос не может быть выполнен.');
+    router.use((_req, res) => res.status(500).json({ error: 'RAG tools gateway URL is not configured' }));
+    return router;
+  }
 
   // Свой multer: принимаем любые типы, хранение в памяти
   const upload = multer({
