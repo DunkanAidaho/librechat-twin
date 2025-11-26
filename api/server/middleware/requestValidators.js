@@ -179,7 +179,7 @@ function validateAgentRequest(req, res, next) {
     let totalSize = 0;
     files.forEach((file, index) => {
       const size = getFileSize(file, 0);
-      totalSize += size;
+      totalFilesSizeBytes += size;
 
       if (size > MAX_REQUEST_FILE_SIZE_BYTES) {
         appendIssue(
@@ -191,11 +191,11 @@ function validateAgentRequest(req, res, next) {
       }
     });
 
-    if (totalSize > MAX_REQUEST_TOTAL_FILES_SIZE_BYTES) {
+    if (totalFilesSizeBytes > MAX_REQUEST_TOTAL_FILES_SIZE_BYTES) {
       appendIssue(
         issues,
         `Суммарный размер файлов превышает лимит (${(
-          totalSize / (1024 * 1024)
+          totalFilesSizeBytes / (1024 * 1024)
         ).toFixed(2)} МБ > ${MAX_REQUEST_TOTAL_FILES_SIZE_MB} МБ).`,
       );
     }
