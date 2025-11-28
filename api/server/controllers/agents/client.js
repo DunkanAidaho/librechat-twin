@@ -64,6 +64,11 @@ const crypto = require('crypto');
 const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
 const { writeTokenReport } = require('~/utils/tokenReport');
 
+const {
+  computePromptTokenBreakdown: computePromptTokenBreakdown,
+  logPromptTokenBreakdown: logPromptTokenBreakdown
+} = require("~/server/utils/tokenBreakdown");
+
 /** @type {Map<string, { expiresAt: number, payload: object }>} */
 const ragCache = new Map();
 
@@ -294,18 +299,18 @@ function resolvePricingRates(modelName, overrideConfig) {
   return { promptUsdPer1k, completionUsdPer1k, source };
 }
 
-  /**
-   * @description Fetches graph context from tools-gateway for RAG enhancement in agent conversations.
-   * @param {Object} params - Parameters for graph context fetching.
-   * @param {string} params.conversationId - Unique identifier of the conversation.
-   * @param {string} params.toolsGatewayUrl - Base URL for the tools-gateway service.
-   * @param {number} [params.limit=GRAPH_RELATIONS_LIMIT] - Maximum number of relations to fetch.
-   * @param {number} [params.timeoutMs=GRAPH_REQUEST_TIMEOUT_MS] - Timeout for the request in milliseconds.
-   * @returns {Promise<{lines: string[], queryHint: string}|null>} Graph context data or null if skipped/failed.
-   * @throws {Error} If the request fails and cannot be handled gracefully.
-   * @example
-   * const context = await fetchGraphContext({ conversationId: '123', toolsGatewayUrl: 'http://gateway' });
-   */
+/**
+ * @description Fetches graph context from tools-gateway for RAG enhancement in agent conversations.
+ * @param {Object} params - Parameters for graph context fetching.
+ * @param {string} params.conversationId - Unique identifier of the conversation.
+ * @param {string} params.toolsGatewayUrl - Base URL for the tools-gateway service.
+ * @param {number} [params.limit=GRAPH_RELATIONS_LIMIT] - Maximum number of relations to fetch.
+ * @param {number} [params.timeoutMs=GRAPH_REQUEST_TIMEOUT_MS] - Timeout for the request in milliseconds.
+ * @returns {Promise<{lines: string[], queryHint: string}|null>} Graph context data or null if skipped/failed.
+ * @throws {Error} If the request fails and cannot be handled gracefully.
+ * @example
+ * const context = await fetchGraphContext({ conversationId: '123', toolsGatewayUrl: 'http://gateway' });
+ */
 async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAPH_RELATIONS_LIMIT, timeoutMs = GRAPH_REQUEST_TIMEOUT_MS }) {
   if (!USE_GRAPH_CONTEXT || !conversationId) {
     logger.warn('[DIAG-GRAPH] Graph context skipped', {
@@ -379,21 +384,21 @@ async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAP
   }
 }
 
-  /**
-   * @description Performs map-reduce condensation on context text for RAG using configured providers.
-   * @param {Object} params - Parameters for context condensation.
-   * @param {Object} params.req - Express request object.
-   * @param {Object} params.res - Express response object.
-   * @param {Object} params.endpointOption - Endpoint configuration options.
-   * @param {string} params.contextText - Raw context text to condense.
-   * @param {string} params.userQuery - User query for relevance scoring.
-   * @param {Object|null} [params.graphContext=null] - Optional graph context data.
-   * @param {{ budgetChars: number, chunkChars: number, provider?: string }|null} [params.summarizationConfig=null] - Summarization limits from runtime config.
-   * @returns {Promise<string>} Condensed context text.
-   * @throws {Error} If condensation fails, falls back to raw context.
-   * @example
-   * const condensed = await mapReduceContext({ req, res, endpointOption, contextText: 'long text', userQuery: 'query', summarizationConfig });
-   */
+/**
+ * @description Performs map-reduce condensation on context text for RAG using configured providers.
+ * @param {Object} params - Parameters for context condensation.
+ * @param {Object} params.req - Express request object.
+ * @param {Object} params.res - Express response object.
+ * @param {Object} params.endpointOption - Endpoint configuration options.
+ * @param {string} params.contextText - Raw context text to condense.
+ * @param {string} params.userQuery - User query for relevance scoring.
+ * @param {Object|null} [params.graphContext=null] - Optional graph context data.
+ * @param {{ budgetChars: number, chunkChars: number, provider?: string }|null} [params.summarizationConfig=null] - Summarization limits from runtime config.
+ * @returns {Promise<string>} Condensed context text.
+ * @throws {Error} If condensation fails, falls back to raw context.
+ * @example
+ * const condensed = await mapReduceContext({ req, res, endpointOption, contextText: 'long text', userQuery: 'query', summarizationConfig });
+ */
 async function mapReduceContext({
   req,
   res,
@@ -562,15 +567,15 @@ function withTimeout(promise, timeoutMs, timeoutMessage = 'Operation timed out')
  * @param {string} [logPrefix='[AgentClient]'] - Prefix for log messages.
  * @returns {{content: string, tokenCount: number}} Normalized instructions.
  */
-  /**
-   * @description Normalizes instruction payload into a consistent object format with token counting.
-   * @param {string|{content: string, tokenCount?: number}|null|undefined} rawInstructions - Raw instructions value.
-   * @param {(() => string)|string} getEncoding - Function or string describing tokenizer encoding.
-   * @param {string} [logPrefix='[AgentClient]'] - Prefix for log messages.
-   * @returns {{content: string, tokenCount: number}} Normalized instructions.
-   * @example
-   * const normalized = normalizeInstructionsPayload('instructions', 'o200k_base');
-   */
+/**
+ * @description Normalizes instruction payload into a consistent object format with token counting.
+ * @param {string|{content: string, tokenCount?: number}|null|undefined} rawInstructions - Raw instructions value.
+ * @param {(() => string)|string} getEncoding - Function or string describing tokenizer encoding.
+ * @param {string} [logPrefix='[AgentClient]'] - Prefix for log messages.
+ * @returns {{content: string, tokenCount: number}} Normalized instructions.
+ * @example
+ * const normalized = normalizeInstructionsPayload('instructions', 'o200k_base');
+ */
 function normalizeInstructionsPayload(rawInstructions, getEncoding, logPrefix = '[AgentClient]') {
   const resolveEncoding = () => {
     if (typeof getEncoding === 'function') {
@@ -656,13 +661,13 @@ function normalizeInstructionsPayload(rawInstructions, getEncoding, logPrefix = 
  * @param {{silent?: boolean}} [options] - Options for extraction.
  * @returns {string} Extracted text content.
  */
-  /**
-   * @description Extracts text content from a message object.
-   * @param {Object|null|undefined} message - The message object.
-   * @param {string} [logPrefix='[AgentClient]'] - Prefix for log messages.
-   * @param {{silent?: boolean}} [options] - Options for extraction.
-   * @returns {string} Extracted text content.
-   */
+/**
+ * @description Extracts text content from a message object.
+ * @param {Object|null|undefined} message - The message object.
+ * @param {string} [logPrefix='[AgentClient]'] - Prefix for log messages.
+ * @param {{silent?: boolean}} [options] - Options for extraction.
+ * @returns {string} Extracted text content.
+ */
 function extractMessageText(message, logPrefix = '[AgentClient]', options = {}) {
   const { silent = false } = options ?? {};
   const warn = (...args) => {
@@ -705,12 +710,12 @@ function extractMessageText(message, logPrefix = '[AgentClient]', options = {}) 
   return '';
 }
 
-  /**
-   * @description Normalizes and cleans memory text for RAG processing.
-   * @param {string|null|undefined} text - Input text to normalize.
-   * @param {string} [logPrefix='[history->RAG]'] - Prefix for log messages.
-   * @returns {string} Normalized and cleaned text.
-   */
+/**
+ * @description Normalizes and cleans memory text for RAG processing.
+ * @param {string|null|undefined} text - Input text to normalize.
+ * @param {string} [logPrefix='[history->RAG]'] - Prefix for log messages.
+ * @returns {string} Normalized and cleaned text.
+ */
 function normalizeMemoryText(text, logPrefix = '[history->RAG]') {
   if (text == null) {
     return '';
@@ -737,25 +742,25 @@ function normalizeMemoryText(text, logPrefix = '[history->RAG]') {
  * extractMessageText({ content: { foo: 'bar' } }, '[AgentClient]', { silent: true });
  */
 
-  /**
-   * @description Generates a unique ingest key for deduplication in RAG.
-   * @param {string} convId - Conversation ID.
-   * @param {string|null} msgId - Message ID, if available.
-   * @param {string} raw - Raw content for hashing if msgId is missing.
-   * @returns {string} Unique ingest key.
-   */
+/**
+ * @description Generates a unique ingest key for deduplication in RAG.
+ * @param {string} convId - Conversation ID.
+ * @param {string|null} msgId - Message ID, if available.
+ * @param {string} raw - Raw content for hashing if msgId is missing.
+ * @returns {string} Unique ingest key.
+ */
 function makeIngestKey(convId, msgId, raw) {
   if (msgId) return `ing:${convId}:${msgId}`;
   const hash = crypto.createHash('md5').update(String(raw || '')).digest('hex');
   return `ing:${convId}:${hash}`;
 }
 
-  /**
-   * @description Condenses RAG query text by deduplicating and truncating.
-   * @param {string} text - Input query text.
-   * @param {number} [limit=RAG_QUERY_MAX_CHARS] - Maximum character limit.
-   * @returns {string} Condensed query text.
-   */
+/**
+ * @description Condenses RAG query text by deduplicating and truncating.
+ * @param {string} text - Input query text.
+ * @param {number} [limit=RAG_QUERY_MAX_CHARS] - Maximum character limit.
+ * @returns {string} Condensed query text.
+ */
 function condenseRagQuery(text, limit = RAG_QUERY_MAX_CHARS) {
   if (!text) {
     return '';
@@ -791,24 +796,24 @@ function condenseRagQuery(text, limit = RAG_QUERY_MAX_CHARS) {
   return `${head}\n...\n${tail}`;
 }
 
-  /**
-   * @description Checks if the agent uses a Google/Gemini model.
-   * @param {Object} agent - Agent configuration object.
-   * @returns {boolean} True if Google/Gemini model, false otherwise.
-   */
+/**
+ * @description Checks if the agent uses a Google/Gemini model.
+ * @param {Object} agent - Agent configuration object.
+ * @returns {boolean} True if Google/Gemini model, false otherwise.
+ */
 function isGoogleModel(agent) {
   const model = agent?.model_parameters?.model || agent?.model || '';
   return agent?.provider === Providers.GOOGLE || /gemini/i.test(model);
 }
 
-  /**
-   * @description Parses model parameters based on endpoint type.
-   * @param {Object} params - Parsing parameters.
-   * @param {Object} params.req - Express request object.
-   * @param {Object} params.agent - Agent configuration.
-   * @param {string} params.endpoint - Endpoint type.
-   * @returns {Object} Parsed model parameters.
-   */
+/**
+ * @description Parses model parameters based on endpoint type.
+ * @param {Object} params - Parsing parameters.
+ * @param {Object} params.req - Express request object.
+ * @param {Object} params.agent - Agent configuration.
+ * @param {string} params.endpoint - Endpoint type.
+ * @returns {Object} Parsed model parameters.
+ */
 const payloadParser = ({ req, agent, endpoint }) => {
   if (isAgentsEndpoint(endpoint)) {
     return { model: undefined };
@@ -824,11 +829,11 @@ const payloadParser = ({ req, agent, endpoint }) => {
 
 const noSystemModelRegex = [/\b(o1-preview|o1-mini|amazon\.titan-text)\b/gi];
 
-  /**
-   * @description Creates a token counter function for messages.
-   * @param {string} encoding - Tokenizer encoding.
-   * @returns {function(Object): number} Token counting function.
-   */
+/**
+ * @description Creates a token counter function for messages.
+ * @param {string} encoding - Tokenizer encoding.
+ * @returns {function(Object): number} Token counting function.
+ */
 function createTokenCounter(encoding) {
   return function (message) {
     const countTokens = (text) => Tokenizer.getTokenCount(text, encoding);
@@ -836,13 +841,13 @@ function createTokenCounter(encoding) {
   };
 }
 
-  /**
-   * @description Logs tool errors with structured details.
-   * @param {Object} graph - Graph context.
-   * @param {Error} error - Error object.
-   * @param {string} toolId - Tool identifier.
-   * @returns {void}
-   */
+/**
+ * @description Logs tool errors with structured details.
+ * @param {Object} graph - Graph context.
+ * @param {Error} error - Error object.
+ * @param {string} toolId - Tool identifier.
+ * @returns {void}
+ */
 function logToolError(graph, error, toolId) {
   logAxiosError({
     error,
@@ -850,10 +855,10 @@ function logToolError(graph, error, toolId) {
   });
 }
 
-  /**
-   * @description Agent client for handling AI agent interactions, RAG, and tool integrations.
-   * @extends BaseClient
-   */
+/**
+ * @description Agent client for handling AI agent interactions, RAG, and tool integrations.
+ * @extends BaseClient
+ */
 class AgentClient extends BaseClient {
   constructor(options = {}) {
     super(null, options);
@@ -925,26 +930,26 @@ class AgentClient extends BaseClient {
     return this.contentParts;
   }
 
-    /**
-     * @description Sets options for the agent client and logs them.
-     * @param {Object} options - Options object to set.
-     * @returns {void}
-     */
+  /**
+   * @description Sets options for the agent client and logs them.
+   * @param {Object} options - Options object to set.
+   * @returns {void}
+   */
   setOptions(options) {
     logger.info('[api/server/controllers/agents/client.js] setOptions', options);
   }
 
-    /**
-     * @description Checks if the request involves vision capabilities (placeholder implementation).
-     * @returns {void}
-     */
+  /**
+   * @description Checks if the request involves vision capabilities (placeholder implementation).
+   * @returns {void}
+   */
   checkVisionRequest() {}
 
-    /**
-     * @description Generates save options by parsing model parameters and removing nullish values.
-     * @returns {Object} Parsed and cleaned save options.
-     * @throws {Error} If payload parsing fails.
-     */
+  /**
+   * @description Generates save options by parsing model parameters and removing nullish values.
+   * @returns {Object} Parsed and cleaned save options.
+   * @throws {Error} If payload parsing fails.
+   */
   getSaveOptions() {
     let runOptions = {};
     try {
@@ -973,10 +978,10 @@ class AgentClient extends BaseClient {
     );
   }
 
-    /**
-     * @description Returns options for building messages, including instructions.
-     * @returns {Object} Options object with instructions and additional_instructions.
-     */
+  /**
+   * @description Returns options for building messages, including instructions.
+   * @returns {Object} Options object with instructions and additional_instructions.
+   */
   getBuildMessagesOptions() {
     return {
       instructions: this.options.agent.instructions,
@@ -984,13 +989,13 @@ class AgentClient extends BaseClient {
     };
   }
 
-    /**
-     * @description Adds image URLs to the message and handles file ingestion for RAG if applicable.
-     * @param {Object} message - Message object to modify.
-     * @param {Array} attachments - Array of file attachments.
-     * @returns {Promise<Array>} Array of processed files.
-     * @throws {Error} If file encoding or task enqueueing fails.
-     */
+  /**
+   * @description Adds image URLs to the message and handles file ingestion for RAG if applicable.
+   * @param {Object} message - Message object to modify.
+   * @param {Array} attachments - Array of file attachments.
+   * @returns {Promise<Array>} Array of processed files.
+   * @throws {Error} If file encoding or task enqueueing fails.
+   */
   async addImageURLs(message, attachments) {
     const { files, text: ocrText, image_urls } = await encodeAndFormat(
       this.options.req,
@@ -1857,15 +1862,30 @@ Graph hints: ${graphQueryHint}`;
    });
  }
 
- for (let i = 0; i < messages.length; i++) {
-      this.indexTokenCountMap[i] = messages[i].tokenCount;
-    }
+    for (let i = 0; i < messages.length; i++) {
+         this.indexTokenCountMap[i] = messages[i].tokenCount;
+       }
 
     const result = {
       tokenCountMap,
       prompt: payload,
       promptTokens,
       messages,
+    };
+
+    const perMessageBreakdown = orderedMessages.map((msg, idx) => ({
+      messageId: msg?.messageId || "msg-" + (idx + 1),
+      tokens: Number(msg?.tokenCount) || 0,
+      isRagContext: msg?.metadata?.isRagContext || false
+    }));
+
+    this.promptTokenContext = {
+      conversationId: this.conversationId ?? "unknown",
+      instructionsTokens: instructions?.tokenCount || 0,
+      ragGraphTokens: this.options?.req?.ragMetrics || 0,
+      ragVectorTokens: this.options?.req?.ragMetrics || 0,
+      messages: perMessageBreakdown,
+      promptTokensEstimate: promptTokens ?? 0
     };
 
     if (promptTokens >= 0 && typeof opts?.getReqData === 'function') {
@@ -1880,12 +1900,12 @@ Graph hints: ${graphQueryHint}`;
     return result;
   }
 
-    /**
-     * @description Awaits memory processing with a timeout to prevent hanging.
-     * @param {Promise} memoryPromise - Promise for memory processing.
-     * @param {number} [timeoutMs=3000] - Timeout in milliseconds.
-     * @returns {Promise<any>} Resolved attachments or undefined on timeout/error.
-     */
+  /**
+   * @description Awaits memory processing with a timeout to prevent hanging.
+   * @param {Promise} memoryPromise - Promise for memory processing.
+   * @param {number} [timeoutMs=3000] - Timeout in milliseconds.
+   * @returns {Promise<any>} Resolved attachments or undefined on timeout/error.
+   */
   async awaitMemoryWithTimeout(memoryPromise, timeoutMs = 3000) {
     if (!memoryPromise) {
       return;
@@ -1908,11 +1928,11 @@ Graph hints: ${graphQueryHint}`;
     }
   }
 
-    /**
-     * @description Initializes and configures memory processing for the agent.
-     * @returns {Promise<Object|null>} Memory processor configuration or null if disabled/unavailable.
-     * @throws {Error} If agent loading or initialization fails.
-     */
+  /**
+   * @description Initializes and configures memory processing for the agent.
+   * @returns {Promise<Object|null>} Memory processor configuration or null if disabled/unavailable.
+   * @throws {Error} If agent loading or initialization fails.
+   */
   async useMemory() {
     const user = this.options.req.user;
     if (user.personalization?.memories === false) {
@@ -2018,11 +2038,11 @@ Graph hints: ${graphQueryHint}`;
     return withoutKeys;
   }
 
-    /**
-     * @description Filters out image URLs from message content for memory processing.
-     * @param {Object} message - Message object to filter.
-     * @returns {Object} Filtered message without image URLs.
-     */
+  /**
+   * @description Filters out image URLs from message content for memory processing.
+   * @param {Object} message - Message object to filter.
+   * @returns {Object} Filtered message without image URLs.
+   */
   removeImageContentFromMessage(message) {
     if (!message.content || typeof message.content === 'string') {
       return message;
@@ -2051,12 +2071,12 @@ Graph hints: ${graphQueryHint}`;
     return message;
   }
 
-    /**
-     * @description Processes messages through memory agent for context enhancement.
-     * @param {Array} messages - Array of messages to process.
-     * @returns {Promise<any>} Processed memory result or undefined on error.
-     * @throws {Error} If memory processing fails.
-     */
+  /**
+   * @description Processes messages through memory agent for context enhancement.
+   * @param {Array} messages - Array of messages to process.
+   * @returns {Promise<any>} Processed memory result or undefined on error.
+   * @throws {Error} If memory processing fails.
+   */
   /**
    * Анализирует последние сообщения и отправляет уникальные фрагменты в memory-агент.
    * @param {Array} messages
@@ -2095,13 +2115,13 @@ Graph hints: ${graphQueryHint}`;
     }
   }
 
-    /**
-     * @description Sends completion request and returns content parts.
-     * @param {Object} payload - Payload for completion.
-     * @param {Object} [opts] - Options including onProgress, userMCPAuthMap, abortController.
-     * @returns {Promise<Array>} Content parts from completion.
-     * @throws {Error} If chat completion fails.
-     */
+  /**
+   * @description Sends completion request and returns content parts.
+   * @param {Object} payload - Payload for completion.
+   * @param {Object} [opts] - Options including onProgress, userMCPAuthMap, abortController.
+   * @returns {Promise<Array>} Content parts from completion.
+   * @throws {Error} If chat completion fails.
+   */
   async sendCompletion(payload, opts = {}) {
     await this.chatCompletion({
       payload,
@@ -2275,20 +2295,20 @@ Graph hints: ${graphQueryHint}`;
     }
   }
 
-    /**
-     * @description Returns the current stream usage statistics.
-     * @returns {Object} Usage object with input/output tokens.
-     */
+  /**
+   * @description Returns the current stream usage statistics.
+   * @returns {Object} Usage object with input/output tokens.
+   */
   getStreamUsage() {
     return this.usage;
   }
 
-    /**
-     * @description Calculates token count for assistant response content.
-     * @param {Object} params - Response parameters.
-     * @param {string} params.content - Response content.
-     * @returns {number} Token count.
-     */
+  /**
+   * @description Calculates token count for assistant response content.
+   * @param {Object} params - Response parameters.
+   * @param {string} params.content - Response content.
+   * @returns {number} Token count.
+   */
   getTokenCountForResponse({ content }) {
     return this.getTokenCountForMessage({
       role: 'assistant',
@@ -2296,14 +2316,14 @@ Graph hints: ${graphQueryHint}`;
     });
   }
 
-    /**
-     * @description Calculates current message token count from usage and map.
-     * @param {Object} params - Calculation parameters.
-     * @param {Object} params.tokenCountMap - Map of token counts.
-     * @param {string} params.currentMessageId - Current message ID.
-     * @param {Object} params.usage - Usage statistics.
-     * @returns {number} Calculated token count.
-     */
+  /**
+   * @description Calculates current message token count from usage and map.
+   * @param {Object} params - Calculation parameters.
+   * @param {Object} params.tokenCountMap - Map of token counts.
+   * @param {string} params.currentMessageId - Current message ID.
+   * @param {Object} params.usage - Usage statistics.
+   * @returns {number} Calculated token count.
+   */
   calculateCurrentTokenCount({ tokenCountMap, currentMessageId, usage }) {
     const originalEstimate = tokenCountMap[currentMessageId] || 0;
 
@@ -2322,15 +2342,15 @@ Graph hints: ${graphQueryHint}`;
     return currentMessageTokens > 0 ? currentMessageTokens : originalEstimate;
   }
 
-    /**
-     * @description Executes chat completion with agent processing, streaming, and tool handling.
-     * @param {Object} params - Completion parameters.
-     * @param {Object} params.payload - Payload for completion.
-     * @param {Object} [params.userMCPAuthMap] - MCP authentication map.
-     * @param {AbortController} [params.abortController] - Abort controller for cancellation.
-     * @returns {Promise<void>}
-     * @throws {Error} If agent run or processing fails.
-     */
+  /**
+   * @description Executes chat completion with agent processing, streaming, and tool handling.
+   * @param {Object} params - Completion parameters.
+   * @param {Object} params.payload - Payload for completion.
+   * @param {Object} [params.userMCPAuthMap] - MCP authentication map.
+   * @param {AbortController} [params.abortController] - Abort controller for cancellation.
+   * @returns {Promise<void>}
+   * @throws {Error} If agent run or processing fails.
+   */
   async chatCompletion({ payload, userMCPAuthMap, abortController = null }) {
     let config;
     let run;
@@ -2721,14 +2741,14 @@ Graph hints: ${graphQueryHint}`;
     }
   }
 
-    /**
-     * @description Generates a conversation title using Ollama or fallback.
-     * @param {Object} params - Title generation parameters.
-     * @param {string} params.text - Text to base title on.
-     * @param {AbortController} params.abortController - Abort controller.
-     * @returns {Promise<string>} Generated title.
-     * @throws {Error} If title generation fails.
-     */
+  /**
+   * @description Generates a conversation title using Ollama or fallback.
+   * @param {Object} params - Title generation parameters.
+   * @param {string} params.text - Text to base title on.
+   * @param {AbortController} params.abortController - Abort controller.
+   * @returns {Promise<string>} Generated title.
+   * @throws {Error} If title generation fails.
+   */
   async titleConvo({ text, abortController }) {
     const ollamaConfig = configService.get('ollama', {});
     const USE_OLLAMA_FOR_TITLES = configService.getBoolean('features.useOllamaForTitles', false);
@@ -2811,10 +2831,10 @@ Graph hints: ${graphQueryHint}`;
     }
   }
 
-    /**
-     * @description Returns the tokenizer encoding based on model.
-     * @returns {string} Encoding name (e.g., 'cl100k_base' or 'o200k_base').
-     */
+  /**
+   * @description Returns the tokenizer encoding based on model.
+   * @returns {string} Encoding name (e.g., 'cl100k_base' or 'o200k_base').
+   */
   getEncoding() {
     const model = this.options?.agent?.model_parameters?.model || this.model;
     if (model && /gemini/i.test(model)) {
@@ -2823,14 +2843,61 @@ Graph hints: ${graphQueryHint}`;
     return 'o200k_base'; // Для GPT-4o
   }
 
-    /**
-     * @description Counts tokens in the given text using the current encoding.
-     * @param {string} text - Text to count tokens for.
-     * @returns {number} Token count.
-     */
+  /**
+   * @description Counts tokens in the given text using the current encoding.
+   * @param {string} text - Text to count tokens for.
+   * @returns {number} Token count.
+   */
   getTokenCount(text) {
     const encoding = this.getEncoding();
     return Tokenizer.getTokenCount(text, encoding);
+  }
+  promptTokenContext;
+  promptTokenBreakdown;
+
+  emitPromptTokenBreakdown(
+    {
+      promptTokens: promptTokens,
+      cacheRead: cacheRead = 0,
+      cacheWrite: cacheWrite = 0,
+      reasoningTokens: reasoningTokens = 0
+    }
+  ) {
+    if (!this.promptTokenContext) {
+      return;
+    }
+
+    const breakdown = computePromptTokenBreakdown({
+      conversationId: this.promptTokenContext.conversationId,
+      promptTokens: promptTokens ?? (this.promptTokenContext.promptTokensEstimate ?? 0),
+      instructionsTokens: this.promptTokenContext.instructionsTokens,
+      ragGraphTokens: this.promptTokenContext.ragGraphTokens,
+      ragVectorTokens: this.promptTokenContext.ragVectorTokens,
+      messages: this.promptTokenContext.messages,
+
+      cache: {
+        read: cacheRead,
+        write: cacheWrite
+      },
+
+      reasoningTokens: reasoningTokens
+    });
+
+    this.promptTokenBreakdown = breakdown;
+
+    if (this.options) {
+      this.options.req = this.options && this.options;
+    }
+
+    if (configService.get("logging.tokenBreakdown", {
+      enabled: true,
+      level: "info"
+    }).enabled) {
+      logPromptTokenBreakdown(logger, breakdown, configService.get("logging.tokenBreakdown", {
+        enabled: true,
+        level: "info"
+      }).level || "info");
+    }
   }
 }
 

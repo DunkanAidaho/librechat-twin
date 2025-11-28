@@ -117,6 +117,7 @@ class ConfigService {
     this.env = env;
     this.schemas = this.#buildSchemas();
     this.cache = new Map();
+    this.missingDefaults = new Set();
     this.reloadAll();
     this.#assertCritical();
   }
@@ -311,6 +312,9 @@ class ConfigService {
       url: z.string().min(1).optional(),
       refreshIntervalSec: z.number().int().positive().optional(),
       cachePath: z.string().min(1).optional(),
+    });
+    const securitySchema = z.object({
+      ragInternalKey: z.string().optional(),
     });
     const limitsSchema = z.object({
       request: z.record(z.number().int().positive()).optional(),
@@ -715,6 +719,12 @@ class ConfigService {
           };
         },
       },
+      security: {
+        schema: securitySchema,
+        loader: () => ({
+          ragInternalKey: sanitizeOptionalString(this.env.INTERNAL_RAG_PROXY_KEY) || '',
+        }),
+      },
       features: {
         schema: featuresSchema,
         loader: () => ({
@@ -987,17 +997,18 @@ class ConfigService {
     try {
       value = this.getSection(sectionName);
     } catch {
-      return defaultValue;
+      return this.#useDefault(path, defaultValue);
     }
 
     for (const key of rest) {
-      if (value == null) {
-        return defaultValue;
-      }
-      if (typeof value !== 'object' || !(key in value)) {
-        return defaultValue;
+      if (value == null || typeof value !== 'object' || !(key in value)) {
+        return this.#useDefault(path, defaultValue);
       }
       value = value[key];
+    }
+
+    if (value === undefined) {
+      return this.#useDefault(path, defaultValue);
     }
 
     return value ?? defaultValue;
@@ -1045,6 +1056,16 @@ class ConfigService {
 
   listSections() {
     return Object.keys(this.schemas);
+  }
+
+  #useDefault(path, defaultValue) {
+    if (!this.missingDefaults.has(path)) {
+      this.missingDefaults.add(path);
+      logger.warn(
+        `[ConfigService] Value for "${path}" is missing; falling back to default (${JSON.stringify(defaultValue)})`,
+      );
+    }
+    return defaultValue;
   }
 
   #assertCritical() {
