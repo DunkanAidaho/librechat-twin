@@ -1,0 +1,32 @@
+# конфигурации и секреты
+.env
+.env.*
+.env_*
+
+# патчи и временные файлы
+*.patch
+*.bak
+*.bak_*
+*[0-9]
+*[0-9][0-9][0-9]
+*.yml
+Dockerfile.librechat
+
+# каталоги резервных копий, логов, данных
+backup/
+backups/
+logs/
+data/
+neo4j/
+redis/
+gcp/
+haproxy/
+scripts/
+temporal/
+tests/
+
+# docker и вспомогательные артефакты
+tools-gateway/services/context_manager.py.bak*
+tools-gateway/services/metrics.py.bak*
+
+docker-compose.yml
