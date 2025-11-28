@@ -15,9 +15,8 @@ const {
   resolveHeaders,
   getBalanceConfig,
   memoryInstructions,
-  formatContentStrings,
   getTransactionsConfig,
-  createMemoryProcessor,
+  createMemoryProcessor
 } = require('@librechat/api');
 const {
   Callback,
@@ -28,7 +27,10 @@ const {
   formatAgentMessages,
   getTokenCountForMessage,
   createMetadataAggregator,
+  formatContentStrings
 } = require('@librechat/agents');
+logger.info('[DEBUG] client.js module loaded successfully');
+logger.info('[DEBUG] client.js module loaded successfully');
 const {
   Constants,
   Permissions,
@@ -39,7 +41,7 @@ const {
   isAgentsEndpoint,
   AgentCapabilities,
   bedrockInputSchema,
-  removeNullishValues,
+  removeNullishValues
 } = require('librechat-data-provider');
 const { addCacheControl, createContextHandlers } = require('~/app/clients/prompts');
 const { initializeAgent } = require('~/server/services/Endpoints/agents/agent');
@@ -58,7 +60,7 @@ const {
   observeSegmentTokens,
   observeCache,
   observeCost,
-  setContextLength,
+  setContextLength
 } = require('~/utils/ragMetrics');
 const crypto = require('crypto');
 const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
@@ -69,7 +71,7 @@ const {
   logPromptTokenBreakdown: logPromptTokenBreakdown
 } = require("~/server/utils/tokenBreakdown");
 
-/** @type {Map<string, { expiresAt: number, payload: object }>} */
+/** @type {Map<string, { expiresAt: number, payload: object }>} */const { analyzeTokenization } = require('~/server/utils/tokenBreakdown');const logTokenizationForProvider = (providerKey, rawRequest = {}, metadata = {}) => {if (!providerKey) {return;}if (!configService || typeof configService.getTokenizationLogSettings !== 'function') {return;}const tokenizationSettings = configService.getTokenizationLogSettings();if (!tokenizationSettings || tokenizationSettings.enabled !== true) {return;}const preparedRequest = rawRequest && typeof rawRequest === 'object' ? rawRequest : {};const originalMessages = Array.isArray(preparedRequest.messages) ? preparedRequest.messages.filter(Boolean) : [];let systemPayload = preparedRequest.system;let messagesForAnalysis = originalMessages.slice();if (!systemPayload && messagesForAnalysis.length > 0 && messagesForAnalysis[0] && messagesForAnalysis[0].role === 'system') {const [systemMessage, ...restMessages] = messagesForAnalysis;systemPayload = systemMessage && Object.prototype.hasOwnProperty.call(systemMessage, 'content') ? systemMessage.content : systemMessage;messagesForAnalysis = restMessages;}const analysis = analyzeTokenization({ system: systemPayload, messages: messagesForAnalysis }, tokenizationSettings);const logPayload = { provider: providerKey, detailLevel: analysis.detailLevel, total: analysis.total, components: analysis.components, includePrompt: tokenizationSettings.includePrompt, includeMessages: tokenizationSettings.includeMessages, ...metadata };if (Array.isArray(analysis.errors) && analysis.errors.length > 0) {logPayload.errors = analysis.errors;}logger.info(`[tokenization.${providerKey}]`, logPayload);};
 const ragCache = new Map();
 
 /** @type {number} */
@@ -94,12 +96,12 @@ function pruneExpiredRagCache(now = Date.now()) {
  */
 function hashPayload(payload) {
   const normalized =
-    typeof payload === 'string'
-      ? payload
-      : JSON.stringify(
-          payload ?? '',
-          (_, value) => (typeof value === 'bigint' ? value.toString() : value),
-        );
+  typeof payload === 'string' ?
+  payload :
+  JSON.stringify(
+    payload ?? '',
+    (_, value) => typeof value === 'bigint' ? value.toString() : value
+  );
 
   return crypto.createHash('sha1').update(normalized ?? '').digest('hex');
 }
@@ -120,7 +122,7 @@ function createCacheKey({ conversationId, endpoint, model, queryHash, configHash
     endpoint,
     model,
     queryHash,
-    configHash,
+    configHash
   });
 }
 
@@ -136,15 +138,15 @@ function sanitizeGraphContext(lines, config) {
   }
 
   const limited = lines.slice(0, config.maxLines);
-  return limited
-    .map((line) => (typeof line === 'string' ? line.trim() : ''))
-    .filter(Boolean)
-    .map((line) => {
-      if (line.length <= config.maxLineChars) {
-        return line;
-      }
-      return `${line.slice(0, config.maxLineChars)}…`;
-    });
+  return limited.
+  map((line) => typeof line === 'string' ? line.trim() : '').
+  filter(Boolean).
+  map((line) => {
+    if (line.length <= config.maxLineChars) {
+      return line;
+    }
+    return `${line.slice(0, config.maxLineChars)}…`;
+  });
 }
 
 /**
@@ -206,7 +208,7 @@ function resolvePricingRates(modelName, overrideConfig) {
       const modelPricing = modelsConfig[modelName] || modelsConfig.default;
       if (modelPricing && typeof modelPricing === 'object') {
         const promptCandidate = parseUsdRate(
-          modelPricing.prompt ?? modelPricing.input ?? modelPricing.promptUsdPer1k,
+          modelPricing.prompt ?? modelPricing.input ?? modelPricing.promptUsdPer1k
         );
         if (promptCandidate != null) {
           promptUsdPer1k = promptCandidate;
@@ -214,7 +216,7 @@ function resolvePricingRates(modelName, overrideConfig) {
         }
 
         const completionCandidate = parseUsdRate(
-          modelPricing.completion ?? modelPricing.output ?? modelPricing.completionUsdPer1k,
+          modelPricing.completion ?? modelPricing.output ?? modelPricing.completionUsdPer1k
         );
         if (completionCandidate != null) {
           completionUsdPer1k = completionCandidate;
@@ -243,7 +245,7 @@ function resolvePricingRates(modelName, overrideConfig) {
     if (modelPricing && typeof modelPricing === 'object') {
       if (promptUsdPer1k == null) {
         const promptCandidate = parseUsdRate(
-          modelPricing.prompt ?? modelPricing.input ?? modelPricing.promptUsdPer1k,
+          modelPricing.prompt ?? modelPricing.input ?? modelPricing.promptUsdPer1k
         );
         if (promptCandidate != null) {
           promptUsdPer1k = promptCandidate;
@@ -253,7 +255,7 @@ function resolvePricingRates(modelName, overrideConfig) {
 
       if (completionUsdPer1k == null) {
         const completionCandidate = parseUsdRate(
-          modelPricing.completion ?? modelPricing.output ?? modelPricing.completionUsdPer1k,
+          modelPricing.completion ?? modelPricing.output ?? modelPricing.completionUsdPer1k
         );
         if (completionCandidate != null) {
           completionUsdPer1k = completionCandidate;
@@ -315,7 +317,7 @@ async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAP
   if (!USE_GRAPH_CONTEXT || !conversationId) {
     logger.warn('[DIAG-GRAPH] Graph context skipped', {
       useGraphContext: USE_GRAPH_CONTEXT,
-      conversationId,
+      conversationId
     });
     return null;
   }
@@ -326,7 +328,7 @@ async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAP
   logger.info('[DIAG-GRAPH] Fetching graph context', {
     conversationId,
     toolsGatewayUrl,
-    limit,
+    limit
   });
 
   try {
@@ -339,7 +341,7 @@ async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAP
       conversationId,
       url,
       linesCount: lines.length,
-      hasHint: Boolean(queryHint),
+      hasHint: Boolean(queryHint)
     });
 
     if (!lines.length && !queryHint) {
@@ -348,7 +350,7 @@ async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAP
 
     return {
       lines: lines.slice(0, GRAPH_CONTEXT_LINE_LIMIT),
-      queryHint,
+      queryHint
     };
   } catch (error) {
     const serializedError = {
@@ -357,14 +359,14 @@ async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAP
       stack: error?.stack,
       responseStatus: error?.response?.status,
       responseData: error?.response?.data,
-      requestConfig: error?.config
-        ? {
-            url: error.config.url,
-            method: error.config.method,
-            timeout: error.config.timeout,
-            data: error.config.data,
-          }
-        : null,
+      requestConfig: error?.config ?
+      {
+        url: error.config.url,
+        method: error.config.method,
+        timeout: error.config.timeout,
+        data: error.config.data
+      } :
+      null
     };
 
     logger.error('[DIAG-GRAPH] Failed to fetch graph context', serializedError);
@@ -374,11 +376,11 @@ async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAP
         logger.error('[DIAG-GRAPH] Axios error JSON', error.toJSON());
       }
     } catch (jsonErr) {
-        logger.warn('[DIAG-GRAPH] Failed to serialize axios error', {
-          message: jsonErr?.message,
-          stack: jsonErr?.stack,
-        });
-      }
+      logger.warn('[DIAG-GRAPH] Failed to serialize axios error', {
+        message: jsonErr?.message,
+        stack: jsonErr?.stack
+      });
+    }
 
     return null;
   }
@@ -406,29 +408,29 @@ async function mapReduceContext({
   contextText,
   userQuery,
   graphContext = null,
-  summarizationConfig = null,
+  summarizationConfig = null
 }) {
   const providersPreview = getCondenseProvidersPreview();
   logger.info('[rag.context.summarize.start]', {
     contextLength: contextText.length,
-    providersPreview,
+    providersPreview
   });
 
   const defaults = {
     budgetChars: 12000,
-    chunkChars: 20000,
+    chunkChars: 20000
   };
 
   const {
     budgetChars: cfgBudget,
     chunkChars: cfgChunk,
-    provider: cfgProvider,
+    provider: cfgProvider
   } = summarizationConfig ?? defaults;
 
   const budgetChars =
-    Number.isFinite(cfgBudget) && cfgBudget > 0 ? Number(cfgBudget) : defaults.budgetChars;
+  Number.isFinite(cfgBudget) && cfgBudget > 0 ? Number(cfgBudget) : defaults.budgetChars;
   const chunkChars =
-    Number.isFinite(cfgChunk) && cfgChunk > 0 ? Number(cfgChunk) : defaults.chunkChars;
+  Number.isFinite(cfgChunk) && cfgChunk > 0 ? Number(cfgChunk) : defaults.chunkChars;
   const provider = cfgProvider && typeof cfgProvider === 'string' ? cfgProvider : undefined;
 
   try {
@@ -441,7 +443,7 @@ async function mapReduceContext({
       graphContext,
       budgetChars,
       chunkChars,
-      provider,
+      provider
     });
 
     logger.info('[rag.context.summarize.complete]', {
@@ -449,14 +451,14 @@ async function mapReduceContext({
       finalLength: finalContext.length,
       budgetChars,
       chunkChars,
-      provider,
+      provider
     });
 
     return finalContext;
   } catch (error) {
     logger.error('[rag.context.summarize.error]', {
       message: error?.message,
-      stack: error?.stack,
+      stack: error?.stack
     });
 
     return contextText;
@@ -464,16 +466,16 @@ async function mapReduceContext({
 }
 
 const omitTitleOptions = new Set([
-  'stream',
-  'thinking',
-  'streaming',
-  'clientOptions',
-  'thinkingConfig',
-  'thinkingBudget',
-  'includeThoughts',
-  'maxOutputTokens',
-  'additionalModelRequestFields',
-]);
+'stream',
+'thinking',
+'streaming',
+'clientOptions',
+'thinkingConfig',
+'thinkingBudget',
+'includeThoughts',
+'maxOutputTokens',
+'additionalModelRequestFields']
+);
 
 const featuresConfig = configService.getSection('features');
 const memoryStaticConfig = configService.getSection('memory');
@@ -500,9 +502,9 @@ const ASSIST_SNIPPET_CHARS = configService.getNumber('rag.history.assistSnippetC
 const GOOGLE_CHAIN_BUFFER = (configService.get('features.googleChainBuffer', 'off') || 'off').toLowerCase();
 const GEMINI_CHAIN_WINDOW = configService.getNumber('features.geminiChainWindow', 5);
 
-const USE_GRAPH_CONTEXT = typeof memoryStaticConfig.useGraphContext === 'boolean'
-  ? memoryStaticConfig.useGraphContext
-  : configService.getBoolean('features.useGraphContext', true);
+const USE_GRAPH_CONTEXT = typeof memoryStaticConfig.useGraphContext === 'boolean' ?
+memoryStaticConfig.useGraphContext :
+configService.getBoolean('features.useGraphContext', true);
 
 const GRAPH_RELATIONS_LIMIT = configService.getNumber('memory.graphContext.maxLines', 40);
 const GRAPH_CONTEXT_LINE_LIMIT = configService.getNumber('memory.graphContext.maxLineChars', 20);
@@ -525,7 +527,7 @@ const createSafeLogger = () => {
   return {
     info: typeof logger.info === 'function' ? logger.info.bind(logger) : noop,
     warn: typeof logger.warn === 'function' ? logger.warn.bind(logger) : noop,
-    error: typeof logger.error === 'function' ? logger.error.bind(logger) : noop,
+    error: typeof logger.error === 'function' ? logger.error.bind(logger) : noop
   };
 };
 
@@ -546,14 +548,14 @@ function withTimeout(promise, timeoutMs, timeoutMessage = 'Operation timed out')
 
   let timer;
   return Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      timer = setTimeout(
-        () => reject(new Error(`${timeoutMessage} after ${timeoutMs} ms`)),
-        timeoutMs,
-      );
-    }),
-  ]).finally(() => clearTimeout(timer));
+  promise,
+  new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${timeoutMessage} after ${timeoutMs} ms`)),
+      timeoutMs
+    );
+  })]
+  ).finally(() => clearTimeout(timer));
 }
 
 /* Example withTimeout usage:
@@ -624,12 +626,12 @@ function normalizeInstructionsPayload(rawInstructions, getEncoding, logPrefix = 
     const tokenCount = computeTokens(rawInstructions.content);
     if (rawInstructions.tokenCount !== tokenCount) {
       safeInfo(
-        `${logPrefix} Recomputed instruction tokens. Length: ${rawInstructions.content.length}, Tokens: ${tokenCount}`,
+        `${logPrefix} Recomputed instruction tokens. Length: ${rawInstructions.content.length}, Tokens: ${tokenCount}`
       );
     }
     return {
       content: rawInstructions.content,
-      tokenCount,
+      tokenCount
     };
   }
 
@@ -640,11 +642,11 @@ function normalizeInstructionsPayload(rawInstructions, getEncoding, logPrefix = 
 
   const tokenCount = computeTokens(rawInstructions);
   safeInfo(
-    `${logPrefix} Converted string instructions. Length: ${rawInstructions.length}, Tokens: ${tokenCount}`,
+    `${logPrefix} Converted string instructions. Length: ${rawInstructions.length}, Tokens: ${tokenCount}`
   );
   return {
     content: rawInstructions,
-    tokenCount,
+    tokenCount
   };
 }
 
@@ -701,10 +703,10 @@ function extractMessageText(message, logPrefix = '[AgentClient]', options = {}) 
   }
 
   if (Array.isArray(message.content)) {
-    return message.content
-      .filter((part) => part && part.type === 'text' && part.text != null && typeof part.text === 'string')
-      .map((part) => part.text)
-      .join('\n');
+    return message.content.
+    filter((part) => part && part.type === 'text' && part.text != null && typeof part.text === 'string').
+    map((part) => part.text).
+    join('\n');
   }
 
   return '';
@@ -766,10 +768,10 @@ function condenseRagQuery(text, limit = RAG_QUERY_MAX_CHARS) {
     return '';
   }
 
-  const normalized = text
-    .replace(/\r\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  const normalized = text.
+  replace(/\r\n/g, '\n').
+  replace(/\n{3,}/g, '\n\n').
+  trim();
 
   if (!normalized) {
     return '';
@@ -851,7 +853,7 @@ function createTokenCounter(encoding) {
 function logToolError(graph, error, toolId) {
   logAxiosError({
     error,
-    message: `[api/server/controllers/agents/client.js #chatCompletion] Tool Error "${toolId}"`,
+    message: `[api/server/controllers/agents/client.js #chatCompletion] Tool Error "${toolId}"`
   });
 }
 
@@ -877,6 +879,7 @@ class AgentClient extends BaseClient {
     } = options;
 
     this.agentConfigs = agentConfigs;
+    logger.info('[DEBUG-constructor] agentConfigs', { type: typeof agentConfigs, isMap: agentConfigs instanceof Map, keys: agentConfigs ? Object.keys(agentConfigs).slice(0, 3) : null });
     this.maxContextTokens = maxContextTokens;
     if (!this.maxContextTokens) this.maxContextTokens = 32000;
     this.contentParts = contentParts;
@@ -899,7 +902,7 @@ class AgentClient extends BaseClient {
           label,
           cid: this.conversationId,
           rid: this.responseMessageId,
-          pid: process.pid,
+          pid: process.pid
         };
         const safe = (v) => {
           try {
@@ -957,7 +960,7 @@ class AgentClient extends BaseClient {
     } catch (error) {
       logger.error(
         '[api/server/controllers/agents/client.js #getSaveOptions] Error parsing options',
-        error,
+        error
       );
     }
 
@@ -971,10 +974,10 @@ class AgentClient extends BaseClient {
           resendFiles: this.options.resendFiles,
           imageDetail: this.options.imageDetail,
           spec: this.options.spec,
-          iconURL: this.options.iconURL,
+          iconURL: this.options.iconURL
         },
-        runOptions,
-      ),
+        runOptions
+      )
     );
   }
 
@@ -985,7 +988,7 @@ class AgentClient extends BaseClient {
   getBuildMessagesOptions() {
     return {
       instructions: this.options.agent.instructions,
-      additional_instructions: this.options.agent.additional_instructions,
+      additional_instructions: this.options.agent.additional_instructions
     };
   }
 
@@ -1001,7 +1004,7 @@ class AgentClient extends BaseClient {
       this.options.req,
       attachments,
       this.options.agent.provider,
-      VisionModes.agents,
+      VisionModes.agents
     );
 
     const convId = this.options.req.body.conversationId;
@@ -1026,8 +1029,8 @@ class AgentClient extends BaseClient {
             text_content: ocrText,
             source_filename: file.originalname || file.filename || null,
             mime_type: file.type || null,
-            file_size: file.size || null,
-          },
+            file_size: file.size || null
+          }
         };
 
         try {
@@ -1039,17 +1042,17 @@ class AgentClient extends BaseClient {
                 conversationId: convId,
                 userId,
                 fileId: file.file_id,
-                textLength: ocrText.length,
-              },
+                textLength: ocrText.length
+              }
             ),
             MEMORY_TASK_TIMEOUT_MS,
-            'Memory indexing timed out',
+            'Memory indexing timed out'
           );
         } catch (queueError) {
           safeError('[file-ingest] Failed to enqueue memory task', {
             conversationId: convId,
             fileId: file.file_id,
-            message: queueError?.message,
+            message: queueError?.message
           });
         }
       }
@@ -1078,7 +1081,7 @@ class AgentClient extends BaseClient {
     runtimeCfg,
     req,
     res,
-    endpointOption,
+    endpointOption
   }) {
     ragCacheTtlMs = Math.max(Number(runtimeCfg.ragCacheTtl) * 1000, 0);
     const conversationId = this.conversationId;
@@ -1090,13 +1093,13 @@ class AgentClient extends BaseClient {
       logger.info('[rag.context.skip]', {
         conversationId,
         reason: 'disabled_or_empty_query',
-        enableMemoryCache: runtimeCfg.enableMemoryCache,
+        enableMemoryCache: runtimeCfg.enableMemoryCache
       });
       return {
         patchedSystemContent: systemContent,
         contextLength: 0,
         cacheStatus: 'skipped',
-        metrics: {},
+        metrics: {}
       };
     }
 
@@ -1119,7 +1122,7 @@ class AgentClient extends BaseClient {
     const configHash = hashPayload({
       graph: runtimeCfg.graphContext,
       vector: runtimeCfg.vectorContext,
-      summarization: runtimeCfg.summarization,
+      summarization: runtimeCfg.summarization
     });
 
     const cacheKey = createCacheKey({
@@ -1127,7 +1130,7 @@ class AgentClient extends BaseClient {
       endpoint: endpointOption?.endpoint || this.options?.endpoint,
       model: endpointOption?.model || this.options?.model,
       queryHash,
-      configHash,
+      configHash
     });
 
     const metrics = {
@@ -1136,7 +1139,7 @@ class AgentClient extends BaseClient {
       contextTokens: 0,
       graphLines: 0,
       vectorChunks: 0,
-      queryTokens: queryTokenCount,
+      queryTokens: queryTokenCount
     };
 
     let contextLength = 0;
@@ -1157,7 +1160,7 @@ class AgentClient extends BaseClient {
           patchedSystemContent: cached.systemContent,
           contextLength: cached.contextLength,
           cacheStatus,
-          metrics: cachedMetrics,
+          metrics: cachedMetrics
         };
       }
 
@@ -1170,7 +1173,7 @@ class AgentClient extends BaseClient {
       logger.info('[rag.context.cache.skip]', {
         conversationId,
         cacheKey,
-        reason: 'cache_disabled',
+        reason: 'cache_disabled'
       });
     }
 
@@ -1189,7 +1192,7 @@ class AgentClient extends BaseClient {
           conversationId,
           toolsGatewayUrl,
           limit: graphLimits.maxLines,
-          timeoutMs: toolsGatewayTimeout,
+          timeoutMs: toolsGatewayTimeout
         });
 
         rawGraphLinesCount = Array.isArray(graphContext?.lines) ? graphContext.lines.length : 0;
@@ -1197,7 +1200,7 @@ class AgentClient extends BaseClient {
         if (graphContext?.lines?.length) {
           graphContextLines = sanitizeGraphContext(graphContext.lines, {
             maxLines: graphLimits.maxLines,
-            maxLineChars: graphLimits.maxLineChars,
+            maxLineChars: graphLimits.maxLineChars
           });
 
           if (rawGraphLinesCount > graphContextLines.length && graphLimits.maxLines) {
@@ -1207,9 +1210,9 @@ class AgentClient extends BaseClient {
           }
 
           if (
-            graphContextLines.some((line) => line.endsWith('…')) &&
-            graphLimits.maxLineChars
-          ) {
+          graphContextLines.some((line) => line.endsWith('…')) &&
+          graphLimits.maxLineChars)
+          {
             logger.info(
               `[rag.context.limit] conversation=${conversationId} param=memory.graphContext.maxLineChars limit=${graphLimits.maxLineChars}`
             );
@@ -1224,16 +1227,16 @@ class AgentClient extends BaseClient {
           const trimmedHint = graphContext.queryHint.trim();
           if (trimmedHint) {
             if (
-              graphLimits.summaryHintMaxChars &&
-              trimmedHint.length > graphLimits.summaryHintMaxChars
-            ) {
+            graphLimits.summaryHintMaxChars &&
+            trimmedHint.length > graphLimits.summaryHintMaxChars)
+            {
               logger.info(
                 `[rag.context.limit] conversation=${conversationId} param=memory.graphContext.summaryHintMaxChars limit=${graphLimits.summaryHintMaxChars} original=${trimmedHint.length}`
               );
             }
             graphQueryHint = trimmedHint.slice(
               0,
-              graphLimits.summaryHintMaxChars || trimmedHint.length,
+              graphLimits.summaryHintMaxChars || trimmedHint.length
             );
           }
         }
@@ -1241,13 +1244,13 @@ class AgentClient extends BaseClient {
         logger.error('[rag.context.graph.error]', {
           conversationId,
           message: error?.message,
-          stack: error?.stack,
+          stack: error?.stack
         });
       }
     } else {
       logger.warn('[rag.context.graph.skip]', {
         conversationId,
-        reason: 'tools_gateway_missing',
+        reason: 'tools_gateway_missing'
       });
     }
 
@@ -1265,7 +1268,7 @@ Graph hints: ${graphQueryHint}`;
       logger.info('[rag.context.query.condensed]', {
         conversationId,
         originalLength: ragSearchQuery.length,
-        condensedLength: condensedQuery.length,
+        condensedLength: condensedQuery.length
       });
     }
     ragSearchQuery = condensedQuery;
@@ -1282,20 +1285,20 @@ Graph hints: ${graphQueryHint}`;
             top_k: vectorLimits.topK,
             embedding_model: vectorLimits.embeddingModel,
             conversation_id: conversationId,
-            user_id: req?.user?.id,
+            user_id: req?.user?.id
           },
-          { timeout: toolsGatewayTimeout },
+          { timeout: toolsGatewayTimeout }
         );
 
-        const rawChunks = Array.isArray(response?.data?.results)
-          ? response.data.results.map((item) => item?.content ?? '').filter(Boolean)
-          : [];
+        const rawChunks = Array.isArray(response?.data?.results) ?
+        response.data.results.map((item) => item?.content ?? '').filter(Boolean) :
+        [];
 
         rawVectorResults = rawChunks.length;
 
         vectorChunks = sanitizeVectorChunks(rawChunks, {
           maxChunks: vectorLimits.maxChunks,
-          maxChars: vectorLimits.maxChars,
+          maxChars: vectorLimits.maxChars
         });
 
         logger.info(
@@ -1309,9 +1312,9 @@ Graph hints: ${graphQueryHint}`;
         }
 
         if (
-          vectorChunks.some((chunk) => chunk.endsWith('…')) &&
-          vectorLimits.maxChars
-        ) {
+        vectorChunks.some((chunk) => chunk.endsWith('…')) &&
+        vectorLimits.maxChars)
+        {
           logger.info(
             `[rag.context.limit] conversation=${conversationId} param=memory.vectorContext.maxChars limit=${vectorLimits.maxChars}`
           );
@@ -1320,13 +1323,13 @@ Graph hints: ${graphQueryHint}`;
         logger.error('[rag.context.vector.error]', {
           conversationId,
           message: error?.message,
-          stack: error?.stack,
+          stack: error?.stack
         });
       }
     } else {
       logger.warn('[rag.context.vector.skip]', {
         conversationId,
-        reason: 'tools_gateway_missing',
+        reason: 'tools_gateway_missing'
       });
     }
 
@@ -1334,10 +1337,10 @@ Graph hints: ${graphQueryHint}`;
 
     const hasGraph = graphContextLines.length > 0;
     const policyIntro =
-      'Ниже предоставлен внутренний контекст для твоего сведения: граф знаний и выдержки из беседы. ' +
-      'Используй эти данные для формирования точного и полного ответа. ' +
-      'Категорически запрещается цитировать или пересказывать этот контекст, особенно строки, содержащие "-->". ' +
-      'Эта информация предназначена только для твоего внутреннего анализа.\n\n';
+    'Ниже предоставлен внутренний контекст для твоего сведения: граф знаний и выдержки из беседы. ' +
+    'Используй эти данные для формирования точного и полного ответа. ' +
+    'Категорически запрещается цитировать или пересказывать этот контекст, особенно строки, содержащие "-->". ' +
+    'Эта информация предназначена только для твоего внутреннего анализа.\n\n';
 
     if (!hasGraph && vectorChunks.length === 0) {
       logger.info(
@@ -1347,18 +1350,18 @@ Graph hints: ${graphQueryHint}`;
       const summarizationCfg = runtimeCfg.summarization || {};
       const defaults = { budgetChars: 12000, chunkChars: 20000 };
       const budgetChars =
-        Number.isFinite(summarizationCfg?.budgetChars) && summarizationCfg.budgetChars > 0
-          ? summarizationCfg.budgetChars
-          : defaults.budgetChars;
+      Number.isFinite(summarizationCfg?.budgetChars) && summarizationCfg.budgetChars > 0 ?
+      summarizationCfg.budgetChars :
+      defaults.budgetChars;
       const chunkChars =
-        Number.isFinite(summarizationCfg?.chunkChars) && summarizationCfg.chunkChars > 0
-          ? summarizationCfg.chunkChars
-          : defaults.chunkChars;
+      Number.isFinite(summarizationCfg?.chunkChars) && summarizationCfg.chunkChars > 0 ?
+      summarizationCfg.chunkChars :
+      defaults.chunkChars;
 
       let vectorText = vectorChunks.join('\n\n');
       const rawVectorTextLength = vectorText.length;
       const shouldSummarize =
-        summarizationCfg.enabled !== false && vectorText.length > budgetChars;
+      summarizationCfg.enabled !== false && vectorText.length > budgetChars;
 
       if (shouldSummarize) {
         logger.info(
@@ -1371,29 +1374,29 @@ Graph hints: ${graphQueryHint}`;
             endpointOption,
             contextText: vectorText,
             userQuery: normalizedQuery,
-            graphContext: hasGraph
-              ? { lines: graphContextLines, queryHint: graphQueryHint }
-              : null,
+            graphContext: hasGraph ?
+            { lines: graphContextLines, queryHint: graphQueryHint } :
+            null,
             summarizationConfig: {
               budgetChars,
               chunkChars,
-              provider: summarizationCfg.provider,
-            },
+              provider: summarizationCfg.provider
+            }
           });
         } catch (summarizeError) {
           logger.error('[rag.context.vector.summarize.error]', {
             message: summarizeError?.message,
-            stack: summarizeError?.stack,
+            stack: summarizeError?.stack
           });
         }
       }
 
-      const graphBlock = hasGraph
-        ? `### Graph context\n${graphContextLines.join('\n')}\n\n`
-        : '';
-      const vectorBlock = vectorText.length
-        ? `### Vector context\n${vectorText}\n\n`
-        : '';
+      const graphBlock = hasGraph ?
+      `### Graph context\n${graphContextLines.join('\n')}\n\n` :
+      '';
+      const vectorBlock = vectorText.length ?
+      `### Vector context\n${vectorText}\n\n` :
+      '';
       const combined = `${policyIntro}${graphBlock}${vectorBlock}---\n\n`;
 
       let sanitizedBlock = combined;
@@ -1402,7 +1405,7 @@ Graph hints: ${graphQueryHint}`;
       } catch (sanitizeError) {
         logger.error('[rag.context.sanitize.error]', {
           message: sanitizeError?.message,
-          stack: sanitizeError?.stack,
+          stack: sanitizeError?.stack
         });
       }
 
@@ -1411,22 +1414,22 @@ Graph hints: ${graphQueryHint}`;
 
       if (hasGraph) {
         const graphText = graphContextLines.join('\n');
-        metrics.graphTokens = graphText
-          ? Tokenizer.getTokenCount(graphText, encoding)
-          : 0;
+        metrics.graphTokens = graphText ?
+        Tokenizer.getTokenCount(graphText, encoding) :
+        0;
 
         if (metrics.graphTokens) {
           observeSegmentTokens({
             segment: 'rag_graph',
             tokens: metrics.graphTokens,
             endpoint: endpointOption?.endpoint || this.options?.endpoint,
-            model: endpointOption?.model || this.options?.model,
+            model: endpointOption?.model || this.options?.model
           });
           setContextLength({
             segment: 'rag_graph',
             length: graphText.length,
             endpoint: endpointOption?.endpoint || this.options?.endpoint,
-            model: endpointOption?.model || this.options?.model,
+            model: endpointOption?.model || this.options?.model
           });
         }
 
@@ -1443,13 +1446,13 @@ Graph hints: ${graphQueryHint}`;
             segment: 'rag_vector',
             tokens: metrics.vectorTokens,
             endpoint: endpointOption?.endpoint || this.options?.endpoint,
-            model: endpointOption?.model || this.options?.model,
+            model: endpointOption?.model || this.options?.model
           });
           setContextLength({
             segment: 'rag_vector',
             length: vectorText.length,
             endpoint: endpointOption?.endpoint || this.options?.endpoint,
-            model: endpointOption?.model || this.options?.model,
+            model: endpointOption?.model || this.options?.model
           });
         }
 
@@ -1458,9 +1461,9 @@ Graph hints: ${graphQueryHint}`;
         );
       }
 
-      metrics.contextTokens = sanitizedBlock
-        ? Tokenizer.getTokenCount(sanitizedBlock, encoding)
-        : metrics.graphTokens + metrics.vectorTokens;
+      metrics.contextTokens = sanitizedBlock ?
+      Tokenizer.getTokenCount(sanitizedBlock, encoding) :
+      metrics.graphTokens + metrics.vectorTokens;
 
       logger.info(
         `[rag.context.tokens] conversation=${conversationId} graphTokens=${metrics.graphTokens} vectorTokens=${metrics.vectorTokens} contextTokens=${metrics.contextTokens}`
@@ -1472,7 +1475,7 @@ Graph hints: ${graphQueryHint}`;
         systemContent: finalSystemContent,
         contextLength,
         metrics,
-        expiresAt: now + ragCacheTtlMs,
+        expiresAt: now + ragCacheTtlMs
       });
       logger.info(
         `[rag.context.cache.store] conversation=${conversationId} cacheKey=${cacheKey} contextTokens=${metrics.contextTokens} graphTokens=${metrics.graphTokens} vectorTokens=${metrics.vectorTokens} queryTokens=${metrics.queryTokens}`
@@ -1489,39 +1492,39 @@ Graph hints: ${graphQueryHint}`;
       patchedSystemContent: finalSystemContent,
       contextLength,
       cacheStatus,
-      metrics,
+      metrics
     };
   }
 
   async buildMessages(
-    messages,
-    parentMessageId,
-    { instructions = null, additional_instructions = null },
-    opts,
-  ) {
+  messages,
+  parentMessageId,
+  { instructions = null, additional_instructions = null },
+  opts)
+  {
     let orderedMessages = this.constructor.getMessagesForConversation({
       messages,
       parentMessageId,
-      summary: this.shouldSummarize,
+      summary: this.shouldSummarize
     });
     const runtimeCfg = runtimeMemoryConfig.getMemoryConfig();
     logger.info({
       msg: '[config.history]',
       conversationId: this.conversationId,
       dontShrinkLastN: runtimeCfg?.history?.dontShrinkLastN,
-      historyTokenBudget: runtimeCfg?.history?.tokenBudget ?? configService.getNumber('memory.history.tokenBudget', 0),
+      historyTokenBudget: runtimeCfg?.history?.tokenBudget ?? configService.getNumber('memory.history.tokenBudget', 0)
     });
     ragCacheTtlMs = Math.max(Number(runtimeCfg?.ragCacheTtl) * 1000, 0);
     const endpointOption = this.options?.req?.body?.endpointOption ?? this.options?.endpointOption ?? {};
     logger.info({
       msg: '[AgentClient.buildMessages] start',
       conversationId: this.conversationId,
-      orderedMessagesCount: orderedMessages.length,
+      orderedMessagesCount: orderedMessages.length
     });
-    try { this.trace('trace:build.start', {
-      total: orderedMessages.length,
-      lastIds: orderedMessages.slice(-3).map(m => m && m.messageId).join(',')
-    }); } catch {}
+    try {this.trace('trace:build.start', {
+        total: orderedMessages.length,
+        lastIds: orderedMessages.slice(-3).map((m) => m && m.messageId).join(',')
+      });} catch {}
 
     try {
       const convId = this.conversationId || this.options?.req?.body?.conversationId;
@@ -1529,9 +1532,9 @@ Graph hints: ${graphQueryHint}`;
       const toIngest = [];
       const totalMessages = orderedMessages.length;
       const dontShrinkConfigured = runtimeCfg?.history?.dontShrinkLastN;
-      const effectiveDontShrink = Number.isFinite(dontShrinkConfigured)
-        ? Math.max(dontShrinkConfigured, 0)
-        : 0;
+      const effectiveDontShrink = Number.isFinite(dontShrinkConfigured) ?
+      Math.max(dontShrinkConfigured, 0) :
+      0;
       const dontShrinkStartIndex = Math.max(totalMessages - effectiveDontShrink, 0);
 
       for (let idx = 0; idx < orderedMessages.length; idx++) {
@@ -1542,16 +1545,16 @@ Graph hints: ${graphQueryHint}`;
           const len = normalizedText.length;
 
           const looksHTML =
-            /</i.test(normalizedText) &&
-            /<html|<body|<div|<p|<span/i.test(normalizedText);
+          /</i.test(normalizedText) &&
+          /<html|<body|<div|<p|<span/i.test(normalizedText);
 
           let hasThink = false;
           if (Array.isArray(m?.content)) {
             hasThink = m.content.some(
               (part) =>
-                part?.type === 'think' &&
-                typeof part.think === 'string' &&
-                part.think.trim().length > 0,
+              part?.type === 'think' &&
+              typeof part.think === 'string' &&
+              part.think.trim().length > 0
             );
           }
           if (!hasThink) {
@@ -1561,15 +1564,15 @@ Graph hints: ${graphQueryHint}`;
 
           const shouldShrinkUser = m?.isCreatedByUser && (len > HIST_LONG_USER_TO_RAG || looksHTML);
           const shouldShrinkAssistant =
-            !m?.isCreatedByUser && (len > ASSIST_LONG_TO_RAG || looksHTML || hasThink);
+          !m?.isCreatedByUser && (len > ASSIST_LONG_TO_RAG || looksHTML || hasThink);
 
           const messageUserId =
-            requestUserId ||
-            m?.user ||
-            m?.metadata?.user ||
-            m?.metadata?.user_id ||
-            this?.user ||
-            null;
+          requestUserId ||
+          m?.user ||
+          m?.metadata?.user ||
+          m?.metadata?.user_id ||
+          this?.user ||
+          null;
 
           if ((shouldShrinkUser || shouldShrinkAssistant) && convId && normalizedText && messageUserId) {
             const dedupeKey = makeIngestKey(convId, m.messageId, normalizedText);
@@ -1577,14 +1580,14 @@ Graph hints: ${graphQueryHint}`;
             if (IngestedHistory.has(dedupeKey)) {
               logger.debug('[history->RAG][dedup] skip message already enqueued', {
                 conversationId: convId,
-                messageId: m?.messageId,
+                messageId: m?.messageId
               });
             } else {
               const taskPayload = {
                 message_id: m.messageId || `hist-${idx}-${Date.now()}`,
                 content: normalizedText,
                 role: m?.isCreatedByUser ? 'user' : 'assistant',
-                user_id: messageUserId,
+                user_id: messageUserId
               };
               IngestedHistory.add(dedupeKey);
               toIngest.push(taskPayload);
@@ -1592,7 +1595,7 @@ Graph hints: ${graphQueryHint}`;
                 conversationId: convId,
                 messageId: taskPayload.message_id,
                 role: taskPayload.role,
-                textLength: len,
+                textLength: len
               });
             }
 
@@ -1626,29 +1629,29 @@ Graph hints: ${graphQueryHint}`;
             conversationId: convId,
             messageId: m?.messageId,
             error: error?.message,
-            stack: error?.stack,
+            stack: error?.stack
           });
         }
       }
 
       if (toIngest.length && convId) {
-        const tasks = toIngest
-          .map((t) => ({
-            type: 'add_turn',
-            payload: {
-              conversation_id: convId,
-              message_id: t.message_id,
-              role: t.role,
-              content: t.content,
-              user_id: t.user_id,
-            },
-          }))
-          .filter((task) => task.payload.user_id);
+        const tasks = toIngest.
+        map((t) => ({
+          type: 'add_turn',
+          payload: {
+            conversation_id: convId,
+            message_id: t.message_id,
+            role: t.role,
+            content: t.content,
+            user_id: t.user_id
+          }
+        })).
+        filter((task) => task.payload.user_id);
 
         if (tasks.length) {
           const totalLength = tasks.reduce(
             (acc, task) => acc + (task.payload.content?.length ?? 0),
-            0,
+            0
           );
           try {
             await withTimeout(
@@ -1658,21 +1661,21 @@ Graph hints: ${graphQueryHint}`;
                   reason: 'history_sync',
                   conversationId: convId,
                   userId: requestUserId,
-                  textLength: totalLength,
-                },
+                  textLength: totalLength
+                }
               ),
               MEMORY_TASK_TIMEOUT_MS,
-              'History sync timed out',
+              'History sync timed out'
             );
             logger.info(
               `[history->RAG] queued ${tasks.length} turn(s) через JetStream ` +
-              `(conversation=${convId}, totalChars=${totalLength}).`,
+              `(conversation=${convId}, totalChars=${totalLength}).`
             );
           } catch (queueError) {
             safeError('[history->RAG] Failed to enqueue history tasks', {
               conversationId: convId,
               messageCount: tasks.length,
-              message: queueError?.message,
+              message: queueError?.message
             });
           }
         } else {
@@ -1684,18 +1687,18 @@ Graph hints: ${graphQueryHint}`;
     }
 
 
-    let systemContent = [instructions ?? '', additional_instructions ?? '']
-      .filter(Boolean)
-      .join('\n')
-      .trim();
+    let systemContent = [instructions ?? '', additional_instructions ?? ''].
+    filter(Boolean).
+    join('\n').
+    trim();
     /**
      * @description Fallback для новых чатов: если нет истории сообщений и systemContent пуст,
      * устанавливаем базовый промпт 'You are a helpful assistant.' для работы RAG.
      * TODO: рассмотреть взятие дефолтного промпта из конфигурации агента.
      */
     if (orderedMessages.length === 0 && systemContent.length === 0) {
-        systemContent = 'You are a helpful assistant.';
-        logger.info('[DEBUG] Applied fallback systemContent for new chat');
+      systemContent = 'You are a helpful assistant.';
+      logger.info('[DEBUG] Applied fallback systemContent for new chat');
     }
     logger.info(`[DIAG-PROMPT] Initial systemContent (from instructions/additional_instructions): ${systemContent.length} chars`);
 
@@ -1715,7 +1718,7 @@ Graph hints: ${graphQueryHint}`;
         runtimeCfg,
         req,
         res,
-        endpointOption,
+        endpointOption
       });
 
       if (ragResult && typeof ragResult === 'object') {
@@ -1738,13 +1741,13 @@ Graph hints: ${graphQueryHint}`;
         contextLength: ragContextLength,
         contextTokens: ragResult?.metrics?.contextTokens ?? 0,
         graphTokens: ragResult?.metrics?.graphTokens ?? 0,
-        vectorTokens: ragResult?.metrics?.vectorTokens ?? 0,
+        vectorTokens: ragResult?.metrics?.vectorTokens ?? 0
       });
     } catch (ragError) {
       logger.error('[rag.context.error]', {
         conversationId: this.conversationId,
         message: ragError?.message,
-        stack: ragError?.stack,
+        stack: ragError?.stack
       });
       if (req) {
         req.ragCacheStatus = 'error';
@@ -1766,13 +1769,13 @@ Graph hints: ${graphQueryHint}`;
         this.message_file_map[orderedMessages[orderedMessages.length - 1].messageId] = attachments;
       } else {
         this.message_file_map = {
-          [orderedMessages[orderedMessages.length - 1].messageId]: attachments,
+          [orderedMessages[orderedMessages.length - 1].messageId]: attachments
         };
       }
 
       const files = await this.addImageURLs(
         orderedMessages[orderedMessages.length - 1],
-        attachments,
+        attachments
       );
 
       this.options.attachments = files;
@@ -1781,7 +1784,7 @@ Graph hints: ${graphQueryHint}`;
     if (this.message_file_map && !isAgentsEndpoint(this.options.endpoint)) {
       this.contextHandlers = createContextHandlers(
         this.options.req,
-        orderedMessages[orderedMessages.length - 1].text,
+        orderedMessages[orderedMessages.length - 1].text
       );
     }
 
@@ -1789,7 +1792,7 @@ Graph hints: ${graphQueryHint}`;
       const formattedMessage = formatMessage({
         message,
         userName: this.options?.name,
-        assistantName: this.options?.modelLabel,
+        assistantName: this.options?.modelLabel
       });
 
       if (message.ocr && i !== orderedMessages.length - 1) {
@@ -1797,18 +1800,18 @@ Graph hints: ${graphQueryHint}`;
           formattedMessage.content = message.ocr + '\n' + formattedMessage.content;
         } else {
           const textPart = formattedMessage.content.find((part) => part.type === 'text');
-          textPart
-            ? (textPart.text = message.ocr + '\n' + textPart.text)
-            : formattedMessage.content.unshift({ type: 'text', text: message.ocr });
+          textPart ?
+          textPart.text = message.ocr + '\n' + textPart.text :
+          formattedMessage.content.unshift({ type: 'text', text: message.ocr });
         }
       } else if (message.ocr && i === orderedMessages.length - 1) {
         systemContent = [systemContent, message.ocr].join('\n');
       }
 
       const needsTokenCount =
-        (this.contextStrategy && !orderedMessages[i].tokenCount) || message.ocr;
+      this.contextStrategy && !orderedMessages[i].tokenCount || message.ocr;
 
-      if (needsTokenCount || (this.isVisionModel && (message.image_urls || message.files))) {
+      if (needsTokenCount || this.isVisionModel && (message.image_urls || message.files)) {
         orderedMessages[i].tokenCount = this.getTokenCountForMessage(formattedMessage);
       }
 
@@ -1842,35 +1845,35 @@ Graph hints: ${graphQueryHint}`;
     instructions = normalizeInstructionsPayload(
       systemContent,
       () => this.getEncoding(),
-      '[DIAG-PROMPT]',
+      '[DIAG-PROMPT]'
     );
     logger.info(
-      `[DIAG-PROMPT] Final instructions object created. Length: ${instructions.content.length}, Tokens: ${instructions.tokenCount}`,
+      `[DIAG-PROMPT] Final instructions object created. Length: ${instructions.content.length}, Tokens: ${instructions.tokenCount}`
     );
     if (this.contextStrategy) {
-   ({ payload, promptTokens, tokenCountMap, messages } = await this.handleContextStrategy({
-     orderedMessages,
-     formattedMessages,
-     instructions,
-   }));
-   logger.info('[prompt.payload]', {
-     conversationId: this.conversationId,
-     promptTokens,
-     ragContextTokens: this.options?.req?.ragContextTokens ?? 0,
-     instructionsTokens: instructions?.tokenCount ?? 0,
-     messageCount: messages.length,
-   });
- }
+      ({ payload, promptTokens, tokenCountMap, messages } = await this.handleContextStrategy({
+        orderedMessages,
+        formattedMessages,
+        instructions
+      }));
+      logger.info('[prompt.payload]', {
+        conversationId: this.conversationId,
+        promptTokens,
+        ragContextTokens: this.options?.req?.ragContextTokens ?? 0,
+        instructionsTokens: instructions?.tokenCount ?? 0,
+        messageCount: messages.length
+      });
+    }
 
     for (let i = 0; i < messages.length; i++) {
-         this.indexTokenCountMap[i] = messages[i].tokenCount;
-       }
+      this.indexTokenCountMap[i] = messages[i].tokenCount;
+    }
 
     const result = {
       tokenCountMap,
       prompt: payload,
       promptTokens,
-      messages,
+      messages
     };
 
     const perMessageBreakdown = orderedMessages.map((msg, idx) => ({
@@ -1913,7 +1916,7 @@ Graph hints: ${graphQueryHint}`;
 
     try {
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Memory processing timeout')), timeoutMs),
+      setTimeout(() => reject(new Error('Memory processing timeout')), timeoutMs)
       );
 
       const attachments = await Promise.race([memoryPromise, timeoutPromise]);
@@ -1942,12 +1945,12 @@ Graph hints: ${graphQueryHint}`;
       user,
       permissionType: PermissionTypes.MEMORIES,
       permissions: [Permissions.USE],
-      getRoleByName,
+      getRoleByName
     });
 
     if (!hasAccess) {
       logger.debug(
-        `[api/server/controllers/agents/client.js #useMemory] User ${user.id} does not have USE permission for memories`,
+        `[api/server/controllers/agents/client.js #useMemory] User ${user.id} does not have USE permission for memories`
       );
       return;
     }
@@ -1959,26 +1962,26 @@ Graph hints: ${graphQueryHint}`;
 
     let prelimAgent;
     const allowedProviders = new Set(
-      appConfig?.endpoints?.[EModelEndpoint.agents]?.allowedProviders,
+      appConfig?.endpoints?.[EModelEndpoint.agents]?.allowedProviders
     );
     try {
       if (memoryConfig.agent?.id != null && memoryConfig.agent.id !== this.options.agent.id) {
         prelimAgent = await loadAgent({
           req: this.options.req,
           agent_id: memoryConfig.agent.id,
-          endpoint: EModelEndpoint.agents,
+          endpoint: EModelEndpoint.agents
         });
       } else if (
-        memoryConfig.agent?.id == null &&
-        memoryConfig.agent?.model != null &&
-        memoryConfig.agent?.provider != null
-      ) {
+      memoryConfig.agent?.id == null &&
+      memoryConfig.agent?.model != null &&
+      memoryConfig.agent?.provider != null)
+      {
         prelimAgent = { id: Constants.EPHEMERAL_AGENT_ID, ...memoryConfig.agent };
       }
     } catch (error) {
       logger.error(
         '[api/server/controllers/agents/client.js #useMemory] Error loading agent for memory',
-        error,
+        error
       );
     }
 
@@ -1989,16 +1992,16 @@ Graph hints: ${graphQueryHint}`;
       allowedProviders,
       endpointOption: {
         endpoint:
-          prelimAgent.id !== Constants.EPHEMERAL_AGENT_ID
-            ? EModelEndpoint.agents
-            : memoryConfig.agent?.provider,
-      },
+        prelimAgent.id !== Constants.EPHEMERAL_AGENT_ID ?
+        EModelEndpoint.agents :
+        memoryConfig.agent?.provider
+      }
     });
 
     if (!agent) {
       logger.warn(
         '[api/server/controllers/agents/client.js #useMemory] No agent found for memory',
-        memoryConfig,
+        memoryConfig
       );
       return;
     }
@@ -2006,16 +2009,16 @@ Graph hints: ${graphQueryHint}`;
     const llmConfig = Object.assign(
       {
         provider: agent.provider,
-        model: agent.model,
+        model: agent.model
       },
-      agent.model_parameters,
+      agent.model_parameters
     );
 
     const config = {
       validKeys: memoryConfig.validKeys,
       instructions: agent.instructions,
       llmConfig,
-      tokenLimit: memoryConfig.tokenLimit,
+      tokenLimit: memoryConfig.tokenLimit
     };
 
     const userId = this.options.req.user.id + '';
@@ -2029,9 +2032,9 @@ Graph hints: ${graphQueryHint}`;
       memoryMethods: {
         setMemory,
         deleteMemory,
-        getFormattedMemories,
+        getFormattedMemories
       },
-      res: this.options.res,
+      res: this.options.res
     });
 
     this.processMemory = processMemory;
@@ -2050,21 +2053,21 @@ Graph hints: ${graphQueryHint}`;
 
     if (Array.isArray(message.content)) {
       const filteredContent = message.content.filter(
-        (part) => part.type !== ContentTypes.IMAGE_URL,
+        (part) => part.type !== ContentTypes.IMAGE_URL
       );
 
       if (filteredContent.length === 1 && filteredContent[0].type === ContentTypes.TEXT) {
         const MessageClass = message.constructor;
         return new MessageClass({
           content: filteredContent[0].text,
-          additional_kwargs: message.additional_kwargs,
+          additional_kwargs: message.additional_kwargs
         });
       }
 
       const MessageClass = message.constructor;
       return new MessageClass({
         content: filteredContent,
-        additional_kwargs: message.additional_kwargs,
+        additional_kwargs: message.additional_kwargs
       });
     }
 
@@ -2123,11 +2126,12 @@ Graph hints: ${graphQueryHint}`;
    * @throws {Error} If chat completion fails.
    */
   async sendCompletion(payload, opts = {}) {
+    logger.info('[DEBUG-sendCompletion] START', { hasAgentConfigs: !!this.agentConfigs, type: typeof this.agentConfigs });
     await this.chatCompletion({
       payload,
       onProgress: opts.onProgress,
       userMCPAuthMap: opts.userMCPAuthMap,
-      abortController: opts.abortController,
+      abortController: opts.abortController
     });
     return this.contentParts;
   }
@@ -2137,7 +2141,7 @@ Graph hints: ${graphQueryHint}`;
     balance,
     transactions,
     context = 'message',
-    collectedUsage = this.collectedUsage,
+    collectedUsage = this.collectedUsage
   }) {
     if (!collectedUsage || !collectedUsage.length) {
       return;
@@ -2148,7 +2152,7 @@ Graph hints: ${graphQueryHint}`;
     const initialInputTokens = Number(firstUsage?.input_tokens) || 0;
     const initialCacheCreation = Number(firstUsage?.input_token_details?.cache_creation) || 0;
     const initialCacheRead =
-      Number(firstUsage?.input_token_details?.cache_token_details?.cache_read) || 0;
+    Number(firstUsage?.input_token_details?.cache_token_details?.cache_read) || 0;
     const input_tokens = initialInputTokens + initialCacheCreation + initialCacheRead;
 
     let output_tokens = 0;
@@ -2165,13 +2169,13 @@ Graph hints: ${graphQueryHint}`;
 
       const cacheCreation = Number(usage?.input_token_details?.cache_creation) || 0;
       const cacheRead =
-        Number(usage?.input_token_details?.cache_token_details?.cache_read) || 0;
+      Number(usage?.input_token_details?.cache_token_details?.cache_read) || 0;
       totalCacheCreation += cacheCreation;
       totalCacheRead += cacheRead;
 
       const reasoningDirect = Number(usage?.reasoning_tokens);
       const reasoningDetailed =
-        Number(usage?.completion_tokens_details?.reasoning_tokens);
+      Number(usage?.completion_tokens_details?.reasoning_tokens);
       if (Number.isFinite(reasoningDirect)) {
         totalReasoningTokens += reasoningDirect;
       } else if (Number.isFinite(reasoningDetailed)) {
@@ -2185,12 +2189,12 @@ Graph hints: ${graphQueryHint}`;
         conversationId: this.conversationId,
         user: this.user ?? this.options.req.user?.id,
         endpointTokenConfig: this.options.endpointTokenConfig,
-        model: usage.model ?? model ?? modelName,
+        model: usage.model ?? model ?? modelName
       };
 
       if (i > 0) {
         output_tokens +=
-          (Number(usage.input_tokens) || 0) + cacheCreation + cacheRead - previousTokens;
+        (Number(usage.input_tokens) || 0) + cacheCreation + cacheRead - previousTokens;
       }
 
       output_tokens += Number(usage.output_tokens) || 0;
@@ -2203,14 +2207,14 @@ Graph hints: ${graphQueryHint}`;
             promptTokens: {
               input: usage.input_tokens,
               write: cacheCreation,
-              read: cacheRead,
+              read: cacheRead
             },
-            completionTokens: usage.output_tokens,
-          },
+            completionTokens: usage.output_tokens
+          }
         ).catch((err) => {
           logger.error(
             '[api/server/controllers/agents/client.js #recordCollectedUsage] Error spending structured tokens',
-            err,
+            err
           );
         });
         continue;
@@ -2218,18 +2222,18 @@ Graph hints: ${graphQueryHint}`;
 
       spendTokens(txMetadata, {
         promptTokens: usage.input_tokens,
-        completionTokens: usage.output_tokens,
+        completionTokens: usage.output_tokens
       }).catch((err) => {
         logger.error(
           '[api/server/controllers/agents/client.js #recordCollectedUsage] Error spending tokens',
-          err,
+          err
         );
       });
     }
 
     this.usage = {
       input_tokens,
-      output_tokens,
+      output_tokens
     };
 
     const totalTokensBilled = input_tokens + output_tokens + totalReasoningTokens;
@@ -2241,10 +2245,10 @@ Graph hints: ${graphQueryHint}`;
     if (promptRate != null || completionRate != null) {
       costUsd = 0;
       if (promptRate != null) {
-        costUsd += (input_tokens / 1000) * promptRate;
+        costUsd += input_tokens / 1000 * promptRate;
       }
       if (completionRate != null) {
-        costUsd += ((output_tokens + totalReasoningTokens) / 1000) * completionRate;
+        costUsd += (output_tokens + totalReasoningTokens) / 1000 * completionRate;
       }
       costUsd = Math.round(costUsd * 1_000_000) / 1_000_000;
 
@@ -2253,9 +2257,9 @@ Graph hints: ${graphQueryHint}`;
           {
             model: modelName,
             endpoint:
-              this.options?.endpoint || this.options?.agent?.provider || 'unknown',
+            this.options?.endpoint || this.options?.agent?.provider || 'unknown'
           },
-          costUsd,
+          costUsd
         );
       }
     }
@@ -2266,8 +2270,8 @@ Graph hints: ${graphQueryHint}`;
 
     logger.info(
       `[pricing.tokens.detail] conversation=${
-        this.conversationId ?? 'unknown'
-      } model=${modelName} prompt=${input_tokens} completion=${output_tokens} reasoning=${totalReasoningTokens} cache_write=${totalCacheCreation} cache_read=${totalCacheRead} promptUsdPer1k=${promptRateLog} completionUsdPer1k=${completionRateLog} pricingSource=${pricingRates.source}`
+      this.conversationId ?? 'unknown'} model=${
+      modelName} prompt=${input_tokens} completion=${output_tokens} reasoning=${totalReasoningTokens} cache_write=${totalCacheCreation} cache_read=${totalCacheRead} promptUsdPer1k=${promptRateLog} completionUsdPer1k=${completionRateLog} pricingSource=${pricingRates.source}`
     );
     logger.info(
       `[pricing.tokens.total] conversation=${this.conversationId ?? 'unknown'} totalTokens=${totalTokensBilled} costUsd=${costLog}`
@@ -2287,8 +2291,8 @@ Graph hints: ${graphQueryHint}`;
         perMessage: messages.map((msg) => ({
           messageId: msg?.messageId ?? 'unknown-message',
           tokens: Number(msg?.tokenCount) || 0,
-          isRagContext: msg?.metadata?.isRagContext === true,
-        })),
+          isRagContext: msg?.metadata?.isRagContext === true
+        }))
       });
     } catch (reportError) {
       logger.warn('[token.report] failed', { message: reportError?.message });
@@ -2312,7 +2316,7 @@ Graph hints: ${graphQueryHint}`;
   getTokenCountForResponse({ content }) {
     return this.getTokenCountForMessage({
       role: 'assistant',
-      content,
+      content
     });
   }
 
@@ -2352,6 +2356,7 @@ Graph hints: ${graphQueryHint}`;
    * @throws {Error} If agent run or processing fails.
    */
   async chatCompletion({ payload, userMCPAuthMap, abortController = null }) {
+    logger.info('[DEBUG-chatCompletion] START', { hasAgentConfigs: !!this.agentConfigs, type: typeof this.agentConfigs, isMap: this.agentConfigs instanceof Map });
     let config;
     let run;
     let memoryPromise;
@@ -2376,34 +2381,34 @@ Graph hints: ${graphQueryHint}`;
       config = {
         configurable: {
           thread_id: this.conversationId,
-          last_agent_index: this.agentConfigs?.size ?? 0,
+          last_agent_index: this.agentConfigs ? Object.keys(this.agentConfigs).length : 0,
           user_id: this.user ?? this.options.req.user?.id,
           hide_sequential_outputs: this.options.agent.hide_sequential_outputs,
           requestBody: {
             messageId: this.responseMessageId,
             conversationId: this.conversationId,
-            parentMessageId: this.parentMessageId,
+            parentMessageId: this.parentMessageId
           },
-          user: this.options.req.user,
+          user: this.options.req.user
         },
         recursionLimit: agentsEConfig?.recursionLimit ?? 25,
         signal: abortController.signal,
         streamMode: 'values',
-        version: 'v2',
+        version: 'v2'
       };
 
       const toolSet = new Set((this.options.agent.tools ?? []).map((tool) => tool && tool.name));
       let { messages: initialMessages, indexTokenCountMap } = formatAgentMessages(
         payload,
         this.indexTokenCountMap,
-        toolSet,
+        toolSet
       );
 
       try {
         const summarizeMsg = (m) => {
           let len = 0;
-          if (typeof m.content === 'string') len = m.content.length;
-          else if (Array.isArray(m.content)) {
+          if (typeof m.content === 'string') len = m.content.length;else
+          if (Array.isArray(m.content)) {
             for (const part of m.content) {
               if (part && part.type === 'text' && typeof part.text === 'string') len += part.text.length;
             }
@@ -2447,30 +2452,30 @@ Graph hints: ${graphQueryHint}`;
         config.configurable.agent_index = i;
         const noSystemMessages = noSystemModelRegex.some((regex) => agent.model_parameters.model.match(regex));
 
-        const systemMessage = Object.values(agent.toolContextMap ?? {})
-          .join('\n')
-          .trim();
+        const systemMessage = Object.values(agent.toolContextMap ?? {}).
+        join('\n').
+        trim();
 
         let instructionsForLangChain = null;
         if (typeof agent.instructions === 'string' && agent.instructions.length > 0) {
-            instructionsForLangChain = new SystemMessage({ content: agent.instructions });
+          instructionsForLangChain = new SystemMessage({ content: agent.instructions });
         } else if (agent.instructions instanceof SystemMessage) {
-            instructionsForLangChain = agent.instructions;
+          instructionsForLangChain = agent.instructions;
         }
 
         let systemContent = [
-          systemMessage,
-          instructionsForLangChain?.content ?? '',
-          i !== 0 ? agent.additional_instructions ?? '' : '',
-        ]
-          .filter(Boolean)
-          .join('\n')
-          .trim();
+        systemMessage,
+        instructionsForLangChain?.content ?? '',
+        i !== 0 ? agent.additional_instructions ?? '' : ''].
+
+        filter(Boolean).
+        join('\n').
+        trim();
 
         const normalizedSystem = normalizeInstructionsPayload(
           systemContent,
           () => this.getEncoding(),
-          `[AgentClient][runAgent:${agent.id}]`,
+          `[AgentClient][runAgent:${agent.id}]`
         );
         systemContent = normalizedSystem.content;
 
@@ -2479,9 +2484,9 @@ Graph hints: ${graphQueryHint}`;
           agent.additional_instructions = undefined;
         } else {
           if (systemContent && (instructionsForLangChain?.content !== systemContent || !instructionsForLangChain)) {
-             agent.instructions = new SystemMessage({ content: systemContent });
+            agent.instructions = new SystemMessage({ content: systemContent });
           } else if (!systemContent) {
-             agent.instructions = null;
+            agent.instructions = null;
           }
           agent.additional_instructions = undefined;
         }
@@ -2502,8 +2507,8 @@ Graph hints: ${graphQueryHint}`;
           messages = formatContentStrings(messages);
         }
         const defaultHeaders =
-          agent.model_parameters?.clientOptions?.defaultHeaders ??
-          agent.model_parameters?.configuration?.defaultHeaders;
+        agent.model_parameters?.clientOptions?.defaultHeaders ??
+        agent.model_parameters?.configuration?.defaultHeaders;
         if (defaultHeaders?.['anthropic-beta']?.includes('prompt-caching')) {
           messages = addCacheControl(messages);
         }
@@ -2515,7 +2520,7 @@ Graph hints: ${graphQueryHint}`;
         if (agent.model_parameters?.configuration?.defaultHeaders != null) {
           agent.model_parameters.configuration.defaultHeaders = resolveHeaders({
             headers: agent.model_parameters.configuration.defaultHeaders,
-            body: config.configurable.requestBody,
+            body: config.configurable.requestBody
           });
         }
 
@@ -2524,7 +2529,7 @@ Graph hints: ${graphQueryHint}`;
           req: this.options.req,
           runId: this.responseMessageId,
           signal: abortController.signal,
-          customHandlers: this.options.eventHandlers,
+          customHandlers: this.options.eventHandlers
         });
 
         if (!run) {
@@ -2541,12 +2546,12 @@ Graph hints: ${graphQueryHint}`;
             [ContentTypes.AGENT_UPDATE]: {
               index: contentData.length,
               runId: this.responseMessageId,
-              agentId: agent.id,
-            },
+              agentId: agent.id
+            }
           };
           const streamData = {
             event: GraphEvents.ON_AGENT_UPDATE,
-            data: agentUpdate,
+            data: agentUpdate
           };
           this.options.aggregateContent(streamData);
           sendEvent(this.options.res, streamData);
@@ -2563,8 +2568,8 @@ Graph hints: ${graphQueryHint}`;
           indexTokenCountMap: currentIndexCountMap,
           maxContextTokens: agent.maxContextTokens,
           callbacks: {
-            [Callback.TOOL_ERROR]: logToolError,
-          },
+            [Callback.TOOL_ERROR]: logToolError
+          }
         });
 
         config.signal = null;
@@ -2574,10 +2579,10 @@ Graph hints: ${graphQueryHint}`;
 
       let finalContentStart = 0;
       if (
-        this.agentConfigs &&
-        this.agentConfigs.size > 0 &&
-        (await checkCapability(this.options.req, AgentCapabilities.chain))
-      ) {
+      this.agentConfigs &&
+      Object.keys(this.agentConfigs || {}).length > 0 && (
+      await checkCapability(this.options.req, AgentCapabilities.chain)))
+      {
         const windowSize = GEMINI_CHAIN_WINDOW;
         let latestMessage = initialMessages.pop().content;
         if (typeof latestMessage !== 'string') {
@@ -2597,13 +2602,14 @@ Graph hints: ${graphQueryHint}`;
         }
         const encoding = this.getEncoding();
         const tokenCounter = createTokenCounter(encoding);
-        for (const [agentId, agent] of this.agentConfigs) {
+        logger.info("[DEBUG] agentConfigs type:", typeof this.agentConfigs, "keys:", this.agentConfigs ? Object.keys(this.agentConfigs) : "null");
+        for (const [agentId, agent] of Object.entries(this.agentConfigs || {})) {
           if (abortController.signal.aborted === true) {
             break;
           }
           const currentRun = await this.run;
 
-          if (i === this.agentConfigs.size && config.configurable.hide_sequential_outputs === true) {
+          if (i === Object.keys(this.agentConfigs || {}).length && config.configurable.hide_sequential_outputs === true) {
             const content = this.contentParts.filter((part) => part.type === ContentTypes.TOOL_CALL);
             if (canWrite(this.options?.res)) {
               this.options.res.write(
@@ -2611,9 +2617,9 @@ Graph hints: ${graphQueryHint}`;
                   event: 'on_content_update',
                   data: {
                     runId: this.responseMessageId,
-                    content,
-                  },
-                })}\n\n`,
+                    content
+                  }
+                })}\n\n`
               );
             }
             sseDebug(this.options?.res, { note: 'sequential_final_update' });
@@ -2632,9 +2638,9 @@ Graph hints: ${graphQueryHint}`;
               const message = windowMessages[wi];
               const messageType = message._getType();
               if (
-                (!agent.tools || agent.tools.length === 0) &&
-                (messageType === 'tool' || (message.tool_calls?.length ?? 0) > 0)
-              ) {
+              (!agent.tools || agent.tools.length === 0) && (
+              messageType === 'tool' || (message.tool_calls?.length ?? 0) > 0))
+              {
                 continue;
               }
               runIndexCountMap[contextMessages.length] = windowIndexCountMap[wi];
@@ -2652,9 +2658,9 @@ Graph hints: ${graphQueryHint}`;
                 const message = windowMessages[wi];
                 const messageType = message._getType();
                 if (
-                  (!agent.tools || agent.tools.length === 0) &&
-                  (messageType === 'tool' || (message.tool_calls?.length ?? 0) > 0)
-                ) {
+                (!agent.tools || agent.tools.length === 0) && (
+                messageType === 'tool' || (message.tool_calls?.length ?? 0) > 0))
+                {
                   continue;
                 }
                 runIndexCountMap[contextMessages.length] = windowIndexCountMap[wi];
@@ -2666,7 +2672,7 @@ Graph hints: ${graphQueryHint}`;
             } catch (err) {
               logger.error(
                 `[api/server/controllers/agents/client.js #chatCompletion] Error preparing chain buffer for agent ${agentId} (${i})`,
-                err,
+                err
               );
               currentMessages = windowMessages;
             }
@@ -2677,7 +2683,7 @@ Graph hints: ${graphQueryHint}`;
           } catch (err) {
             logger.error(
               `[api/server/controllers/agents/client.js #chatCompletion] Error running agent ${agentId} (${i})`,
-              err,
+              err
             );
           }
           i++;
@@ -2700,23 +2706,23 @@ Graph hints: ${graphQueryHint}`;
 
         const balanceConfig = getBalanceConfig(appConfig);
         const transactionsConfig = getTransactionsConfig(appConfig);
-        try { const u = this.getStreamUsage && this.getStreamUsage(); this.trace('trace:usage', u || {}); } catch {}
+        try {const u = this.getStreamUsage && this.getStreamUsage();this.trace('trace:usage', u || {});} catch {}
         await this.recordCollectedUsage({
           context: 'message',
           balance: balanceConfig,
-          transactions: transactionsConfig,
+          transactions: transactionsConfig
         });
       } catch (err) {
         logger.error(
           '[api/server/controllers/agents/client.js #chatCompletion] Error recording collected usage',
-          err,
+          err
         );
       }
     } catch (err) {
       const isAborted =
-        (typeof AbortController !== 'undefined' && abortController?.signal?.aborted === true) ||
-        err?.name === 'AbortError' ||
-        String(err?.message || '').toLowerCase().includes('aborted');
+      typeof AbortController !== 'undefined' && abortController?.signal?.aborted === true ||
+      err?.name === 'AbortError' ||
+      String(err?.message || '').toLowerCase().includes('aborted');
 
       try {
         const attachments = await this.awaitMemoryWithTimeout(memoryPromise);
@@ -2735,8 +2741,8 @@ Graph hints: ${graphQueryHint}`;
       this.contentParts.push({
         type: ContentTypes.ERROR,
         [ContentTypes.ERROR]: `An error occurred while processing the request${
-          err?.message ? `: ${err.message}` : ''
-        }`,
+        err?.message ? `: ${err.message}` : ''}`
+
       });
     }
   }
@@ -2756,35 +2762,35 @@ Graph hints: ${graphQueryHint}`;
     const OLLAMA_TITLE_MODEL_NAME = this.options.titleModel || ollamaConfig.titleModel || 'gemma:7b-instruct';
 
     if (USE_OLLAMA_FOR_TITLES) {
-        try {
-            const ollama_payload = {
-                "model": OLLAMA_TITLE_MODEL_NAME,
-                "messages": [
-                    {"role": "system", "content": "Ты — эксперт по созданию коротких и релевантных заголовков для бесед. На основе текста последнего сообщения пользователя, создай краткий заголовок. Выдавай ТОЛЬКО JSON-объект с полем 'title'. Никакого дополнительного текста. Заголовок должен быть на русском языке, без кавычек, двоеточий и пояснений, до 30 символов, без слов: создание, генерация, заголовок, название, тема, описание, запрос."},
-                    {"role": "user", "content": `На основе текста ниже верни один короткий суммаризированный заголовок на русском, который отражает тему последнего сообщения пользователя (до 30 символов). Текст: "${text}"`}
-                ],
-                "stream": false,
-                "format": "json",
-                "options": {
-                    "temperature": 0.1
-                }
-            };
-            const response = await axios.post(`${OLLAMA_TITLE_URL}/api/chat`, ollama_payload, { timeout: 60000 });
-            if (response.data && response.data.message && response.data.message.content) {
-                const raw_json_str = response.data.message.content;
-                const parsed_data = JSON.parse(raw_json_str);
-                if (parsed_data && parsed_data.title) {
-                    logger.info(`[title] Ollama generated: "${parsed_data.title}"`);
-                    return parsed_data.title;
-                }
-            }
-            logger.warn(`[title] Ollama title generation failed or returned empty. Falling back. Response: ${JSON.stringify(response.data)}`);
-        } catch (e) {
-            logger.error(`[title] Ollama title generation error: ${e.message}. Falling back.`, e);
+      try {
+        const ollama_payload = {
+          "model": OLLAMA_TITLE_MODEL_NAME,
+          "messages": [
+          { "role": "system", "content": "Ты — эксперт по созданию коротких и релевантных заголовков для бесед. На основе текста последнего сообщения пользователя, создай краткий заголовок. Выдавай ТОЛЬКО JSON-объект с полем 'title'. Никакого дополнительного текста. Заголовок должен быть на русском языке, без кавычек, двоеточий и пояснений, до 30 символов, без слов: создание, генерация, заголовок, название, тема, описание, запрос." },
+          { "role": "user", "content": `На основе текста ниже верни один короткий суммаризированный заголовок на русском, который отражает тему последнего сообщения пользователя (до 30 символов). Текст: "${text}"` }],
+
+          "stream": false,
+          "format": "json",
+          "options": {
+            "temperature": 0.1
+          }
+        };
+        const response = await axios.post(`${OLLAMA_TITLE_URL}/api/chat`, ollama_payload, { timeout: 60000 });
+        if (response.data && response.data.message && response.data.message.content) {
+          const raw_json_str = response.data.message.content;
+          const parsed_data = JSON.parse(raw_json_str);
+          if (parsed_data && parsed_data.title) {
+            logger.info(`[title] Ollama generated: "${parsed_data.title}"`);
+            return parsed_data.title;
+          }
         }
-        const cleaned = String(text || '').replace(/\s+/g, ' ').slice(0, 30).trim();
-        logger.warn(`[title][fallback-ollama] "${cleaned}"`);
-        return cleaned.length ? cleaned : 'Новый диалог';
+        logger.warn(`[title] Ollama title generation failed or returned empty. Falling back. Response: ${JSON.stringify(response.data)}`);
+      } catch (e) {
+        logger.error(`[title] Ollama title generation error: ${e.message}. Falling back.`, e);
+      }
+      const cleaned = String(text || '').replace(/\s+/g, ' ').slice(0, 30).trim();
+      logger.warn(`[title][fallback-ollama] "${cleaned}"`);
+      return cleaned.length ? cleaned : 'Новый диалог';
     }
 
     const cleaned = String(text || '').replace(/\s+/g, ' ').slice(0, 30).trim();
@@ -2798,7 +2804,7 @@ Graph hints: ${graphQueryHint}`;
     balance,
     promptTokens,
     completionTokens,
-    context = 'message',
+    context = 'message'
   }) {
     try {
       await spendTokens(
@@ -2808,9 +2814,9 @@ Graph hints: ${graphQueryHint}`;
           balance,
           conversationId: this.conversationId,
           user: this.user ?? this.options.req.user?.id,
-          endpointTokenConfig: this.options.endpointTokenConfig,
+          endpointTokenConfig: this.options.endpointTokenConfig
         },
-        { promptTokens, completionTokens },
+        { promptTokens, completionTokens }
       );
 
       if (usage && typeof usage === 'object' && 'reasoning_tokens' in usage && typeof usage.reasoning_tokens === 'number') {
@@ -2821,9 +2827,9 @@ Graph hints: ${graphQueryHint}`;
             context: 'reasoning',
             conversationId: this.conversationId,
             user: this.user ?? this.options.req.user?.id,
-            endpointTokenConfig: this.options.endpointTokenConfig,
+            endpointTokenConfig: this.options.endpointTokenConfig
           },
-          { completionTokens: usage.reasoning_tokens },
+          { completionTokens: usage.reasoning_tokens }
         );
       }
     } catch (error) {
@@ -2838,7 +2844,7 @@ Graph hints: ${graphQueryHint}`;
   getEncoding() {
     const model = this.options?.agent?.model_parameters?.model || this.model;
     if (model && /gemini/i.test(model)) {
-        return 'cl100k_base'; // Gemini использует похожий токенизатор
+      return 'cl100k_base'; // Gemini использует похожий токенизатор
     }
     return 'o200k_base'; // Для GPT-4o
   }
@@ -2856,20 +2862,20 @@ Graph hints: ${graphQueryHint}`;
   promptTokenBreakdown;
 
   emitPromptTokenBreakdown(
-    {
-      promptTokens: promptTokens,
-      cacheRead: cacheRead = 0,
-      cacheWrite: cacheWrite = 0,
-      reasoningTokens: reasoningTokens = 0
-    }
-  ) {
+  {
+    promptTokens: promptTokens,
+    cacheRead = 0,
+    cacheWrite = 0,
+    reasoningTokens = 0
+  })
+  {
     if (!this.promptTokenContext) {
       return;
     }
 
     const breakdown = computePromptTokenBreakdown({
       conversationId: this.promptTokenContext.conversationId,
-      promptTokens: promptTokens ?? (this.promptTokenContext.promptTokensEstimate ?? 0),
+      promptTokens: promptTokens ?? this.promptTokenContext.promptTokensEstimate ?? 0,
       instructionsTokens: this.promptTokenContext.instructionsTokens,
       ragGraphTokens: this.promptTokenContext.ragGraphTokens,
       ragVectorTokens: this.promptTokenContext.ragVectorTokens,
