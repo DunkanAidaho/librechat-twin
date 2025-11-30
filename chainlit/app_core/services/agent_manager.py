@@ -66,6 +66,11 @@ class AgentManager:
                 "Создан дефолтный агент",
                 extra=extra_with_context(operation="bootstrap_agent", status="created", agent_id=created.agent_id, trace_id=trace_id),
             )
+            self._set_active_agent_id(created.agent_id)
+            _LOGGER.info(
+                "Активирован дефолтный агент",
+                extra=extra_with_context(operation="bootstrap_agent", status="activated", agent_id=created.agent_id, trace_id=trace_id),
+            )
         except Exception as exc:
             log_exception(
                 _LOGGER,
@@ -242,8 +247,8 @@ class AgentManager:
 
     def _clear_active_agent_id(self) -> None:
         try:
-            cl.user_session.remove(_SESSION_ACTIVE_AGENT)
-        except AttributeError:
+            cl.user_session.delete(_SESSION_ACTIVE_AGENT)
+        except (AttributeError, KeyError):
             cl.user_session.set(_SESSION_ACTIVE_AGENT, None)
 
     @staticmethod
