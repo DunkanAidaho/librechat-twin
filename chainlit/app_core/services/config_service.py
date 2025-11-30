@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
+from app_core.utils.structured_logging import extra_with_context, get_logger
+
 __all__ = [
     "CoreConfig",
     "FeaturesConfig",
@@ -309,8 +311,8 @@ class QueuesSubjects:
 @dataclass(frozen=True)
 class DatastoresConfig:
     """External datastore configuration (Mongo, etc.)."""
-    mongo_uri: str
-    mongo_db: str
+    mongo_uri: Optional[str] = None
+    mongo_db: Optional[str] = None
 
 @dataclass(frozen=True)
 class QueuesConfig:
@@ -326,6 +328,9 @@ class LocalStoresConfig:
     data_dir: Path
     agents_path: Path
     history_path: Path
+
+
+_LOGGER = get_logger(__name__)
 
 
 class ConfigService:
@@ -583,10 +588,14 @@ class ConfigService:
 
 
     def _build_datastores(self) -> DatastoresConfig:
-        uri = self._env_str("MONGO_URI")
+        uri = _sanitize_string(self._env_str("MONGO_URI"))
         if not uri:
-            raise ValueError("MONGO_URI must be configured for datastores.mongo_uri")
-        db_name = self._env_str("MONGO_DB") or "LibreChat"
+            _LOGGER.warning(
+                "MONGO_URI не задан. Подключение Mongo будет пропущено.",
+                extra=extra_with_context(operation="build_datastores", status="disabled"),
+            )
+            return DatastoresConfig()
+        db_name = _sanitize_string(self._env_str("MONGO_DB")) or "LibreChat"
         return DatastoresConfig(mongo_uri=uri, mongo_db=db_name)
 
     def _build_storage(self) -> LocalStoresConfig:
