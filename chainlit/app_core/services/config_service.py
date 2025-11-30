@@ -282,13 +282,12 @@ class QueuesSubjects:
 
 
 @dataclass(frozen=True)
-
-@dataclass(frozen=True)
 class DatastoresConfig:
     """External datastore configuration (Mongo, etc.)."""
     mongo_uri: str
     mongo_db: str
 
+@dataclass(frozen=True)
 class QueuesConfig:
     """Queue-related configuration."""
     tools_gateway_url: Optional[str]
@@ -542,8 +541,7 @@ class ConfigService:
         db_name = self._env_str("MONGO_DB") or "LibreChat"
         return DatastoresConfig(mongo_uri=uri, mongo_db=db_name)
 
-
-        def _build_queues(self) -> QueuesConfig:
+    def _build_queues(self) -> QueuesConfig:
         subjects = QueuesSubjects(
             memory=_sanitize_string(self._env_str("NATS_MEMORY_SUBJECT")),
             graph=_sanitize_string(self._env_str("NATS_GRAPH_SUBJECT")),
