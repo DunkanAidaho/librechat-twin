@@ -1,0 +1,8 @@
+chainlit
+openai
+httpx
+neo4j
+psycopg2-binary
+pgvector
+pymongo
+# temporalio # раскомментируйте, когда будете подключать воркеры
