@@ -30,9 +30,11 @@ __all__ = [
     "AgentOperationsConfig",
     "AgentsThresholds",
     "AgentsConfig",
+    "AgentDefaultsConfig",
     "QueuesSubjects",
     "QueuesConfig",
     "DatastoresConfig",
+    "LocalStoresConfig",
     "ConfigService",
     "config_service",
 ]
@@ -80,6 +82,16 @@ def _parse_float(value: Any, default: float = 0.0) -> float:
         return float(str(value).strip())
     except (TypeError, ValueError):
         return default
+
+
+def _parse_float_range(value: Any, default: float, minimum: float, maximum: float) -> float:
+    """Parses floats and clamps the result to the specified range."""
+    parsed = _parse_float(value, default)
+    if parsed < minimum:
+        return minimum
+    if parsed > maximum:
+        return maximum
+    return parsed
 
 
 def _camel_to_snake(name: str) -> str:
@@ -260,6 +272,18 @@ class AgentsThresholds:
 
 
 @dataclass(frozen=True)
+class AgentDefaultsConfig:
+    """Default LLM parameters applied when creating a new agent."""
+    model_id: Optional[str]
+    system_prompt: Optional[str]
+    temperature: float
+    top_p: float
+    frequency_penalty: float
+    presence_penalty: float
+    reasoning_cost: float
+
+
+@dataclass(frozen=True)
 class AgentsConfig:
     """Aggregated agent configuration."""
     retry_min_delay_ms: int
@@ -270,6 +294,7 @@ class AgentsConfig:
     thresholds: AgentsThresholds
     default_tokenizer_encoding: str
     titles_enabled: bool
+    defaults: AgentDefaultsConfig
 
 
 @dataclass(frozen=True)
@@ -293,6 +318,14 @@ class QueuesConfig:
     tools_gateway_url: Optional[str]
     http_timeout_ms: int
     subjects: QueuesSubjects
+
+
+@dataclass(frozen=True)
+class LocalStoresConfig:
+    """Filesystem locations for local JSON storage."""
+    data_dir: Path
+    agents_path: Path
+    history_path: Path
 
 
 class ConfigService:
@@ -522,6 +555,20 @@ class ConfigService:
             max_user_message_chars=_parse_int(self._env_str("MAX_USER_MSG_TO_MODEL_CHARS"), 200000),
             google_no_stream_threshold=_parse_int(self._env_str("GOOGLE_NOSTREAM_THRESHOLD"), 120000),
         )
+        defaults = AgentDefaultsConfig(
+            model_id=_sanitize_string(self._env_str("AGENT_DEFAULT_MODEL_ID")),
+            system_prompt=_sanitize_string(self._env_str("AGENT_DEFAULT_SYSTEM_PROMPT")),
+            temperature=_parse_float(self._env_str("AGENT_DEFAULT_TEMPERATURE"), 1.0),
+            top_p=_parse_float(self._env_str("AGENT_DEFAULT_TOP_P"), 1.0),
+            frequency_penalty=_parse_float(self._env_str("AGENT_DEFAULT_FREQUENCY_PENALTY"), 0.0),
+            presence_penalty=_parse_float(self._env_str("AGENT_DEFAULT_PRESENCE_PENALTY"), 0.0),
+            reasoning_cost=_parse_float_range(
+                self._env_str("AGENT_DEFAULT_REASONING_COST"),
+                0.0,
+                0.0,
+                100.0,
+            ),
+        )
         return AgentsConfig(
             retry_min_delay_ms=_parse_int(self._env_str("AGENT_RETRY_MIN_DELAY_MS"), 200),
             retry_max_delay_ms=_parse_int(self._env_str("AGENT_RETRY_MAX_DELAY_MS"), 2000),
@@ -531,6 +578,7 @@ class ConfigService:
             thresholds=thresholds,
             default_tokenizer_encoding=_sanitize_string(self._env_str("DEFAULT_TOKENIZER_ENCODING")) or "o200k_base",
             titles_enabled=_parse_bool(self._env_str("TITLE_CONVO"), True),
+            defaults=defaults,
         )
 
 
@@ -540,6 +588,26 @@ class ConfigService:
             raise ValueError("MONGO_URI must be configured for datastores.mongo_uri")
         db_name = self._env_str("MONGO_DB") or "LibreChat"
         return DatastoresConfig(mongo_uri=uri, mongo_db=db_name)
+
+    def _build_storage(self) -> LocalStoresConfig:
+        """Builds configuration for local JSON storage paths."""
+        data_dir = Path(self._env_str("CHAINLIT_DATA_DIR") or "/app/data").expanduser()
+
+        def _resolve_path(raw: Optional[str], default_name: str) -> Path:
+            if raw:
+                candidate = Path(raw).expanduser()
+                if not candidate.is_absolute():
+                    return data_dir / candidate
+                return candidate
+            return data_dir / default_name
+
+        agents_path = _resolve_path(self._env_str("AGENTS_STORE_PATH"), "agents.json")
+        history_path = _resolve_path(self._env_str("CHAT_HISTORY_STORE_PATH"), "chat_history.json")
+        return LocalStoresConfig(
+            data_dir=data_dir,
+            agents_path=agents_path,
+            history_path=history_path,
+        )
 
     def _build_queues(self) -> QueuesConfig:
         subjects = QueuesSubjects(
