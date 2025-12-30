@@ -1193,7 +1193,7 @@ class AgentClient extends BaseClient {
         const graphContext = await fetchGraphContext({
           conversationId,
           toolsGatewayUrl,
-          limit: graphLimits.maxLines,
+          limit: graphMaxLines,
           timeoutMs: toolsGatewayTimeout,
         });
 
@@ -1201,22 +1201,22 @@ class AgentClient extends BaseClient {
 
         if (graphContext?.lines?.length) {
           graphContextLines = sanitizeGraphContext(graphContext.lines, {
-            maxLines: graphLimits.maxLines,
-            maxLineChars: graphLimits.maxLineChars,
+            maxLines: graphMaxLines,
+            maxLineChars: graphMaxLineChars,
           });
 
-          if (rawGraphLinesCount > graphContextLines.length && graphLimits.maxLines) {
+          if (rawGraphLinesCount > graphContextLines.length && graphMaxLines) {
             logger.info(
-              `[rag.context.limit] conversation=${conversationId} param=memory.graphContext.maxLines limit=${graphLimits.maxLines} original=${rawGraphLinesCount}`
+              `[rag.context.limit] conversation=${conversationId} param=memory.graphContext.maxLines limit=${graphMaxLines} original=${rawGraphLinesCount}`
             );
           }
 
           if (
             graphContextLines.some((line) => line.endsWith('…')) &&
-            graphLimits.maxLineChars
+            graphMaxLineChars
           ) {
             logger.info(
-              `[rag.context.limit] conversation=${conversationId} param=memory.graphContext.maxLineChars limit=${graphLimits.maxLineChars}`
+              `[rag.context.limit] conversation=${conversationId} param=memory.graphContext.maxLineChars limit=${graphMaxLineChars}`
             );
           }
         }
@@ -1229,16 +1229,16 @@ class AgentClient extends BaseClient {
           const trimmedHint = graphContext.queryHint.trim();
           if (trimmedHint) {
             if (
-              graphLimits.summaryHintMaxChars &&
-              trimmedHint.length > graphLimits.summaryHintMaxChars
+              graphSummaryHintMaxChars &&
+              trimmedHint.length > graphSummaryHintMaxChars
             ) {
               logger.info(
-                `[rag.context.limit] conversation=${conversationId} param=memory.graphContext.summaryHintMaxChars limit=${graphLimits.summaryHintMaxChars} original=${trimmedHint.length}`
+                `[rag.context.limit] conversation=${conversationId} param=memory.graphContext.summaryHintMaxChars limit=${graphSummaryHintMaxChars} original=${trimmedHint.length}`
               );
             }
             graphQueryHint = trimmedHint.slice(
               0,
-              graphLimits.summaryHintMaxChars || trimmedHint.length,
+              graphSummaryHintMaxChars || trimmedHint.length,
             );
           }
         }
@@ -1275,6 +1275,17 @@ Graph hints: ${graphQueryHint}`;
     }
     ragSearchQuery = condensedQuery;
 
+    // Нормализация лимитов для защиты от undefined
+    const graphMaxLines = Number(graphLimits.maxLines ?? 40);
+    const graphMaxLineChars = Number(graphLimits.maxLineChars ?? 200);
+    const graphSummaryHintMaxChars = Number(graphLimits.summaryHintMaxChars ?? 2000);
+
+    const vectorMaxChunks = Number(vectorLimits.maxChunks ?? 4);
+    const vectorMaxChars = Number(vectorLimits.maxChars ?? 70000);
+    const vectorTopK = Number(vectorLimits.topK ?? 12);
+    const embeddingModel = vectorLimits.embeddingModel;
+    const recentTurns = Number(vectorLimits.recentTurns ?? 6);
+
     let vectorChunks = [];
     let recentChunks = [];
     let rawVectorResults = 0;
@@ -1286,8 +1297,8 @@ Graph hints: ${graphQueryHint}`;
           `${toolsGatewayUrl}/rag/search`,
           {
             query: ragSearchQuery,
-            top_k: vectorLimits.topK,
-            embedding_model: vectorLimits.embeddingModel,
+            top_k: vectorTopK,
+            embedding_model: embeddingModel,
             conversation_id: conversationId,
             user_id: req?.user?.id,
           },
@@ -1301,18 +1312,18 @@ Graph hints: ${graphQueryHint}`;
         rawVectorResults = rawChunks.length;
 
         vectorChunks = sanitizeVectorChunks(rawChunks, {
-          maxChunks: vectorLimits.maxChunks,
-          maxChars: vectorLimits.maxChars,
+          maxChunks: vectorMaxChunks,
+          maxChars: vectorMaxChars,
         });
 
         logger.info(
-          `[rag.context.vector.raw] conversation=${conversationId} rawResults=${rawVectorResults} sanitizedChunks=${vectorChunks.length} topK=${vectorLimits.topK ?? 'n/a'}`
+          `[rag.context.vector.raw] conversation=${conversationId} rawResults=${rawVectorResults} sanitizedChunks=${vectorChunks.length} topK=${vectorTopK}`
         );
         logger.info('[rag.context.vector.limits]', { 
           conversationId, 
-          maxChunks: vectorLimits.maxChunks, 
+          maxChunks: vectorMaxChunks, 
           recentTurns, 
-          topK: vectorLimits.topK 
+          topK: vectorTopK 
         });
       } catch (error) {
         logger.error('[rag.context.vector.error]', {
@@ -1323,7 +1334,6 @@ Graph hints: ${graphQueryHint}`;
       }
 
       // Часть C: Recent turns для устойчивости
-      const recentTurns = Number(vectorLimits?.recentTurns ?? 6);
       if (recentTurns > 0) {
         try {
           const recentResp = await axios.post(
@@ -1342,7 +1352,7 @@ Graph hints: ${graphQueryHint}`;
 
           recentChunks = sanitizeVectorChunks(rawRecent, {
             maxChunks: recentTurns,
-            maxChars: vectorLimits.maxChars,
+            maxChars: vectorMaxChars,
           });
 
           logger.info('[rag.context.recent]', { 
@@ -1351,10 +1361,16 @@ Graph hints: ${graphQueryHint}`;
             got: recentChunks.length 
           });
         } catch (e) {
-          logger.warn('[rag.context.recent.skip]', { 
-            conversationId, 
-            reason: e?.message 
-          });
+          const status = e?.response?.status;
+          if (status === 404 || status === 501) {
+            logger.info('[rag.context.recent.unavailable]', { conversationId, status });
+          } else {
+            logger.warn('[rag.context.recent.skip]', { 
+              conversationId, 
+              reason: e?.message, 
+              status 
+            });
+          }
         }
       }
 
@@ -1370,20 +1386,20 @@ Graph hints: ${graphQueryHint}`;
         merged.push(c);
       }
 
-      vectorChunks = merged.slice(0, vectorLimits.maxChunks);
+      vectorChunks = merged.slice(0, vectorMaxChunks);
 
-      if (rawVectorResults > vectorChunks.length && vectorLimits.maxChunks) {
+      if (rawVectorResults > vectorChunks.length && vectorMaxChunks) {
         logger.info(
-          `[rag.context.limit] conversation=${conversationId} param=memory.vectorContext.maxChunks limit=${vectorLimits.maxChunks} original=${rawVectorResults}`
+          `[rag.context.limit] conversation=${conversationId} param=memory.vectorContext.maxChunks limit=${vectorMaxChunks} original=${rawVectorResults}`
         );
       }
 
       if (
         vectorChunks.some((chunk) => chunk.endsWith('…')) &&
-        vectorLimits.maxChars
+        vectorMaxChars
       ) {
         logger.info(
-          `[rag.context.limit] conversation=${conversationId} param=memory.vectorContext.maxChars limit=${vectorLimits.maxChars}`
+          `[rag.context.limit] conversation=${conversationId} param=memory.vectorContext.maxChars limit=${vectorMaxChars}`
         );
       }
     } else {
@@ -1568,7 +1584,6 @@ Graph hints: ${graphQueryHint}`;
       summary: this.shouldSummarize,
     });
     
-    let didEnqueueIngestThisRequest = false;
     
     const MAX_MESSAGES_TO_PROCESS = 25;
     
@@ -1628,7 +1643,6 @@ Graph hints: ${graphQueryHint}`;
               MEMORY_TASK_TIMEOUT_MS,
               'Dropped history ingest timed out',
             );
-            didEnqueueIngestThisRequest = true;
             if (this.options?.req) {
               this.options.req.didEnqueueIngest = true;
             }
@@ -1806,7 +1820,6 @@ Graph hints: ${graphQueryHint}`;
               MEMORY_TASK_TIMEOUT_MS,
               'History sync timed out',
             );
-            didEnqueueIngestThisRequest = true;
             if (this.options?.req) {
               this.options.req.didEnqueueIngest = true;
             }
@@ -1857,12 +1870,11 @@ Graph hints: ${graphQueryHint}`;
     // Часть A: Применение WAIT_FOR_RAG_INGEST_MS из runtimeCfg с upper bound
     const waitMsRaw = Number(runtimeCfg?.rag?.history?.waitForIngestMs ?? runtimeCfg?.history?.waitForIngestMs ?? 0);
     const waitMs = Math.min(Math.max(waitMsRaw, 0), 5000);
-    const didIngest = Boolean(didEnqueueIngestThisRequest || req?.didEnqueueIngest);
+    const didIngest = Boolean(req?.didEnqueueIngest);
     if (didIngest && waitMs > 0) {
       logger.info('[history->RAG] waiting before rag/search', { 
         conversationId: this.conversationId, 
         waitMs,
-        didEnqueueIngestThisRequest,
         reqDidEnqueueIngest: req?.didEnqueueIngest
       });
       await new Promise((r) => setTimeout(r, waitMs));
