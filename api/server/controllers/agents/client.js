@@ -347,7 +347,7 @@ async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAP
     }
 
     return {
-      lines: lines.slice(0, limit || GRAPH_CONTEXT_LINE_LIMIT),
+      lines: lines.slice(0, limit),
       queryHint,
     };
   } catch (error) {
@@ -1201,8 +1201,8 @@ class AgentClient extends BaseClient {
 
         if (graphContext?.lines?.length) {
           graphContextLines = sanitizeGraphContext(graphContext.lines, {
-            maxLines: graphLimits.maxLines || GRAPH_CONTEXT_LINE_LIMIT,
-            maxLineChars: graphLimits.maxLineChars || GRAPH_CONTEXT_MAX_LINE_CHARS,
+            maxLines: graphLimits.maxLines,
+            maxLineChars: graphLimits.maxLineChars,
           });
 
           if (rawGraphLinesCount > graphContextLines.length && graphLimits.maxLines) {
@@ -1308,6 +1308,12 @@ Graph hints: ${graphQueryHint}`;
         logger.info(
           `[rag.context.vector.raw] conversation=${conversationId} rawResults=${rawVectorResults} sanitizedChunks=${vectorChunks.length} topK=${vectorLimits.topK ?? 'n/a'}`
         );
+        logger.info('[rag.context.vector.limits]', { 
+          conversationId, 
+          maxChunks: vectorLimits.maxChunks, 
+          recentTurns, 
+          topK: vectorLimits.topK 
+        });
       } catch (error) {
         logger.error('[rag.context.vector.error]', {
           conversationId,
@@ -1317,7 +1323,7 @@ Graph hints: ${graphQueryHint}`;
       }
 
       // Часть C: Recent turns для устойчивости
-      const recentTurns = Number(runtimeCfg?.vectorContext?.recentTurns ?? 6);
+      const recentTurns = Number(vectorLimits?.recentTurns ?? 6);
       if (recentTurns > 0) {
         try {
           const recentResp = await axios.post(
@@ -1590,18 +1596,19 @@ Graph hints: ${graphQueryHint}`;
           const rawText = extractMessageText(m, '[history->RAG][dropped]');
           const normalizedText = normalizeMemoryText(rawText, '[history->RAG][dropped]');
 
-          if (!normalizedText) continue;
+          if (!normalizedText || normalizedText.length < 20) continue;
 
           const dedupeKey = makeIngestKey(convId, m.messageId, normalizedText);
           if (IngestedHistory.has(dedupeKey)) continue;
 
           IngestedHistory.add(dedupeKey);
 
+          const stableId = m.messageId || `dropped-${hashPayload(normalizedText).slice(0, 12)}`;
           droppedTasks.push({
             type: 'add_turn',
             payload: {
               conversation_id: convId,
-              message_id: m.messageId || `dropped-${Date.now()}-${Math.random()}`,
+              message_id: stableId,
               role: m?.isCreatedByUser ? 'user' : 'assistant',
               content: normalizedText,
               user_id: userId,
@@ -1622,6 +1629,9 @@ Graph hints: ${graphQueryHint}`;
               'Dropped history ingest timed out',
             );
             didEnqueueIngestThisRequest = true;
+            if (this.options?.req) {
+              this.options.req.didEnqueueIngest = true;
+            }
             logger.info(`[history->RAG][dropped] queued ${droppedTasks.length} dropped messages`, {
               conversationId: convId,
             });
@@ -1702,7 +1712,7 @@ Graph hints: ${graphQueryHint}`;
             this?.user ||
             null;
 
-          if ((shouldShrinkUser || shouldShrinkAssistant) && convId && normalizedText && messageUserId) {
+          if ((shouldShrinkUser || shouldShrinkAssistant) && convId && normalizedText && normalizedText.length >= 20 && messageUserId) {
             const dedupeKey = makeIngestKey(convId, m.messageId, normalizedText);
 
             if (IngestedHistory.has(dedupeKey)) {
@@ -1711,8 +1721,9 @@ Graph hints: ${graphQueryHint}`;
                 messageId: m?.messageId,
               });
             } else {
+              const stableId = m.messageId || `hist-${idx}-${hashPayload(normalizedText).slice(0, 12)}`;
               const taskPayload = {
-                message_id: m.messageId || `hist-${idx}-${Date.now()}`,
+                message_id: stableId,
                 content: normalizedText,
                 role: m?.isCreatedByUser ? 'user' : 'assistant',
                 user_id: messageUserId,
@@ -1796,6 +1807,9 @@ Graph hints: ${graphQueryHint}`;
               'History sync timed out',
             );
             didEnqueueIngestThisRequest = true;
+            if (this.options?.req) {
+              this.options.req.didEnqueueIngest = true;
+            }
             logger.info(
               `[history->RAG] queued ${tasks.length} turn(s) через JetStream ` +
               `(conversation=${convId}, totalChars=${totalLength}).`,
@@ -1840,12 +1854,16 @@ Graph hints: ${graphQueryHint}`;
       req.ragCacheStatus = ragCacheStatus;
     }
 
-    // Часть A: Применение WAIT_FOR_RAG_INGEST_MS
-    const waitMs = configService.getNumber('rag.history.waitForIngestMs', 0);
-    if (didEnqueueIngestThisRequest && waitMs > 0) {
+    // Часть A: Применение WAIT_FOR_RAG_INGEST_MS из runtimeCfg с upper bound
+    const waitMsRaw = Number(runtimeCfg?.rag?.history?.waitForIngestMs ?? runtimeCfg?.history?.waitForIngestMs ?? 0);
+    const waitMs = Math.min(Math.max(waitMsRaw, 0), 5000);
+    const didIngest = Boolean(didEnqueueIngestThisRequest || req?.didEnqueueIngest);
+    if (didIngest && waitMs > 0) {
       logger.info('[history->RAG] waiting before rag/search', { 
         conversationId: this.conversationId, 
-        waitMs 
+        waitMs,
+        didEnqueueIngestThisRequest,
+        reqDidEnqueueIngest: req?.didEnqueueIngest
       });
       await new Promise((r) => setTimeout(r, waitMs));
     }

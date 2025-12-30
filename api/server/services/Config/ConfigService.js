@@ -263,6 +263,7 @@ class ConfigService {
           maxChars: z.number().int().positive(),
           topK: z.number().int().positive(),
           embeddingModel: z.string().min(1).optional(),
+          recentTurns: z.number().int().nonnegative().optional(),
         })
         .optional(),
       summarization: z
