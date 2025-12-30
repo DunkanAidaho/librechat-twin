@@ -572,6 +572,7 @@ class ConfigService {
           const ragVectorTopK = parseOptionalInt(this.env.RAG_CONTEXT_TOPK) ?? 12;
           const ragVectorEmbedding =
             sanitizeOptionalString(this.env.RAG_SEARCH_MODEL) || 'mxbai';
+          const ragVectorRecentTurns = parseOptionalInt(this.env.RAG_VECTOR_RECENT_TURNS) ?? 6;
 
           const ragSummaryBudget = parseOptionalInt(this.env.RAG_SUMMARY_BUDGET) ?? 12_000;
           const ragSummaryChunk = parseOptionalInt(this.env.RAG_CHUNK_CHARS) ?? 20_000;
@@ -665,6 +666,7 @@ class ConfigService {
               maxChars: ragVectorMaxChars,
               topK: ragVectorTopK,
               embeddingModel: ragVectorEmbedding,
+              recentTurns: ragVectorRecentTurns,
             },
             summarization: {
               enabled: ragSummaryEnabled,

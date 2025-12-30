@@ -347,7 +347,7 @@ async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAP
     }
 
     return {
-      lines: lines.slice(0, GRAPH_CONTEXT_LINE_LIMIT),
+      lines: lines.slice(0, limit || GRAPH_CONTEXT_LINE_LIMIT),
       queryHint,
     };
   } catch (error) {
@@ -505,7 +505,8 @@ const USE_GRAPH_CONTEXT = typeof memoryStaticConfig.useGraphContext === 'boolean
   : configService.getBoolean('features.useGraphContext', true);
 
 const GRAPH_RELATIONS_LIMIT = configService.getNumber('memory.graphContext.maxLines', 40);
-const GRAPH_CONTEXT_LINE_LIMIT = configService.getNumber('memory.graphContext.maxLineChars', 20);
+const GRAPH_CONTEXT_LINE_LIMIT = configService.getNumber('memory.graphContext.maxLines', 40);
+const GRAPH_CONTEXT_MAX_LINE_CHARS = configService.getNumber('memory.graphContext.maxLineChars', 200);
 const GRAPH_REQUEST_TIMEOUT_MS = configService.getNumber('memory.graphContext.requestTimeoutMs', 10000);
 const GRAPH_QUERY_HINT_MAX_CHARS = configService.getNumber('memory.graphContext.summaryHintMaxChars', 2000);
 const RAG_QUERY_MAX_CHARS = configService.getNumber('memory.ragQuery.maxChars', 6000);
@@ -1045,6 +1046,10 @@ class AgentClient extends BaseClient {
             MEMORY_TASK_TIMEOUT_MS,
             'Memory indexing timed out',
           );
+          // Устанавливаем флаг для ожидания ingestion
+          if (this.options?.req) {
+            this.options.req.didEnqueueIngest = true;
+          }
         } catch (queueError) {
           safeError('[file-ingest] Failed to enqueue memory task', {
             conversationId: convId,
@@ -1196,8 +1201,8 @@ class AgentClient extends BaseClient {
 
         if (graphContext?.lines?.length) {
           graphContextLines = sanitizeGraphContext(graphContext.lines, {
-            maxLines: graphLimits.maxLines,
-            maxLineChars: graphLimits.maxLineChars,
+            maxLines: graphLimits.maxLines || GRAPH_CONTEXT_LINE_LIMIT,
+            maxLineChars: graphLimits.maxLineChars || GRAPH_CONTEXT_MAX_LINE_CHARS,
           });
 
           if (rawGraphLinesCount > graphContextLines.length && graphLimits.maxLines) {
@@ -1271,9 +1276,11 @@ Graph hints: ${graphQueryHint}`;
     ragSearchQuery = condensedQuery;
 
     let vectorChunks = [];
+    let recentChunks = [];
     let rawVectorResults = 0;
 
     if (toolsGatewayUrl) {
+      // Semantic search
       try {
         const response = await axios.post(
           `${toolsGatewayUrl}/rag/search`,
@@ -1301,27 +1308,77 @@ Graph hints: ${graphQueryHint}`;
         logger.info(
           `[rag.context.vector.raw] conversation=${conversationId} rawResults=${rawVectorResults} sanitizedChunks=${vectorChunks.length} topK=${vectorLimits.topK ?? 'n/a'}`
         );
-
-        if (rawVectorResults > vectorChunks.length && vectorLimits.maxChunks) {
-          logger.info(
-            `[rag.context.limit] conversation=${conversationId} param=memory.vectorContext.maxChunks limit=${vectorLimits.maxChunks} original=${rawVectorResults}`
-          );
-        }
-
-        if (
-          vectorChunks.some((chunk) => chunk.endsWith('…')) &&
-          vectorLimits.maxChars
-        ) {
-          logger.info(
-            `[rag.context.limit] conversation=${conversationId} param=memory.vectorContext.maxChars limit=${vectorLimits.maxChars}`
-          );
-        }
       } catch (error) {
         logger.error('[rag.context.vector.error]', {
           conversationId,
           message: error?.message,
           stack: error?.stack,
         });
+      }
+
+      // Часть C: Recent turns для устойчивости
+      const recentTurns = Number(runtimeCfg?.vectorContext?.recentTurns ?? 6);
+      if (recentTurns > 0) {
+        try {
+          const recentResp = await axios.post(
+            `${toolsGatewayUrl}/rag/recent`,
+            { 
+              conversation_id: conversationId, 
+              limit: recentTurns, 
+              user_id: req?.user?.id 
+            },
+            { timeout: toolsGatewayTimeout },
+          );
+
+          const rawRecent = Array.isArray(recentResp?.data?.results)
+            ? recentResp.data.results.map(r => r?.content ?? '').filter(Boolean)
+            : [];
+
+          recentChunks = sanitizeVectorChunks(rawRecent, {
+            maxChunks: recentTurns,
+            maxChars: vectorLimits.maxChars,
+          });
+
+          logger.info('[rag.context.recent]', { 
+            conversationId, 
+            recentTurns, 
+            got: recentChunks.length 
+          });
+        } catch (e) {
+          logger.warn('[rag.context.recent.skip]', { 
+            conversationId, 
+            reason: e?.message 
+          });
+        }
+      }
+
+      // Объединяем recent + semantic с дедупликацией
+      const merged = [];
+      const seen = new Set();
+
+      for (const c of [...recentChunks, ...vectorChunks]) {
+        const key = c.trim();
+        if (!key) continue;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(c);
+      }
+
+      vectorChunks = merged.slice(0, vectorLimits.maxChunks);
+
+      if (rawVectorResults > vectorChunks.length && vectorLimits.maxChunks) {
+        logger.info(
+          `[rag.context.limit] conversation=${conversationId} param=memory.vectorContext.maxChunks limit=${vectorLimits.maxChunks} original=${rawVectorResults}`
+        );
+      }
+
+      if (
+        vectorChunks.some((chunk) => chunk.endsWith('…')) &&
+        vectorLimits.maxChars
+      ) {
+        logger.info(
+          `[rag.context.limit] conversation=${conversationId} param=memory.vectorContext.maxChars limit=${vectorLimits.maxChars}`
+        );
       }
     } else {
       logger.warn('[rag.context.vector.skip]', {
@@ -1504,15 +1561,79 @@ Graph hints: ${graphQueryHint}`;
       parentMessageId,
       summary: this.shouldSummarize,
     });
-    const MAX_MESSAGES_TO_PROCESS = 25; // <-- Установите разумный лимит, например 60
-    if (orderedMessages.length > MAX_MESSAGES_TO_PROCESS) {
-      logger.warn(`[PROMPT-LIMIT] Принудительно усекаем историю с ${orderedMessages.length} до ${MAX_MESSAGES_TO_PROCESS} сообщений.`);
-      const systemMessage = orderedMessages.find(m => m.role === 'system');
-      const otherMessages = orderedMessages.filter(m => m.role !== 'system');
-  
-      const messagesToKeep = otherMessages.slice(-MAX_MESSAGES_TO_PROCESS);
-  
-      orderedMessages = systemMessage ? [systemMessage, ...messagesToKeep] : messagesToKeep;
+    
+    let didEnqueueIngestThisRequest = false;
+    
+    const MAX_MESSAGES_TO_PROCESS = 25;
+    
+    // Часть B: Обработка dropped messages для RAG
+    let systemMessage = orderedMessages.find(m => m.role === 'system');
+    let otherMessages = orderedMessages.filter(m => m.role !== 'system');
+    let droppedMessages = [];
+
+    if (otherMessages.length > MAX_MESSAGES_TO_PROCESS) {
+      const keptMessages = otherMessages.slice(-MAX_MESSAGES_TO_PROCESS);
+      droppedMessages = otherMessages.slice(0, otherMessages.length - MAX_MESSAGES_TO_PROCESS);
+      
+      orderedMessages = systemMessage ? [systemMessage, ...keptMessages] : keptMessages;
+      
+      logger.warn(`[PROMPT-LIMIT] Принудительно усекаем историю с ${otherMessages.length} до ${MAX_MESSAGES_TO_PROCESS} сообщений. Dropped: ${droppedMessages.length}`);
+      
+      // Отправляем dropped messages в RAG
+      const convId = this.conversationId || this.options?.req?.body?.conversationId;
+      const userId = this.options?.req?.user?.id;
+
+      if (convId && userId && droppedMessages.length) {
+        const droppedTasks = [];
+
+        for (const m of droppedMessages) {
+          const rawText = extractMessageText(m, '[history->RAG][dropped]');
+          const normalizedText = normalizeMemoryText(rawText, '[history->RAG][dropped]');
+
+          if (!normalizedText) continue;
+
+          const dedupeKey = makeIngestKey(convId, m.messageId, normalizedText);
+          if (IngestedHistory.has(dedupeKey)) continue;
+
+          IngestedHistory.add(dedupeKey);
+
+          droppedTasks.push({
+            type: 'add_turn',
+            payload: {
+              conversation_id: convId,
+              message_id: m.messageId || `dropped-${Date.now()}-${Math.random()}`,
+              role: m?.isCreatedByUser ? 'user' : 'assistant',
+              content: normalizedText,
+              user_id: userId,
+            },
+          });
+        }
+
+        if (droppedTasks.length) {
+          try {
+            await withTimeout(
+              enqueueMemoryTasks(droppedTasks, {
+                reason: 'history_window_drop',
+                conversationId: convId,
+                userId,
+                messageCount: droppedTasks.length,
+              }),
+              MEMORY_TASK_TIMEOUT_MS,
+              'Dropped history ingest timed out',
+            );
+            didEnqueueIngestThisRequest = true;
+            logger.info(`[history->RAG][dropped] queued ${droppedTasks.length} dropped messages`, {
+              conversationId: convId,
+            });
+          } catch (queueError) {
+            safeError('[history->RAG][dropped] Failed to enqueue dropped messages', {
+              conversationId: convId,
+              messageCount: droppedTasks.length,
+              message: queueError?.message,
+            });
+          }
+        }
+      }
     }
     const runtimeCfg = runtimeMemoryConfig.getMemoryConfig();
     logger.info({
@@ -1674,6 +1795,7 @@ Graph hints: ${graphQueryHint}`;
               MEMORY_TASK_TIMEOUT_MS,
               'History sync timed out',
             );
+            didEnqueueIngestThisRequest = true;
             logger.info(
               `[history->RAG] queued ${tasks.length} turn(s) через JetStream ` +
               `(conversation=${convId}, totalChars=${totalLength}).`,
@@ -1716,6 +1838,16 @@ Graph hints: ${graphQueryHint}`;
 
     if (req) {
       req.ragCacheStatus = ragCacheStatus;
+    }
+
+    // Часть A: Применение WAIT_FOR_RAG_INGEST_MS
+    const waitMs = configService.getNumber('rag.history.waitForIngestMs', 0);
+    if (didEnqueueIngestThisRequest && waitMs > 0) {
+      logger.info('[history->RAG] waiting before rag/search', { 
+        conversationId: this.conversationId, 
+        waitMs 
+      });
+      await new Promise((r) => setTimeout(r, waitMs));
     }
 
     try {
@@ -1889,11 +2021,12 @@ Graph hints: ${graphQueryHint}`;
       isRagContext: msg?.metadata?.isRagContext || false
     }));
 
+    const rm = this.options?.req?.ragMetrics || {};
     this.promptTokenContext = {
       conversationId: this.conversationId ?? "unknown",
       instructionsTokens: instructions?.tokenCount || 0,
-      ragGraphTokens: this.options?.req?.ragMetrics || 0,
-      ragVectorTokens: this.options?.req?.ragMetrics || 0,
+      ragGraphTokens: Number(rm.graphTokens) || 0,
+      ragVectorTokens: Number(rm.vectorTokens) || 0,
       messages: perMessageBreakdown,
       promptTokensEstimate: promptTokens ?? 0
     };
