@@ -1,4 +1,6 @@
 'use strict';
+const fs = require('fs');
+const yaml = require('js-yaml');
 
 const { z } = require('zod');
 const { logger } = require('@librechat/data-schemas');
@@ -976,7 +978,33 @@ class ConfigService {
     this.cache.clear();
     Object.keys(this.schemas).forEach((section) => {
       this.#loadSection(section, { force: true });
-    });
+        });
+    // [CUSTOM PATCH] START: YAML config loading logic
+    const configPath = this.env.ENDPOINTS_CONFIG_PATH;
+    if (configPath && fs.existsSync(configPath)) {
+      try {
+        const fileContents = fs.readFileSync(configPath, 'utf8');
+        const fileConfig = yaml.load(fileContents);
+
+        if (fileConfig && typeof fileConfig === 'object') {
+          // Загружаем секцию 'endpoints' из YAML и кешируем ее
+          if (fileConfig.endpoints) {
+            this.cache.set('endpoints', deepFreeze(fileConfig.endpoints));
+            logger.info(`[ConfigService] Successfully loaded 'endpoints' from YAML: ${configPath}`);
+          }
+
+          // Загружаем также другие корневые секции из YAML, если они есть (например, fileConfig)
+          if (fileConfig.fileConfig) {
+            this.cache.set('fileConfig', deepFreeze(fileConfig.fileConfig));
+            logger.info(`[ConfigService] Successfully loaded 'fileConfig' from YAML: ${configPath}`);
+          }
+        }
+      } catch (e) {
+        logger.error(`[ConfigService] Failed to load or parse YAML config at ${configPath}`, e);
+      }
+    }
+    // [CUSTOM PATCH] END: YAML config loading logic
+
   }
 
   getSection(name) {

@@ -415,8 +415,8 @@ async function mapReduceContext({
   });
 
   const defaults = {
-    budgetChars: 12000,
-    chunkChars: 20000,
+    budgetChars: 50000,
+    chunkChars: 30000,
   };
 
   const {
@@ -1504,6 +1504,16 @@ Graph hints: ${graphQueryHint}`;
       parentMessageId,
       summary: this.shouldSummarize,
     });
+    const MAX_MESSAGES_TO_PROCESS = 25; // <-- Установите разумный лимит, например 60
+    if (orderedMessages.length > MAX_MESSAGES_TO_PROCESS) {
+      logger.warn(`[PROMPT-LIMIT] Принудительно усекаем историю с ${orderedMessages.length} до ${MAX_MESSAGES_TO_PROCESS} сообщений.`);
+      const systemMessage = orderedMessages.find(m => m.role === 'system');
+      const otherMessages = orderedMessages.filter(m => m.role !== 'system');
+  
+      const messagesToKeep = otherMessages.slice(-MAX_MESSAGES_TO_PROCESS);
+  
+      orderedMessages = systemMessage ? [systemMessage, ...messagesToKeep] : messagesToKeep;
+    }
     const runtimeCfg = runtimeMemoryConfig.getMemoryConfig();
     logger.info({
       msg: '[config.history]',
