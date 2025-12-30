@@ -344,6 +344,10 @@ class ConfigService {
       queue: z.object({
         taskTimeoutMs: z.number().int().nonnegative(),
         historySyncBatchSize: z.number().int().positive(),
+        enqueueBatchSize: z.number().int().positive().optional(),
+        enqueueConcurrency: z.number().int().positive().optional(),
+        enqueueMaxTotalMs: z.number().int().positive().optional(),
+        failOpen: z.boolean().optional(),
       }),
       graphContext: z
         .object({
