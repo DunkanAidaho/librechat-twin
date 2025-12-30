@@ -53,7 +53,7 @@ function chunk(arr, size) {
  */
 function isTransientError(error) {
   const message = String(error?.message || error || '');
-  return TRANSIENT_ERROR_PATTERNS.some((pattern) => pattern.test(message));
+  1return TRANSIENT_ERROR_PATTERNS.some((pattern) => pattern.test(message));
 }
 
 function getToolsGatewayConfig() {
@@ -227,14 +227,26 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
   }
 
   const progress = { enqueued: 0 };
+  const cancellation = { aborted: false };
+  let timeoutId;
 
   // Synchronous processing with timeout
   try {
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`Enqueue timed out after ${maxTotalMs}ms`)), maxTotalMs),
-    );
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        cancellation.aborted = true;
+        reject(new Error(`Enqueue timed out after ${maxTotalMs}ms`));
+      }, maxTotalMs);
+    });
 
-    const enqueuePromise = enqueueMemoryTasksSync(client, tasks, meta, batchSize, progress);
+    const enqueuePromise = enqueueMemoryTasksSync(
+      client,
+      tasks,
+      meta,
+      batchSize,
+      progress,
+      cancellation,
+    );
     const result = await Promise.race([enqueuePromise, timeoutPromise]);
 
     return result;
@@ -268,13 +280,24 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
       retryable: true,
       count: partialCount,
     };
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
   }
 }
 
 /**
  * Synchronous enqueue processing with batching
  */
-async function enqueueMemoryTasksSync(client, tasks, meta, batchSize, progress = null) {
+async function enqueueMemoryTasksSync(
+  client,
+  tasks,
+  meta,
+  batchSize,
+  progress = null,
+  cancellation = null,
+) {
   const batches = chunk(tasks, batchSize);
   let enqueuedTotal = 0;
   const allErrors = [];
@@ -289,6 +312,21 @@ async function enqueueMemoryTasksSync(client, tasks, meta, batchSize, progress =
 
   try {
     for (let bi = 0; bi < batches.length; bi++) {
+      if (cancellation?.aborted) {
+        if (progress) {
+          progress.enqueued = enqueuedTotal;
+        }
+        logger.warn('[memoryQueue] Cancellation signal received, stopping enqueue loop', {
+          reason: meta.reason,
+          conversationId: meta.conversationId,
+          enqueuedTotal,
+        });
+        const abortError = new Error('Enqueue aborted because enqueue timed out');
+        abortError.partialCount = enqueuedTotal;
+        abortError.isTimeout = true;
+        throw abortError;
+      }
+
       const batch = batches[bi];
 
       try {
