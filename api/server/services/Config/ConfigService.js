@@ -684,8 +684,9 @@ class ConfigService {
             },
           };
 
-          // Diagnostic logging for RAG vector config (remove after verification)
-          if (ragConfig.vector) {
+          // Diagnostic logging for RAG vector config (conditional)
+          const diag = parseOptionalBool(this.env.RAG_DIAG) ?? false;
+          if (diag && ragConfig.vector) {
             logger.info('[diag.config.rag.vector]', ragConfig.vector);
           }
 

@@ -1184,6 +1184,17 @@ class AgentClient extends BaseClient {
     const graphLimits = runtimeCfg.graphContext || {};
     const vectorLimits = runtimeCfg.vectorContext || {};
 
+    // Нормализация лимитов для защиты от undefined - ДОЛЖНО БЫТЬ ЗДЕСЬ
+    const graphMaxLines = Number(graphLimits.maxLines ?? 40);
+    const graphMaxLineChars = Number(graphLimits.maxLineChars ?? 200);
+    const graphSummaryHintMaxChars = Number(graphLimits.summaryHintMaxChars ?? 2000);
+
+    const vectorMaxChunks = Number(vectorLimits.maxChunks ?? 4);
+    const vectorMaxChars = Number(vectorLimits.maxChars ?? 70000);
+    const vectorTopK = Number(vectorLimits.topK ?? 12);
+    const embeddingModel = vectorLimits.embeddingModel;
+    const recentTurns = Number(vectorLimits.recentTurns ?? 6);
+
     let graphContextLines = [];
     let graphQueryHint = '';
     let rawGraphLinesCount = 0;
@@ -1274,17 +1285,6 @@ Graph hints: ${graphQueryHint}`;
       });
     }
     ragSearchQuery = condensedQuery;
-
-    // Нормализация лимитов для защиты от undefined
-    const graphMaxLines = Number(graphLimits.maxLines ?? 40);
-    const graphMaxLineChars = Number(graphLimits.maxLineChars ?? 200);
-    const graphSummaryHintMaxChars = Number(graphLimits.summaryHintMaxChars ?? 2000);
-
-    const vectorMaxChunks = Number(vectorLimits.maxChunks ?? 4);
-    const vectorMaxChars = Number(vectorLimits.maxChars ?? 70000);
-    const vectorTopK = Number(vectorLimits.topK ?? 12);
-    const embeddingModel = vectorLimits.embeddingModel;
-    const recentTurns = Number(vectorLimits.recentTurns ?? 6);
 
     let vectorChunks = [];
     let recentChunks = [];
@@ -1643,6 +1643,7 @@ Graph hints: ${graphQueryHint}`;
               MEMORY_TASK_TIMEOUT_MS,
               'Dropped history ingest timed out',
             );
+            // Устанавливаем флаг для ожидания ingestion
             if (this.options?.req) {
               this.options.req.didEnqueueIngest = true;
             }
@@ -1820,6 +1821,7 @@ Graph hints: ${graphQueryHint}`;
               MEMORY_TASK_TIMEOUT_MS,
               'History sync timed out',
             );
+            // Устанавливаем флаг для ожидания ingestion
             if (this.options?.req) {
               this.options.req.didEnqueueIngest = true;
             }
