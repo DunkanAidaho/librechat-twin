@@ -53,7 +53,7 @@ function chunk(arr, size) {
  */
 function isTransientError(error) {
   const message = String(error?.message || error || '');
-  return TRANSIENT_ERROR_PATTERNS.some(pattern => pattern.test(message));
+  return TRANSIENT_ERROR_PATTERNS.some((pattern) => pattern.test(message));
 }
 
 function getToolsGatewayConfig() {
@@ -219,33 +219,32 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
         });
       }
     });
-    
+
     logger.info(
-      `[memoryQueue] Started fire-and-forget enqueue (reason=${meta.reason}, tasks=${tasks.length}, conversation=${meta.conversationId || 'n/a'})`
+      `[memoryQueue] Started fire-and-forget enqueue (reason=${meta.reason}, tasks=${tasks.length}, conversation=${meta.conversationId || 'n/a'})`,
     );
     return { status: 'queued_async', via: 'temporal', count: tasks.length };
   }
 
+  const progress = { enqueued: 0 };
+
   // Synchronous processing with timeout
   try {
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error(`Enqueue timed out after ${maxTotalMs}ms`)), maxTotalMs)
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Enqueue timed out after ${maxTotalMs}ms`)), maxTotalMs),
     );
 
-    const enqueuePromise = enqueueMemoryTasksSync(client, tasks, meta, batchSize);
+    const enqueuePromise = enqueueMemoryTasksSync(client, tasks, meta, batchSize, progress);
     const result = await Promise.race([enqueuePromise, timeoutPromise]);
-    
+
     return result;
   } catch (error) {
     const isTransient = isTransientError(error);
     const isTimeout = error?.message?.includes('timed out');
-    
-    // For timeout errors, try to get partial count from the error
-    let partialCount = 0;
-    if (isTimeout && error.partialCount !== undefined) {
-      partialCount = error.partialCount;
-    }
-    
+
+    const partialCount =
+      typeof error?.partialCount === 'number' ? error.partialCount : progress?.enqueued ?? 0;
+
     logger.error('[memoryQueue] Ошибка отправки задач в Temporal', {
       error: error?.message,
       isTransient,
@@ -263,11 +262,11 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
     }
 
     // For transient errors with failOpen, return retryable failure
-    return { 
-      status: 'failed', 
-      reason: error?.message || 'temporal_enqueue_failed', 
+    return {
+      status: 'failed',
+      reason: error?.message || 'temporal_enqueue_failed',
       retryable: true,
-      count: partialCount 
+      count: partialCount,
     };
   }
 }
@@ -275,36 +274,47 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
 /**
  * Synchronous enqueue processing with batching
  */
-async function enqueueMemoryTasksSync(client, tasks, meta, batchSize) {
+async function enqueueMemoryTasksSync(client, tasks, meta, batchSize, progress = null) {
   const batches = chunk(tasks, batchSize);
   let enqueuedTotal = 0;
   const allErrors = [];
 
+  if (progress) {
+    progress.enqueued = 0;
+  }
+
   logger.info(
-    `[memoryQueue] Processing ${tasks.length} tasks in ${batches.length} batches (batchSize=${batchSize}, reason=${meta.reason})`
+    `[memoryQueue] Processing ${tasks.length} tasks in ${batches.length} batches (batchSize=${batchSize}, reason=${meta.reason})`,
   );
 
   try {
     for (let bi = 0; bi < batches.length; bi++) {
       const batch = batches[bi];
-      
+
       try {
         const { enqueued, errors } = await enqueueBatch(client, batch, meta);
         enqueuedTotal += enqueued;
         allErrors.push(...errors);
 
+        if (progress) {
+          progress.enqueued = enqueuedTotal;
+        }
+
         logger.info(
-          `[memoryQueue] Batch ${bi + 1}/${batches.length} enqueued=${enqueued}/${batch.length} total=${enqueuedTotal} reason=${meta.reason}`
+          `[memoryQueue] Batch ${bi + 1}/${batches.length} enqueued=${enqueued}/${batch.length} total=${enqueuedTotal} reason=${meta.reason}`,
         );
       } catch (batchError) {
         logger.error(
           `[memoryQueue] Batch ${bi + 1}/${batches.length} failed completely: ${batchError?.message}`,
-          { reason: meta.reason, conversationId: meta.conversationId }
+          { reason: meta.reason, conversationId: meta.conversationId },
         );
         allErrors.push(batchError);
       }
     }
   } catch (outerError) {
+    if (progress) {
+      progress.enqueued = enqueuedTotal;
+    }
     // If we get interrupted (e.g., by timeout), attach partial count to error
     if (outerError?.message?.includes('timed out')) {
       outerError.partialCount = enqueuedTotal;
@@ -313,18 +323,23 @@ async function enqueueMemoryTasksSync(client, tasks, meta, batchSize) {
   }
 
   if (enqueuedTotal === 0) {
+    if (progress) {
+      progress.enqueued = enqueuedTotal;
+    }
     incMemoryQueueSkipped('no_valid_payloads');
     return { status: 'skipped', reason: 'no_valid_payloads', count: 0 };
   }
 
   if (allErrors.length > 0) {
-    logger.warn(
-      `[memoryQueue] Completed with ${allErrors.length} errors, ${enqueuedTotal} successful enqueues`
-    );
+    logger.warn(`[memoryQueue] Completed with ${allErrors.length} errors, ${enqueuedTotal} successful enqueues`);
+  }
+
+  if (progress) {
+    progress.enqueued = enqueuedTotal;
   }
 
   logger.info(
-    `[memoryQueue] Поставлено ${enqueuedTotal} задач через Temporal (reason=${meta.reason}, conversation=${meta.conversationId || 'n/a'})`
+    `[memoryQueue] Поставлено ${enqueuedTotal} задач через Temporal (reason=${meta.reason}, conversation=${meta.conversationId || 'n/a'})`,
   );
 
   return { status: 'queued', via: 'temporal', count: enqueuedTotal };
