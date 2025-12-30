@@ -53,7 +53,7 @@ function chunk(arr, size) {
  */
 function isTransientError(error) {
   const message = String(error?.message || error || '');
-  1return TRANSIENT_ERROR_PATTERNS.some((pattern) => pattern.test(message));
+  return TRANSIENT_ERROR_PATTERNS.some((pattern) => pattern.test(message));
 }
 
 function getToolsGatewayConfig() {
