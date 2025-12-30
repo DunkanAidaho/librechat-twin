@@ -597,7 +597,7 @@ class ConfigService {
           const historyAssistSnippet =
             parseOptionalInt(this.env.ASSIST_SNIPPET_CHARS) ?? 1_500;
 
-          return {
+          const ragConfig = {
             url: sanitizeUrl(this.env.RAG_URL || this.env.RAG_SERVICE_URL),
             context: {
               maxChars: parseOptionalInt(this.env.RAG_CONTEXT_MAX_CHARS) ?? 60_000,
@@ -683,6 +683,13 @@ class ConfigService {
               assistSnippetChars: historyAssistSnippet,
             },
           };
+
+          // Diagnostic logging for RAG vector config (remove after verification)
+          if (ragConfig.vector) {
+            logger.info('[diag.config.rag.vector]', ragConfig.vector);
+          }
+
+          return ragConfig;
         },
       },
       summaries: {
