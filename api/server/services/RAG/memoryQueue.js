@@ -19,10 +19,42 @@ const REQUIRED_FIELDS = new Set([
 
 const TEMPORAL_STATUS_REASON = 'memory_queue';
 
+// Transient error patterns that should not disable Temporal globally
+const TRANSIENT_ERROR_PATTERNS = [
+  /timeout/i,
+  /ResourceExhausted/i,
+  /503/,
+  /502/,
+  /429/,
+  /connection reset/i,
+  /ECONNRESET/i,
+  /ETIMEDOUT/i,
+  /Service Unavailable/i,
+];
+
 let temporalClient = null;
 let temporalEnabled = Boolean(config.get('memory.temporalEnabled', false));
 
 setTemporalStatus(TEMPORAL_STATUS_REASON, temporalEnabled);
+
+/**
+ * Splits array into chunks of specified size
+ */
+function chunk(arr, size) {
+  const chunks = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+}
+
+/**
+ * Classifies error as transient (retryable) or permanent
+ */
+function isTransientError(error) {
+  const message = String(error?.message || error || '');
+  return TRANSIENT_ERROR_PATTERNS.some(pattern => pattern.test(message));
+}
 
 function getToolsGatewayConfig() {
   const url = config.get('queues.toolsGatewayUrl', null);
@@ -93,6 +125,59 @@ async function callToolsGatewayDelete(conversationId, userId) {
   }
 }
 
+/**
+ * Enqueues a single batch of memory tasks
+ */
+async function enqueueBatch(client, batch, meta) {
+  let enqueued = 0;
+  const errors = [];
+
+  for (const task of batch) {
+    const payload = task?.payload || task;
+    if (!payload || !payload.conversation_id || !payload.message_id) {
+      errors.push(new Error('Invalid task payload: missing conversation_id/message_id'));
+      continue;
+    }
+
+    const missing = [...REQUIRED_FIELDS].filter((key) => !(key in payload));
+    if (missing.length) {
+      incMemoryQueueSkipped('missing_fields');
+      logger.warn(
+        '[memoryQueue] Пропуск задачи для Temporal (conversation=%s, message=%s) — отсутствуют поля: %s',
+        payload.conversation_id,
+        payload.message_id,
+        missing.join(', '),
+      );
+      // REMOVED: automatic delete call - this was dangerous
+      continue;
+    }
+
+    try {
+      const context = {
+        ...payload,
+        _metadata: {
+          reason: meta.reason,
+          conversationId: meta.conversationId,
+          userId: meta.userId,
+        },
+      };
+
+      await client.enqueueMemoryTask(context);
+      enqueued++;
+    } catch (error) {
+      errors.push(error);
+      logger.warn(
+        '[memoryQueue] Ошибка enqueue отдельной задачи (conversation=%s, message=%s): %s',
+        payload.conversation_id,
+        payload.message_id,
+        error?.message,
+      );
+    }
+  }
+
+  return { enqueued, errors };
+}
+
 async function enqueueMemoryTasks(tasks = [], meta = {}) {
   if (!Array.isArray(tasks) || tasks.length === 0) {
     incMemoryQueueSkipped('empty_tasks');
@@ -112,57 +197,120 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
     return { status: 'failed', reason: 'temporal_client_init_failed', count: 0 };
   }
 
-  try {
-    let enqueued = 0;
-    for (const task of tasks) {
-      const payload = task?.payload || task;
-      if (!payload || !payload.conversation_id || !payload.message_id) {
-        throw new Error('Invalid task payload: missing conversation_id/message_id');
-      }
+  // Get batching configuration
+  const memoryConfig = config.getSection('memory');
+  const batchSize = Math.max(1, memoryConfig.queue?.enqueueBatchSize ?? 25);
+  const maxTotalMs = memoryConfig.queue?.enqueueMaxTotalMs ?? 60000;
+  const failOpen = memoryConfig.queue?.failOpen ?? true;
+  const isDropped = meta.reason === 'history_window_drop';
 
-      const missing = [...REQUIRED_FIELDS].filter((key) => !(key in payload));
-      if (missing.length) {
-        incMemoryQueueSkipped('missing_fields');
-        logger.warn(
-          '[memoryQueue] Пропуск задачи для Temporal (conversation=%s, message=%s) — отсутствуют поля: %s',
-          payload.conversation_id,
-          payload.message_id,
-          missing.join(', '),
-          payload,
-        );
-
-        await callToolsGatewayDelete(payload.conversation_id, payload.user_id || meta.userId);
-        continue;
-      }
-
-      const context = {
-        ...payload,
-        _metadata: {
+  // Handle fire-and-forget for dropped history
+  if (isDropped && meta.fireAndForget) {
+    // Start async processing without waiting
+    setImmediate(async () => {
+      try {
+        await enqueueMemoryTasksSync(client, tasks, meta, batchSize);
+      } catch (error) {
+        logger.error('[memoryQueue] Fire-and-forget enqueue failed', {
           reason: meta.reason,
           conversationId: meta.conversationId,
-          userId: meta.userId,
-        },
-      };
-
-      await client.enqueueMemoryTask(context);
-      enqueued += 1;
-    }
-
-    if (enqueued === 0) {
-      incMemoryQueueSkipped('no_valid_payloads');
-      return { status: 'skipped', reason: 'no_valid_payloads', count: 0 };
-    }
-
+          taskCount: tasks.length,
+          error: error?.message,
+        });
+      }
+    });
+    
     logger.info(
-      `[memoryQueue] Поставлено ${enqueued} задач через Temporal (reason=${meta.reason}, conversation=${meta.conversationId || 'n/a'})`
+      `[memoryQueue] Started fire-and-forget enqueue (reason=${meta.reason}, tasks=${tasks.length}, conversation=${meta.conversationId || 'n/a'})`
+    );
+    return { status: 'queued_async', via: 'temporal', count: tasks.length };
+  }
+
+  // Synchronous processing with timeout
+  try {
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error(`Enqueue timed out after ${maxTotalMs}ms`)), maxTotalMs)
     );
 
-    return { status: 'queued', via: 'temporal', count: enqueued };
+    const enqueuePromise = enqueueMemoryTasksSync(client, tasks, meta, batchSize);
+    const result = await Promise.race([enqueuePromise, timeoutPromise]);
+    
+    return result;
   } catch (error) {
-    logger.error('[memoryQueue] Ошибка отправки задач в Temporal', error);
-    disableTemporal(error?.message || 'temporal_enqueue_failed');
-    return { status: 'failed', reason: error?.message || 'temporal_enqueue_failed', count: 0 };
+    const isTransient = isTransientError(error);
+    
+    logger.error('[memoryQueue] Ошибка отправки задач в Temporal', {
+      error: error?.message,
+      isTransient,
+      reason: meta.reason,
+      conversationId: meta.conversationId,
+      taskCount: tasks.length,
+    });
+
+    // Only disable Temporal for permanent errors
+    if (!isTransient || !failOpen) {
+      disableTemporal(error?.message || 'temporal_enqueue_failed');
+      return { status: 'failed', reason: error?.message || 'temporal_enqueue_failed', count: 0 };
+    }
+
+    // For transient errors with failOpen, return retryable failure
+    return { 
+      status: 'failed', 
+      reason: error?.message || 'temporal_enqueue_failed', 
+      retryable: true,
+      count: 0 
+    };
   }
+}
+
+/**
+ * Synchronous enqueue processing with batching
+ */
+async function enqueueMemoryTasksSync(client, tasks, meta, batchSize) {
+  const batches = chunk(tasks, batchSize);
+  let enqueuedTotal = 0;
+  const allErrors = [];
+
+  logger.info(
+    `[memoryQueue] Processing ${tasks.length} tasks in ${batches.length} batches (batchSize=${batchSize}, reason=${meta.reason})`
+  );
+
+  for (let bi = 0; bi < batches.length; bi++) {
+    const batch = batches[bi];
+    
+    try {
+      const { enqueued, errors } = await enqueueBatch(client, batch, meta);
+      enqueuedTotal += enqueued;
+      allErrors.push(...errors);
+
+      logger.info(
+        `[memoryQueue] Batch ${bi + 1}/${batches.length} enqueued=${enqueued}/${batch.length} total=${enqueuedTotal} reason=${meta.reason}`
+      );
+    } catch (batchError) {
+      logger.error(
+        `[memoryQueue] Batch ${bi + 1}/${batches.length} failed completely: ${batchError?.message}`,
+        { reason: meta.reason, conversationId: meta.conversationId }
+      );
+      allErrors.push(batchError);
+    }
+  }
+
+  if (enqueuedTotal === 0) {
+    incMemoryQueueSkipped('no_valid_payloads');
+    return { status: 'skipped', reason: 'no_valid_payloads', count: 0 };
+  }
+
+  if (allErrors.length > 0) {
+    logger.warn(
+      `[memoryQueue] Completed with ${allErrors.length} errors, ${enqueuedTotal} successful enqueues`
+    );
+  }
+
+  logger.info(
+    `[memoryQueue] Поставлено ${enqueuedTotal} задач через Temporal (reason=${meta.reason}, conversation=${meta.conversationId || 'n/a'})`
+  );
+
+  return { status: 'queued', via: 'temporal', count: enqueuedTotal };
 }
 
 module.exports = {

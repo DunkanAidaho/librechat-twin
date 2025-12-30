@@ -1032,7 +1032,7 @@ class AgentClient extends BaseClient {
         };
 
         try {
-          await withTimeout(
+          const result = await withTimeout(
             enqueueMemoryTasks(
               [task],
               {
@@ -1043,11 +1043,12 @@ class AgentClient extends BaseClient {
                 textLength: ocrText.length,
               },
             ),
-            MEMORY_TASK_TIMEOUT_MS,
+            Math.min(MEMORY_TASK_TIMEOUT_MS, 10000), // Cap timeout for file indexing
             'Memory indexing timed out',
           );
-          // Устанавливаем флаг для ожидания ingestion
-          if (this.options?.req) {
+            
+          // Set flag only for successful blocking operations
+          if (this.options?.req && result?.status === 'queued') {
             this.options.req.didEnqueueIngest = true;
           }
         } catch (queueError) {
@@ -1444,26 +1445,41 @@ Graph hints: ${graphQueryHint}`;
           `[rag.context.limit] conversation=${conversationId} param=memory.summarization.budgetChars limit=${budgetChars} original=${rawVectorTextLength}`
         );
         try {
-          vectorText = await mapReduceContext({
-            req,
-            res,
-            endpointOption,
-            contextText: vectorText,
-            userQuery: normalizedQuery,
-            graphContext: hasGraph
-              ? { lines: graphContextLines, queryHint: graphQueryHint }
-              : null,
-            summarizationConfig: {
-              budgetChars,
-              chunkChars,
-              provider: summarizationCfg.provider,
-            },
-          });
+          const summarizationTimeoutMs = runtimeCfg.summarization?.timeoutMs ?? 25000;
+          vectorText = await withTimeout(
+            mapReduceContext({
+              req,
+              res,
+              endpointOption,
+              contextText: vectorText,
+              userQuery: normalizedQuery,
+              graphContext: hasGraph
+                ? { lines: graphContextLines, queryHint: graphQueryHint }
+                : null,
+              summarizationConfig: {
+                budgetChars,
+                chunkChars,
+                provider: summarizationCfg.provider,
+              },
+            }),
+            summarizationTimeoutMs,
+            'RAG summarization timed out'
+          );
         } catch (summarizeError) {
           logger.error('[rag.context.vector.summarize.error]', {
             message: summarizeError?.message,
             stack: summarizeError?.stack,
+            timeout: summarizeError?.message?.includes('timed out'),
           });
+          
+          // On timeout, fall back to truncated text
+          if (summarizeError?.message?.includes('timed out')) {
+            const fallbackLength = Math.min(vectorText.length, budgetChars);
+            vectorText = vectorText.slice(0, fallbackLength);
+            logger.warn(
+              `[rag.context.vector.summarize.fallback] Using truncated text (${fallbackLength} chars) due to timeout`
+            );
+          }
         }
       }
 
@@ -1633,22 +1649,24 @@ Graph hints: ${graphQueryHint}`;
 
         if (droppedTasks.length) {
           try {
-            await withTimeout(
+            // For dropped messages, use fire-and-forget to avoid blocking user request
+            const result = await withTimeout(
               enqueueMemoryTasks(droppedTasks, {
                 reason: 'history_window_drop',
                 conversationId: convId,
                 userId,
                 messageCount: droppedTasks.length,
+                fireAndForget: droppedTasks.length > 50, // Fire-and-forget for large batches
               }),
-              MEMORY_TASK_TIMEOUT_MS,
+              Math.min(MEMORY_TASK_TIMEOUT_MS, 5000), // Cap timeout for dropped messages
               'Dropped history ingest timed out',
             );
-            // Устанавливаем флаг для ожидания ingestion
-            if (this.options?.req) {
-              this.options.req.didEnqueueIngest = true;
-            }
+            
+            // Don't set didEnqueueIngest for dropped messages to avoid unnecessary waiting
             logger.info(`[history->RAG][dropped] queued ${droppedTasks.length} dropped messages`, {
               conversationId: convId,
+              status: result?.status,
+              actualCount: result?.count,
             });
           } catch (queueError) {
             safeError('[history->RAG][dropped] Failed to enqueue dropped messages', {
@@ -1808,7 +1826,7 @@ Graph hints: ${graphQueryHint}`;
             0,
           );
           try {
-            await withTimeout(
+            const result = await withTimeout(
               enqueueMemoryTasks(
                 tasks,
                 {
@@ -1821,8 +1839,9 @@ Graph hints: ${graphQueryHint}`;
               MEMORY_TASK_TIMEOUT_MS,
               'History sync timed out',
             );
-            // Устанавливаем флаг для ожидания ingestion
-            if (this.options?.req) {
+            
+            // Set flag only for successful blocking operations
+            if (this.options?.req && result?.status === 'queued') {
               this.options.req.didEnqueueIngest = true;
             }
             logger.info(
@@ -1870,9 +1889,11 @@ Graph hints: ${graphQueryHint}`;
     }
 
     // Часть A: Применение WAIT_FOR_RAG_INGEST_MS из runtimeCfg с upper bound
+    // Only wait for blocking operations (history_sync, index_file), not dropped messages
     const waitMsRaw = Number(runtimeCfg?.rag?.history?.waitForIngestMs ?? runtimeCfg?.history?.waitForIngestMs ?? 0);
-    const waitMs = Math.min(Math.max(waitMsRaw, 0), 5000);
+    const waitMs = Math.min(Math.max(waitMsRaw, 0), 3000); // Reduced max wait time
     const didIngest = Boolean(req?.didEnqueueIngest);
+    
     if (didIngest && waitMs > 0) {
       logger.info('[history->RAG] waiting before rag/search', { 
         conversationId: this.conversationId, 

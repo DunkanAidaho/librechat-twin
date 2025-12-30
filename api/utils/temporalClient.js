@@ -55,6 +55,57 @@ async function enqueueMemoryTask(payload) {
   return publishWithFallback('memory', payload, '/temporal/memory/run', 'MemoryWorkflow');
 }
 
+async function enqueueMemoryTaskBatch(payloads) {
+  if (!Array.isArray(payloads) || payloads.length === 0) {
+    return { status: 'skipped', reason: 'empty_batch' };
+  }
+
+  if (payloads.length === 1) {
+    return enqueueMemoryTask(payloads[0]);
+  }
+
+  // For batch operations, try to use batch endpoint if available
+  const queueConfig = getQueueConfig();
+  const subject = queueConfig.subjects.memory;
+
+  if (isNatsEnabled() && subject) {
+    try {
+      const batchPayload = {
+        type: 'batch_memory',
+        tasks: payloads,
+        timestamp: Date.now(),
+      };
+      await publish(subject, batchPayload);
+      return { status: 'queued', via: 'nats', count: payloads.length };
+    } catch (err) {
+      logger.error(
+        '[TemporalClient] Ошибка batch публикации в NATS: %s',
+        err?.message || err,
+      );
+    }
+  }
+
+  // Fallback to individual enqueues
+  const results = [];
+  for (const payload of payloads) {
+    try {
+      const result = await enqueueMemoryTask(payload);
+      results.push(result);
+    } catch (error) {
+      logger.error('[TemporalClient] Batch item failed:', error?.message);
+      results.push({ status: 'failed', error: error?.message });
+    }
+  }
+
+  const successful = results.filter(r => r.status === 'queued').length;
+  return { 
+    status: successful > 0 ? 'queued' : 'failed', 
+    via: 'http-fallback-batch',
+    count: successful,
+    total: payloads.length 
+  };
+}
+
 async function enqueueGraphTask(payload) {
   const conversationId = payload?.conversation_id ?? 'unknown';
   const messageId = payload?.message_id ?? 'unknown';
@@ -83,6 +134,7 @@ async function enqueueSummaryTask(payload) {
 
 module.exports = {
   enqueueMemoryTask,
+  enqueueMemoryTaskBatch,
   enqueueGraphTask,
   enqueueSummaryTask,
 };

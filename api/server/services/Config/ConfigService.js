@@ -674,6 +674,7 @@ class ConfigService {
               budgetChars: ragSummaryBudget,
               chunkChars: ragSummaryChunk,
               provider: ragSummaryProvider || '',
+              timeoutMs: parseOptionalInt(this.env.RAG_SUMMARY_TIMEOUT_MS) ?? 25000,
             },
             history: {
               histLongUserToRag: historyHistLongUser,
@@ -792,6 +793,10 @@ class ConfigService {
               taskTimeoutMs: parseOptionalInt(this.env.MEMORY_TASK_TIMEOUT_MS) ?? 30_000,
               historySyncBatchSize:
                 parseOptionalInt(this.env.HISTORY_SYNC_BATCH_SIZE) ?? 20,
+              enqueueBatchSize: parseOptionalInt(this.env.MEMORY_QUEUE_ENQUEUE_BATCH_SIZE) ?? 25,
+              enqueueConcurrency: parseOptionalInt(this.env.MEMORY_QUEUE_ENQUEUE_CONCURRENCY) ?? 1,
+              enqueueMaxTotalMs: parseOptionalInt(this.env.MEMORY_QUEUE_ENQUEUE_MAX_TOTAL_MS) ?? 60000,
+              failOpen: parseOptionalBool(this.env.MEMORY_QUEUE_FAIL_OPEN) ?? true,
             },
             graphContext: {
               maxLines: graphMaxLines,
