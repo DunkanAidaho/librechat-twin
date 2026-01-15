@@ -95,13 +95,13 @@ endpoints:
       baseURL: "https://openrouter.ai/api/v1"
       models:
         default:
-          - "qwen/qwen-3-max"
+          - "qwen/qwen3-max"
           - "qwen/qwen3-vl-235b-a22b-thinking"
           - "qwen/qwen3-30b-a3b-thinking-2507"
           - "qwen/qwen3-coder"
       fetch: false
       titleConvo: true
-      titleModel: "qwen/qwen-3-max"
+      titleModel: "qwen/qwen3-max"
       dropParams: ["user", "frequency_penalty", "presence_penalty"]
       addParams:
         headers:
