@@ -2729,6 +2729,19 @@ Graph hints: ${graphQueryHint}`;
           recursionLimit: config.recursionLimit,
         });
 
+        // ДОБАВЛЕНО: Логирование запроса к модели
+        logger.info('[agent.run.request] Request to model', {
+          conversationId: this.conversationId,
+          agentId: agent.id,
+          model: agent.model_parameters?.model,
+          provider: agent.provider,
+          baseURL: agent.model_parameters?.configuration?.baseURL,
+          messagesPreview: messages.slice(0, 2).map(m => ({
+            role: typeof m._getType === 'function' ? m._getType() : m.role,
+            contentLength: typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content).length,
+          })),
+        });
+
         const run = await createRun({
           agent,
           req: this.options.req,
@@ -2953,9 +2966,15 @@ Graph hints: ${graphQueryHint}`;
       const errorDetails = {
         message: err?.message,
         code: err?.code,
-        status: err?.response?.status,
-        statusText: err?.response?.statusText,
-        responseData: err?.response?.data,
+        name: err?.name,
+        status: err?.response?.status || err?.status,
+        statusText: err?.response?.statusText || err?.statusText,
+        responseData: err?.response?.data || err?.error,
+        requestData: err?.request ? {
+          method: err?.request?.method,
+          url: err?.request?.url,
+          path: err?.request?.path,
+        } : undefined,
         stack: err?.stack,
         conversationId: this.conversationId,
         agentId: this.options?.agent?.id,
