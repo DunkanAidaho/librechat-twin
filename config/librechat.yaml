@@ -1,0 +1,208 @@
+version: 1.2.8
+endpoints:
+  google:
+    vertex: true
+    projectId: turing-outrider-474015-s3
+    location: us-central1
+    streaming: false
+    streamRate: 250
+    keyFilename: /app/api/data/auth.json
+    titleConvo: true
+    titleEndpoint: google
+    titleModel: gemini-2.0-flash-001
+    titleMethod: structured
+    titleLanguage: ru
+    titleTemperature: 0.0
+    titleMaxOutputTokens: 12
+    titlePromptTemplate: >
+      На основе текста ниже верни один короткий суммаризированный заголовок на русском,
+      который отражает тему последнего сообщения пользователя (до 30 символов).
+      Текст:
+      "{input}"
+      Требования:
+      - только сам заголовок, без кавычек, двоеточий и пояснений
+      - без слов: создание, генерация, заголовок, название, тема, описание, запрос
+      - формат ответа: строго JSON {{ "title":"<только кириллица>" }}; без латиницы, без кавычек внутри значения, до 30 символов
+    models:
+      chat:
+        - gemini-2.5-pro
+        - gemini-2.5-flash
+        - gemini-2.5-flash-lite
+        - gemini-2.0-flash-001
+        - gemini-2.0-flash-lite-001
+
+  custom:
+    - name: "OpenRouter - OpenAI"
+      apiKey: "${OPENROUTER_API_KEY}"
+      baseURL: "https://openrouter.ai/api/v1"
+      models:
+        default:
+          - "openai/gpt-5.2"
+          - "openai/gpt-5.2-pro"
+          - "openai/gpt-5.2-chat"
+          - "openai/gpt-4o"
+          - "openai/gpt-4o-mini"
+          - "openai/gpt-4o-search-preview"
+          - "openai/gpt-4-turbo"
+          - "openai/gpt-3.5-turbo"
+      fetch: false
+      titleConvo: true
+      titleModel: "openai/gpt-5.2"
+      dropParams: ["user", "frequency_penalty", "presence_penalty"]
+      addParams:
+        headers:
+          HTTP-Referer: "https://twin.mentat.su"
+          X-Title: "TwinChat"
+
+    - name: "OpenRouter - Google"
+      apiKey: "${OPENROUTER_API_KEY}"
+      baseURL: "https://openrouter.ai/api/v1"
+      models:
+        default:
+          - "google/gemini-3-pro-preview"
+          - "google/gemini-3-flash-preview"
+          - "google/gemini-2.5-pro"
+          - "google/gemini-2.5-flash"
+          - "google/gemini-2.5-flash-image"
+      fetch: false
+      titleConvo: true
+      titleModel: "google/gemini-3-pro-preview"
+      dropParams: ["user", "frequency_penalty", "presence_penalty"]
+      addParams:
+        headers:
+          HTTP-Referer: "https://twin.mentat.su"
+          X-Title: "TwinChat"
+
+    - name: "OpenRouter - Anthropic"
+      apiKey: "${OPENROUTER_API_KEY}"
+      baseURL: "https://openrouter.ai/api/v1"
+      models:
+        default:
+          - "anthropic/claude-opus-4.5"
+          - "anthropic/claude-sonnet-4.5"
+          - "anthropic/claude-haiku-4.5"
+      fetch: false
+      titleConvo: true
+      titleModel: "anthropic/claude-opus-4.5"
+      dropParams: ["user", "frequency_penalty", "presence_penalty"]
+      addParams:
+        headers:
+          HTTP-Referer: "https://twin.mentat.su"
+          X-Title: "TwinChat"
+
+    - name: "OpenRouter - Qwen"
+      apiKey: "${OPENROUTER_API_KEY}"
+      baseURL: "https://openrouter.ai/api/v1"
+      models:
+        default:
+          - "qwen/qwen-3-max"
+          - "qwen/qwen3-vl-235b-a22b-thinking"
+          - "qwen/qwen3-30b-a3b-thinking-2507"
+          - "qwen/qwen3-coder"
+      fetch: false
+      titleConvo: true
+      titleModel: "qwen/qwen-3-max"
+      dropParams: ["user", "frequency_penalty", "presence_penalty"]
+      addParams:
+        headers:
+          HTTP-Referer: "https://twin.mentat.su"
+          X-Title: "TwinChat"
+
+    - name: "OpenRouter - xAI (Grok)"
+      apiKey: "${OPENROUTER_API_KEY}"
+      baseURL: "https://openrouter.ai/api/v1"
+      models:
+        default:
+          - "x-ai/grok-4.1-fast"
+          - "x-ai/grok-4"
+          - "x-ai/grok-code-fast-1"
+      fetch: false
+      titleConvo: true
+      titleModel: "x-ai/grok-4.1-fast"
+      dropParams: ["user", "frequency_penalty", "presence_penalty"]
+      addParams:
+        headers:
+          HTTP-Referer: "https://twin.mentat.su"
+          X-Title: "TwinChat"
+
+    - name: "OpenRouter - Meta Llama"
+      apiKey: "${OPENROUTER_API_KEY}"
+      baseURL: "https://openrouter.ai/api/v1"
+      models:
+        default:
+          - "meta-llama/llama-4-maverick"
+          - "meta-llama/llama-3.3-70b-instruct"
+          - "meta-llama/llama-3.2-3b-instruct"
+      fetch: false
+      titleConvo: true
+      titleModel: "meta-llama/llama-4-maverick"
+      dropParams: ["user", "frequency_penalty", "presence_penalty"]
+      addParams:
+        headers:
+          HTTP-Referer: "https://twin.mentat.su"
+          X-Title: "TwinChat"
+
+    - name: "OpenRouter - Mistral AI"
+      apiKey: "${OPENROUTER_API_KEY}"
+      baseURL: "https://openrouter.ai/api/v1"
+      models:
+        default:
+          - "mistralai/mistral-large-2512"
+          - "mistralai/devstral-2512"
+          - "mistralai/ministral-14b-2512"
+      fetch: false
+      titleConvo: true
+      titleModel: "mistralai/mistral-large-2512"
+      dropParams: ["user", "frequency_penalty", "presence_penalty"]
+      addParams:
+        headers:
+          HTTP-Referer: "https://twin.mentat.su"
+          X-Title: "TwinChat"
+
+    - name: "OpenRouter - DeepSeek"
+      apiKey: "${OPENROUTER_API_KEY}"
+      baseURL: "https://openrouter.ai/api/v1"
+      models:
+        default:
+          - "deepseek/deepseek-v3.1-terminus"
+          - "deepseek/deepseek-v3.1-terminus:exacto"
+          - "deepseek/deepseek-v3.2"
+          - "deepseek/deepseek-v3.2-speciale"
+          - "deepseek/deepseek-v3.2-exp"
+          - "deepseek/deepseek-chat-v3.1"
+          - "deepseek/deepseek-chat-v3-0324"
+          - "deepseek/deepseek-prover-v2"
+          - "deepseek/deepseek-r1-0528"
+          - "deepseek/deepseek-r1-0528-qwen3-8b"
+          - "deepseek/deepseek-r1-0528:free"
+          - "deepseek/deepseek-r1-distill-qwen-14b"
+          - "deepseek/deepseek-r1-distill-qwen-32b"
+          - "deepseek/deepseek-r1-distill-llama-70b"
+          - "deepseek/deepseek-r1"
+          - "deepseek/deepseek-chat"
+          - "deepseek/deepseek-r1t-chimera"
+          - "deepseek/deepseek-r1t-chimera:free"
+          - "deepseek/deepseek-r1t2-chimera"
+          - "deepseek/deepseek-r1t2-chimera:free"
+      fetch: false
+      titleConvo: true
+      titleModel: "deepseek/deepseek-v3.2"
+      dropParams: ["user", "frequency_penalty", "presence_penalty"]
+      addParams:
+        headers:
+          HTTP-Referer: "https://twin.mentat.su"
+          X-Title: "TwinChat"
+
+fileConfig:
+  fileTokenLimit: 2900000
+  text:
+    supportedMimeTypes:
+      - 'application/json'
+      - 'text/plain'
+      - 'text/markdown'
+      - 'text/csv'
+      - 'application/pdf'
+      - 'text/x-python'
+      - 'text/javascript'
+      - 'text/html'
+      - 'text/css'
