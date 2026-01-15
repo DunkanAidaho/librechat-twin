@@ -89,7 +89,7 @@ function pruneExpiredRagCache(now = Date.now()) {
 
 /**
  * Хэширует произвольные данные в SHA1.
- * @param {unknown} payload - Данные для хеширования.
+ * @param {unknown} payload - Данные для хэширования.
  * @returns {string} SHA1-хеш.
  */
 function hashPayload(payload) {
@@ -2715,6 +2715,20 @@ Graph hints: ${graphQueryHint}`;
           });
         }
 
+        // ДОБАВЛЕНО: Детальное логирование перед вызовом createRun
+        logger.info('[agent.run.debug] Agent configuration', {
+          conversationId: this.conversationId,
+          agentId: agent.id,
+          agentName: agent.name,
+          provider: agent.provider,
+          model: agent.model_parameters?.model,
+          messagesCount: messages.length,
+          systemContentLength: systemContent?.length || 0,
+          hasInstructions: Boolean(agent.instructions),
+          instructionsType: agent.instructions?.constructor?.name,
+          recursionLimit: config.recursionLimit,
+        });
+
         const run = await createRun({
           agent,
           req: this.options.req,
@@ -2753,6 +2767,15 @@ Graph hints: ${graphQueryHint}`;
         if (userMCPAuthMap != null) {
           config.configurable.userMCPAuthMap = userMCPAuthMap;
         }
+        
+        // ДОБАВЛЕНО: Логирование перед processStream
+        logger.info('[agent.run.processStream] Starting stream processing', {
+          conversationId: this.conversationId,
+          agentId: agent.id,
+          messagesCount: messages.length,
+          maxContextTokens: agent.maxContextTokens,
+        });
+        
         await run.processStream({ messages }, config, {
           keepContent: i !== 0,
           tokenCounter: createTokenCounter(this.getEncoding()),
@@ -2926,7 +2949,20 @@ Graph hints: ${graphQueryHint}`;
         return;
       }
 
-      logger.error('[api/server/controllers/agents/client.js #sendCompletion] Unhandled error', err);
+      // УЛУЧШЕНО: Более детальное логирование ошибки
+      logger.error('[api/server/controllers/agents/client.js #sendCompletion] Unhandled error', {
+        message: err?.message,
+        code: err?.code,
+        status: err?.response?.status,
+        statusText: err?.response?.statusText,
+        responseData: err?.response?.data,
+        stack: err?.stack,
+        conversationId: this.conversationId,
+        agentId: this.options?.agent?.id,
+        model: this.options?.agent?.model_parameters?.model,
+        provider: this.options?.agent?.provider,
+      });
+      
       this.contentParts = this.contentParts || [];
       this.contentParts.push({
         type: ContentTypes.ERROR,
