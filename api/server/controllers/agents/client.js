@@ -2949,8 +2949,8 @@ Graph hints: ${graphQueryHint}`;
         return;
       }
 
-      // УЛУЧШЕНО: Более детальное логирование ошибки
-      logger.error('[api/server/controllers/agents/client.js #sendCompletion] Unhandled error', {
+      // ИСПРАВЛЕНО: Используем JSON.stringify для вывода объекта с деталями ошибки
+      const errorDetails = {
         message: err?.message,
         code: err?.code,
         status: err?.response?.status,
@@ -2961,7 +2961,11 @@ Graph hints: ${graphQueryHint}`;
         agentId: this.options?.agent?.id,
         model: this.options?.agent?.model_parameters?.model,
         provider: this.options?.agent?.provider,
-      });
+      };
+      
+      logger.error(
+        `[api/server/controllers/agents/client.js #sendCompletion] Unhandled error ${err?.response?.status || err?.code || 'unknown'} ${err?.message || 'Provider returned error'}\n${JSON.stringify(errorDetails, null, 2)}`
+      );
       
       this.contentParts = this.contentParts || [];
       this.contentParts.push({
