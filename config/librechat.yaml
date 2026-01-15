@@ -107,6 +107,7 @@ endpoints:
         headers:
           HTTP-Referer: "https://twin.mentat.su"
           X-Title: "TwinChat"
+        require_parameters: false
 
     - name: "OpenRouter - xAI (Grok)"
       apiKey: "${OPENROUTER_API_KEY}"
