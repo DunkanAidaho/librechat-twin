@@ -488,17 +488,6 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       return;
     }
 
-    logger.info('[GraphWorkflow] guard check', {
-      useRagMemory,
-      hasAssistantText: Boolean(
-        (localResponse && localResponse.text) ||
-          (Array.isArray(localResponse?.content) &&
-            localResponse.content.some((part) => part.type === 'text' && part.text)),
-      ),
-      conversationId: localConversationId,
-      assistantMessageId: localResponse && localResponse.messageId,
-    });
-
     const tasks = [];
     const userContent = localUserMessage ? localUserMessage.text || '' : '';
     let assistantText = localResponse ? localResponse.text || '' : '';
@@ -542,17 +531,27 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
     }
 
     if (tasks.length > 0) {
-      await enqueueMemoryTasksSafe(tasks, {
-        reason: 'regular_turn',
-        conversationId: localConversationId,
-        userId,
-        fileId: null,
-        textLength: (userContent?.length || 0) + (assistantText?.length || 0),
+      // Fire-and-forget для новых чатов (не блокируем ответ)
+      setImmediate(async () => {
+        try {
+          await enqueueMemoryTasksSafe(tasks, {
+            reason: 'regular_turn',
+            conversationId: localConversationId,
+            userId,
+            fileId: null,
+            textLength: (userContent?.length || 0) + (assistantText?.length || 0),
+          });
+        } catch (err) {
+          logger.error('[processConversationArtifacts] Failed to enqueue memory tasks', {
+            conversationId: localConversationId,
+            error: err?.message,
+          });
+        }
       });
     }
 
     if (!assistantText || !assistantText.trim()) {
-      logger.info('[GraphWorkflow] пропуск Graph (нет текста ассистента)', {
+      logger.debug('[GraphWorkflow] пропуск Graph (нет текста ассистента)', {
         conversationId: localConversationId,
         assistantMessageId: localResponse?.messageId,
       });
@@ -570,19 +569,17 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       context_flags: localResponse?.contextFlags || [],
     };
 
-    try {
-      logger.info(
-        `[GraphWorkflow] ветка Graph запущена (conversation=${localConversationId}, message=${localResponse?.messageId})`,
-      );
-
-      await enqueueGraphTaskWithResilience(graphPayload);
-
-      logger.info(`[GraphWorkflow] started for message ${localResponse?.messageId}`);
-    } catch (err) {
-      logger.error(
-        `[GraphWorkflow] Ошибка постановки/выполнения (conversation=${localConversationId}, message=${localResponse?.messageId}): ${err?.message || err}`,
-      );
-    }
+    // Fire-and-forget для graph workflow (не блокируем ответ)
+    setImmediate(async () => {
+      try {
+        await enqueueGraphTaskWithResilience(graphPayload);
+        logger.debug(`[GraphWorkflow] started for message ${localResponse?.messageId}`);
+      } catch (err) {
+        logger.error(
+          `[GraphWorkflow] Ошибка постановки/выполнения (conversation=${localConversationId}, message=${localResponse?.messageId}): ${err?.message || err}`,
+        );
+      }
+    });
   };
 
   let sender;
@@ -743,10 +740,10 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       return;
     }
 
-    logger.info(`[DIAG] Контекст RAG пропускается (обрабатывается на клиенте).`);
+    logger.debug(`[AgentController] Контекст RAG обрабатывается на клиенте.`);
     const originalTextForDisplay = text || '';
 
-    logger.info(`[DEBUG-request] conversationId before build=${conversationId}`);
+    logger.debug(`[AgentController] conversationId=${conversationId}`);
 
     if (!HEADLESS_STREAM) {
       const isGoogleEndpoint = (option) => option && option.endpoint === 'google';
@@ -931,17 +928,6 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
         if (userMessage && text !== originalTextForDisplay)
           userMessage.text = originalTextForDisplay;
 
-        logger.info('[GraphWorkflow1] pre-guard', {
-          useRagMemory,
-          hasResponse: Boolean(response),
-          responseKeys: response ? Object.keys(response) : [],
-          assistantTextPreview:
-            typeof response?.text === 'string' ? response.text.slice(0, 80) : null,
-          responseContentTypes: Array.isArray(response?.content)
-            ? response.content.map((part) => part.type)
-            : null,
-        });
-
         if (useRagMemory) {
           await processConversationArtifacts({
             userMessage,
@@ -997,15 +983,13 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
           } catch {}
         }
 
-        logger.info('[GraphWorkflow2] pre-guard', {
-          useRagMemory,
-          hasResponse: Boolean(response),
-        });
-
         if (useRagMemory) {
-          triggerSummarization(req, conversationId).catch((err) =>
-            logger.error(`[Суммаризатор] Фоновый запуск завершился ошибкой`, err),
-          );
+          // Fire-and-forget для суммаризации (не блокируем ответ)
+          setImmediate(() => {
+            triggerSummarization(req, conversationId).catch((err) =>
+              logger.error(`[Суммаризатор] Фоновый запуск завершился ошибкой`, err),
+            );
+          });
         }
       }
       return;
@@ -1150,20 +1134,19 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       logger.info(`[AgentController] Ответ сформирован в фоне — клиент уже отключился.`);
     }
 
-    logger.info('[GraphWorkflow333] pre-guard', {
-      useRagMemory,
-      hasResponse: Boolean(response),
-    });
-
     if (useRagMemory) {
       await processConversationArtifacts({
         userMessage,
         response,
         conversationId,
       });
-      triggerSummarization(req, conversationId).catch((err) =>
-        logger.error(`[Суммаризатор] Фоновый запуск завершился ошибкой`, err),
-      );
+      
+      // Fire-and-forget для суммаризации
+      setImmediate(() => {
+        triggerSummarization(req, conversationId).catch((err) =>
+          logger.error(`[Суммаризатор] Фоновый запуск завершился ошибкой`, err),
+        );
+      });
     }
   } catch (error) {
     handleAbortError(res, req, error, {
@@ -1188,7 +1171,7 @@ async function triggerSummarization(req, conversationId) {
   const userId = req.user.id;
 
   if (!acquireSummarizationLock(conversationId)) {
-    logger.info(`[Суммаризатор] Диалог ${conversationId} уже обрабатывается, пропускаем.`);
+    logger.debug(`[Суммаризатор] Диалог ${conversationId} уже обрабатывается, пропускаем.`);
     return;
   }
 
@@ -1202,7 +1185,7 @@ async function triggerSummarization(req, conversationId) {
     const messageCount = allMessages.length;
     let lastSummarized = convo.lastSummarizedIndex || 0;
 
-    logger.info(
+    logger.debug(
       `[Суммаризатор] Проверка диалога ${conversationId}: всего сообщений=${messageCount}, последняя суммаризация=${lastSummarized}.`,
     );
 
@@ -1239,7 +1222,7 @@ async function triggerSummarization(req, conversationId) {
       lastSummarized + MAX_MESSAGES_PER_SUMMARY,
     );
     if (messagesToSummarize.length < 2) {
-      logger.info(
+      logger.debug(
         `[Суммаризатор] Недостаточно сообщений для суммаризации диалога ${conversationId}, освобождаем блокировку.`,
       );
       return;
