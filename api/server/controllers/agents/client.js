@@ -857,6 +857,94 @@ function logToolError(graph, error, toolId) {
 }
 
 /**
+ * @description Detects if error is context overflow (400 with token limit message).
+ * @param {Error} error - Error object to check.
+ * @returns {boolean} True if context overflow detected.
+ */
+function detectContextOverflow(error) {
+  if (!error) {
+    return false;
+  }
+
+  const status = error?.status || error?.response?.status || error?.code;
+  if (status !== 400 && status !== '400') {
+    return false;
+  }
+
+  const message = error?.message || error?.response?.data?.message || '';
+  const lowerMessage = String(message).toLowerCase();
+
+  return (
+    lowerMessage.includes('context length') ||
+    lowerMessage.includes('maximum context') ||
+    lowerMessage.includes('token') && (lowerMessage.includes('exceed') || lowerMessage.includes('limit'))
+  );
+}
+
+/**
+ * @description Aggressively compresses messages for retry after context overflow.
+ * @param {Array} messages - Original messages array.
+ * @param {number} targetReduction - Target reduction percentage (0-1).
+ * @returns {Array} Compressed messages array.
+ */
+function compressMessagesForRetry(messages, targetReduction = 0.5) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return messages;
+  }
+
+  const compressed = [];
+  const keepSystemMessage = messages.find(m => m._getType && m._getType() === 'system');
+  
+  if (keepSystemMessage) {
+    const systemContent = typeof keepSystemMessage.content === 'string' 
+      ? keepSystemMessage.content 
+      : JSON.stringify(keepSystemMessage.content);
+    
+    const maxSystemLength = Math.floor(systemContent.length * (1 - targetReduction));
+    const truncatedSystem = systemContent.slice(0, maxSystemLength);
+    
+    compressed.push(new SystemMessage({ 
+      content: truncatedSystem + '\n[...system message truncated due to context limit...]' 
+    }));
+  }
+
+  const nonSystemMessages = messages.filter(m => !m._getType || m._getType() !== 'system');
+  const keepCount = Math.max(3, Math.floor(nonSystemMessages.length * (1 - targetReduction)));
+  const recentMessages = nonSystemMessages.slice(-keepCount);
+
+  for (const msg of recentMessages) {
+    const messageType = msg._getType ? msg._getType() : 'unknown';
+    let content = msg.content;
+
+    if (typeof content === 'string') {
+      const maxLength = Math.floor(content.length * (1 - targetReduction));
+      if (content.length > maxLength) {
+        content = content.slice(0, maxLength) + '\n[...truncated...]';
+      }
+    } else if (Array.isArray(content)) {
+      content = content
+        .filter(part => part.type === 'text')
+        .map(part => {
+          const text = part.text || '';
+          const maxLength = Math.floor(text.length * (1 - targetReduction));
+          return {
+            type: 'text',
+            text: text.length > maxLength ? text.slice(0, maxLength) + '\n[...truncated...]' : text
+          };
+        });
+    }
+
+    if (messageType === 'human') {
+      compressed.push(new HumanMessage({ content }));
+    } else {
+      compressed.push(msg.constructor ? new msg.constructor({ content }) : { ...msg, content });
+    }
+  }
+
+  return compressed;
+}
+
+/**
  * @description Agent client for handling AI agent interactions, RAG, and tool integrations.
  * @extends BaseClient
  */
@@ -2551,6 +2639,9 @@ Graph hints: ${graphQueryHint}`;
     let config;
     let run;
     let memoryPromise;
+    let retryAttempt = 0;
+    const MAX_RETRIES = 2;
+    
     try {
       if (!abortController) {
         abortController = new AbortController();
@@ -2802,7 +2893,43 @@ Graph hints: ${graphQueryHint}`;
         config.signal = null;
       };
 
-      await runAgent(this.options.agent, initialMessages);
+      // Main execution loop with retry logic
+      while (retryAttempt <= MAX_RETRIES) {
+        try {
+          await runAgent(this.options.agent, initialMessages);
+          break; // Success, exit retry loop
+        } catch (runError) {
+          if (detectContextOverflow(runError) && retryAttempt < MAX_RETRIES) {
+            retryAttempt++;
+            const reductionFactor = 0.3 + (retryAttempt * 0.2); // 30%, 50%, 70% reduction
+            
+            logger.warn('[context.overflow.retry]', {
+              conversationId: this.conversationId,
+              attempt: retryAttempt,
+              maxRetries: MAX_RETRIES,
+              reductionFactor,
+              originalError: runError?.message,
+            });
+
+            // Compress messages for retry
+            initialMessages = compressMessagesForRetry(initialMessages, reductionFactor);
+            
+            logger.info('[context.overflow.compressed]', {
+              conversationId: this.conversationId,
+              attempt: retryAttempt,
+              newMessageCount: initialMessages.length,
+              reductionFactor,
+            });
+
+            // Wait a bit before retry
+            await new Promise(resolve => setTimeout(resolve, 500 * retryAttempt));
+            continue;
+          }
+          
+          // If not overflow or max retries reached, throw error
+          throw runError;
+        }
+      }
 
       let finalContentStart = 0;
       if (
@@ -2959,6 +3086,22 @@ Graph hints: ${graphQueryHint}`;
 
       if (isAborted) {
         logger.info('[agents/client.chatCompletion] aborted by client; ending gracefully');
+        return;
+      }
+
+      // Check if this is a context overflow error after all retries
+      if (detectContextOverflow(err) && retryAttempt >= MAX_RETRIES) {
+        logger.error('[context.overflow.max_retries]', {
+          conversationId: this.conversationId,
+          attempts: retryAttempt,
+          message: 'Max retries reached for context overflow',
+        });
+        
+        this.contentParts = this.contentParts || [];
+        this.contentParts.push({
+          type: ContentTypes.ERROR,
+          [ContentTypes.ERROR]: 'Context window exceeded. Please try with a shorter conversation history or reduce the amount of context.',
+        });
         return;
       }
 
