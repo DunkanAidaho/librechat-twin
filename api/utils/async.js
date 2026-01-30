@@ -115,7 +115,6 @@ async function retryAsync(fn, options = {}) {
     jitter = 0.2,
     onRetry,
     signal,
-    timeoutMs,
   } = options;
 
   let attempt = 0;
@@ -127,20 +126,16 @@ async function retryAsync(fn, options = {}) {
     }
 
     try {
-      const execPromise = Promise.resolve(fn(attempt));
-      const result =
-        typeof timeoutMs === 'function' || typeof timeoutMs === 'number'
-          ? await withTimeout(
-              execPromise,
-              typeof timeoutMs === 'function' ? timeoutMs(attempt) : timeoutMs,
-              'Повторная операция превысила таймаут',
-              signal,
-            )
-          : await execPromise;
-
+      const result = await fn(attempt);
       return result;
     } catch (error) {
       lastError = error;
+      
+      // Don't retry on abort errors
+      if (error?.name === 'AbortError' || error?.message?.includes('абортирован')) {
+        throw error;
+      }
+      
       if (attempt === retries) {
         break;
       }

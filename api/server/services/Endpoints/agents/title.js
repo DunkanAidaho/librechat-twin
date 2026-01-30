@@ -22,7 +22,7 @@ const addTitle = async (req, { text, response, client }) => {
   const googleConfig = providersConfig.google;
   const titlesConfig = configService.getSection('agents').titles;
   const TITLE_CONVO = titlesConfig.enabled;
-  if (!isEnabled(TITLE_CONВО)) {
+  if (!isEnabled(TITLE_CONVO)) {
     return;
   }
   if (client?.options?.titleConvo === false) {
@@ -72,57 +72,83 @@ const addTitle = async (req, { text, response, client }) => {
       );
       return;
     }
-    const { runWithResilience } = require('~/utils/async');
-const titleStart = Date.now();
-try {
-  const title = await runWithResilience(
-    'titleConvo',
-    () => Promise.race([
-      client.titleConvo({ text, abortController }).catch((error) => {
-        logger.error('[title] client.titleConvo failed (conversation=%s, endpoint=%s, model=%s): %s', response?.conversationId ?? 'unknown', endpointName, modelName, error?.message ?? error);
-        throw error;
-      }),
-      timeoutPromise
-    ]),
-    { timeoutMs: 45000, retries: 1, operation: 'title' }
-  );
-  const titleDur = Date.now() - titleStart;
-  logger.info('[title] Успех для conv=%s (endpoint=%s, dur=%dms): %s', response?.conversationId ?? 'unknown', endpointName, titleDur, String(title).slice(0, 120));
-  observeAgentTitle({ endpoint: endpointName }, titleDur);
-  // ... (rest: cache, saveConvo)
-} catch (e) {
-  const titleDur = Date.now() - titleStart;
-  incAgentTitleFailure({ endpoint: endpointName, reason: e?.message || 'unknown' });
-  logger.error('[title] Ошибка для conv=%s (dur=%dms): %s', response?.conversationId ?? 'unknown', endpointName, titleDur, e?.message || e);
-  // ... (rest: abort)
-}const title = await titlePromise;
-    if (!abortController.signal.aborted) {
-      abortController.abort();
-    }
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
-    if (!title) {
+    const { runWithResilience } = require('~/server/utils/resilience');
+    const titleStart = Date.now();
+    try {
+      const title = await runWithResilience(
+        'titleConvo',
+        () =>
+          Promise.race([
+            client.titleConvo({ text, abortController }).catch((error) => {
+              logger.error(
+                '[title] client.titleConvo failed (conversation=%s, endpoint=%s, model=%s): %s',
+                response?.conversationId ?? 'unknown',
+                endpointName,
+                modelName,
+                error?.message ?? error,
+              );
+              throw error;
+            }),
+            timeoutPromise,
+          ]),
+        { timeoutMs: 45000, retries: 1, operation: 'title' },
+      );
+      const titleDur = Date.now() - titleStart;
+      logger.info(
+        '[title] Успех для conv=%s (endpoint=%s, dur=%dms): %s',
+        response?.conversationId ?? 'unknown',
+        endpointName,
+        titleDur,
+        String(title).slice(0, 120),
+      );
+      observeAgentTitle({ endpoint: endpointName }, titleDur);
+
+      if (!abortController.signal.aborted) {
+        abortController.abort();
+      }
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      if (!title) {
+        logger.debug(
+          '[title] empty result (conversation=%s, endpoint=%s, model=%s)',
+          response?.conversationId ?? 'unknown',
+          endpointName,
+          modelName,
+        );
+        return;
+      }
       logger.debug(
-        '[title] empty result (conversation=%s, endpoint=%s, model=%s)',
+        '[title] generated (conversation=%s, endpoint=%s, model=%s): %s',
         response?.conversationId ?? 'unknown',
         endpointName,
         modelName,
+        String(title).slice(0, 120),
       );
-      return;
+      await titleCache.set(key, title, 120000);
+      await saveConvo(
+        req,
+        { conversationId: response.conversationId, title },
+        { context: 'api/server/services/Endpoints/agents/title.js' },
+      );
+    } catch (e) {
+      const titleDur = Date.now() - titleStart;
+      incAgentTitleFailure({
+        endpoint: endpointName,
+        reason: e?.message || 'unknown',
+      });
+      logger.error(
+        '[title] Ошибка для conv=%s (dur=%dms): %s',
+        response?.conversationId ?? 'unknown',
+        endpointName,
+        titleDur,
+        e?.message || e,
+      );
+      throw e;
     }
-    logger.debug(
-      '[title] generated (conversation=%s, endpoint=%s, model=%s): %s',
-      response?.conversationId ?? 'unknown',
-      endpointName,
-      modelName,
-      String(title).slice(0, 120),
-    );
-    await titleCache.set(key, title, 120000);
-    await saveConvo(req, { conversationId: response.conversationId, title }, { context: 'api/server/services/Endpoints/agents/title.js' });
   } catch (error) {
     if (!abortController.signal.aborted) {
-      try:
+      try {
         abortController.abort();
       } catch {}
     }

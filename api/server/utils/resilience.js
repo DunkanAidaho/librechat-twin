@@ -67,7 +67,7 @@ async function runWithResilience(operationName, fn, options = {}) {
     onRetry: async (error, attemptNumber) => {
       const nextAttempt = attemptNumber + 1;
       logger.warn(
-        '[Resilience] Повторная попытка %s после ошибки в %s: %s',
+        '[Resilience] Повторная попытка %d после ошибки в %s: %s',
         nextAttempt,
         operationName,
         error?.message || error,
@@ -91,7 +91,7 @@ async function runWithResilience(operationName, fn, options = {}) {
     const result = await retryAsync(attemptExecutor, retryOptions);
     const durationMs = Date.now() - startedAt;
     logger.debug(
-      '[Resilience] Операция %s завершена, попыток=%s, длительность=%sms',
+      '[Resilience] Операция %s завершена, попыток=%d, длительность=%dms',
       operationName,
       normalizedRetries + 1,
       durationMs,
@@ -100,7 +100,7 @@ async function runWithResilience(operationName, fn, options = {}) {
   } catch (err) {
     const durationMs = Date.now() - startedAt;
     logger.error(
-      '[Resilience] Операция %s провалилась спустя %sms: %s',
+      '[Resilience] Операция %s провалилась спустя %dms: %s',
       operationName,
       durationMs,
       err?.message || err,
