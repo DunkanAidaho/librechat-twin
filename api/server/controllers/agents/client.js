@@ -385,6 +385,39 @@ async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAP
 }
 
 /**
+ * Вычисляет адаптивный таймаут для суммаризации на основе размера контекста.
+ * @param {number} contextLength - Длина контекста в символах.
+ * @param {number} baseTimeoutMs - Базовый таймаут из конфигурации.
+ * @returns {number} Адаптивный таймаут в миллисекундах.
+ */
+function calculateAdaptiveTimeout(contextLength, baseTimeoutMs) {
+  // Базовый таймаут для контекста до 50k символов
+  const BASE_CONTEXT_SIZE = 50000;
+  
+  if (contextLength <= BASE_CONTEXT_SIZE) {
+    return baseTimeoutMs;
+  }
+
+  // Добавляем 20 секунд на каждые дополнительные 50k символов
+  const extraChunks = Math.ceil((contextLength - BASE_CONTEXT_SIZE) / BASE_CONTEXT_SIZE);
+  const additionalTimeout = extraChunks * 20000;
+  
+  // Максимальный таймаут - 5 минут
+  const MAX_TIMEOUT = 300000;
+  const adaptiveTimeout = Math.min(baseTimeoutMs + additionalTimeout, MAX_TIMEOUT);
+  
+  logger.info('[rag.timeout.adaptive]', {
+    contextLength,
+    baseTimeoutMs,
+    adaptiveTimeout,
+    extraChunks,
+    additionalTimeout,
+  });
+  
+  return adaptiveTimeout;
+}
+
+/**
  * @description Performs map-reduce condensation on context text for RAG using configured providers.
  * @param {Object} params - Parameters for context condensation.
  * @param {Object} params.req - Express request object.
@@ -393,7 +426,7 @@ async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAP
  * @param {string} params.contextText - Raw context text to condense.
  * @param {string} params.userQuery - User query for relevance scoring.
  * @param {Object|null} [params.graphContext=null] - Optional graph context data.
- * @param {{ budgetChars: number, chunkChars: number, provider?: string }|null} [params.summarizationConfig=null] - Summarization limits from runtime config.
+ * @param {{ budgetChars: number, chunkChars: number, provider?: string, timeoutMs?: number }|null} [params.summarizationConfig=null] - Summarization limits from runtime config.
  * @returns {Promise<string>} Condensed context text.
  * @throws {Error} If condensation fails, falls back to raw context.
  * @example
@@ -417,12 +450,14 @@ async function mapReduceContext({
   const defaults = {
     budgetChars: 50000,
     chunkChars: 30000,
+    timeoutMs: 125000, // Увеличен дефолтный таймаут
   };
 
   const {
     budgetChars: cfgBudget,
     chunkChars: cfgChunk,
     provider: cfgProvider,
+    timeoutMs: cfgTimeout,
   } = summarizationConfig ?? defaults;
 
   const budgetChars =
@@ -430,6 +465,10 @@ async function mapReduceContext({
   const chunkChars =
     Number.isFinite(cfgChunk) && cfgChunk > 0 ? Number(cfgChunk) : defaults.chunkChars;
   const provider = cfgProvider && typeof cfgProvider === 'string' ? cfgProvider : undefined;
+  
+  // Используем адаптивный таймаут
+  const baseTimeout = Number.isFinite(cfgTimeout) && cfgTimeout > 0 ? Number(cfgTimeout) : defaults.timeoutMs;
+  const adaptiveTimeout = calculateAdaptiveTimeout(contextText.length, baseTimeout);
 
   try {
     const finalContext = await ragCondenseContext({
@@ -442,6 +481,7 @@ async function mapReduceContext({
       budgetChars,
       chunkChars,
       provider,
+      timeoutMs: adaptiveTimeout, // Передаем адаптивный таймаут
     });
 
     logger.info('[rag.context.summarize.complete]', {
@@ -450,6 +490,7 @@ async function mapReduceContext({
       budgetChars,
       chunkChars,
       provider,
+      timeoutMs: adaptiveTimeout,
     });
 
     return finalContext;
@@ -457,6 +498,8 @@ async function mapReduceContext({
     logger.error('[rag.context.summarize.error]', {
       message: error?.message,
       stack: error?.stack,
+      contextLength: contextText.length,
+      timeoutMs: adaptiveTimeout,
     });
 
     return contextText;
@@ -1513,7 +1556,11 @@ Graph hints: ${graphQueryHint}`;
       );
     } else {
       const summarizationCfg = runtimeCfg.summarization || {};
-      const defaults = { budgetChars: 12000, chunkChars: 20000 };
+      const defaults = { 
+        budgetChars: 12000, 
+        chunkChars: 20000,
+        timeoutMs: 125000, // Увеличен дефолтный таймаут
+      };
       const budgetChars =
         Number.isFinite(summarizationCfg?.budgetChars) && summarizationCfg.budgetChars > 0
           ? summarizationCfg.budgetChars
@@ -1533,7 +1580,22 @@ Graph hints: ${graphQueryHint}`;
           `[rag.context.limit] conversation=${conversationId} param=memory.summarization.budgetChars limit=${budgetChars} original=${rawVectorTextLength}`
         );
         try {
-          const summarizationTimeoutMs = runtimeCfg.summarization?.timeoutMs ?? 25000;
+          // Получаем базовый таймаут из конфигурации
+          const baseTimeoutMs = Number.isFinite(summarizationCfg?.timeoutMs) && summarizationCfg.timeoutMs > 0
+            ? summarizationCfg.timeoutMs
+            : defaults.timeoutMs;
+          
+          // Вычисляем адаптивный таймаут на основе размера контекста
+          const adaptiveTimeoutMs = calculateAdaptiveTimeout(rawVectorTextLength, baseTimeoutMs);
+          
+          logger.info('[rag.context.summarize.timeout]', {
+            conversationId,
+            contextLength: rawVectorTextLength,
+            baseTimeoutMs,
+            adaptiveTimeoutMs,
+            configuredTimeout: summarizationCfg?.timeoutMs,
+          });
+          
           vectorText = await withTimeout(
             mapReduceContext({
               req,
@@ -1548,9 +1610,10 @@ Graph hints: ${graphQueryHint}`;
                 budgetChars,
                 chunkChars,
                 provider: summarizationCfg.provider,
+                timeoutMs: adaptiveTimeoutMs, // Передаем адаптивный таймаут
               },
             }),
-            summarizationTimeoutMs,
+            adaptiveTimeoutMs,
             'RAG summarization timed out'
           );
         } catch (summarizeError) {
@@ -1558,6 +1621,7 @@ Graph hints: ${graphQueryHint}`;
             message: summarizeError?.message,
             stack: summarizeError?.stack,
             timeout: summarizeError?.message?.includes('timed out'),
+            contextLength: rawVectorTextLength,
           });
           
           // On timeout, fall back to truncated text

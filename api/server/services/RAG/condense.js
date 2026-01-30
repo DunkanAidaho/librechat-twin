@@ -36,7 +36,8 @@ const GRAPH_CONTEXT_SUMMARY_LINE_LIMIT = ragContextConfig.summaryLineLimit;
 const GRAPH_CONTEXT_SUMMARY_HINT_MAX_CHARS = ragContextConfig.summaryHintMaxChars;
 const GRAPH_CONTEXT_INCLUDE_IN_SUMMARY = ragContextConfig.includeGraphInSummary;
 
-const CONDENSE_TIMEOUT_MS = condenseConfig.timeoutMs;
+// ИСПРАВЛЕНО: Читаем таймаут из конфигурации с увеличенным дефолтом
+const CONDENSE_TIMEOUT_MS = condenseConfig.timeoutMs || 125000;
 const SUMMARY_SYSTEM_PROMPT =
   'Ты — аккуратный компрессор текста для LibreChat. Соблюдай формат инструкции и не добавляй лишних пояснений.';
 
@@ -68,7 +69,7 @@ function localFallback(text, budgetChars) {
     return text;
   }
   const half = Math.max(1, Math.floor(budgetChars / 2));
-  return `${text.slice(0, half)}\\n...\\n${text.slice(-half)}`;
+  return `${text.slice(0, half)}\n...\n${text.slice(-half)}`;
 }
 
 function describeProviderChain(chain) {
@@ -86,16 +87,16 @@ function splitIntoChunks(text, target = 12000, hardMax = 15000) {
     if (buffer.trim().length) parts.push(buffer);
     buffer = '';
   };
-  const para = text.split(/\\n{2,}/g);
+  const para = text.split(/\n{2,}/g);
   for (const p of para) {
-    if ((buffer + '\\n\\n' + p).length <= target) {
-      buffer = buffer ? buffer + '\\n\\n' + p : p;
+    if ((buffer + '\n\n' + p).length <= target) {
+      buffer = buffer ? buffer + '\n\n' + p : p;
     } else if (p.length <= hardMax) {
       flush();
       buffer = p;
       flush();
     } else {
-      const sents = p.split(/(?<=[.!?])\\s+(?=[A-ZА-ЯЁ0-9])/g);
+      const sents = p.split(/(?<=[.!?])\s+(?=[A-ZА-ЯЁ0-9])/g);
       for (const s of sents) {
         if ((buffer + ' ' + s).length <= target) {
           buffer = buffer ? buffer + ' ' + s : s;
@@ -135,10 +136,10 @@ function mapPrompt(userQuery, graphExtra) {
   }
 
   if (graphExtra && Array.isArray(graphExtra.lines) && graphExtra.lines.length) {
-    extras.push(`Графовые связи:\\n${graphExtra.lines.join('\\n')}`);
+    extras.push(`Графовые связи:\n${graphExtra.lines.join('\n')}`);
   }
 
-  return [basePrompt, ...extras].join('\\n');
+  return [basePrompt, ...extras].join('\n');
 }
 
 function reducePrompt(userQuery, budget, graphExtra) {
@@ -152,10 +153,10 @@ function reducePrompt(userQuery, budget, graphExtra) {
   }
 
   if (graphExtra && Array.isArray(graphExtra.lines) && graphExtra.lines.length) {
-    extras.push(`Графовые связи:\\n${graphExtra.lines.join('\\n')}`);
+    extras.push(`Графовые связи:\n${graphExtra.lines.join('\n')}`);
   }
 
-  return [basePrompt, ...extras].join('\\n');
+  return [basePrompt, ...extras].join('\n');
 }
 
 function sha1(s) {
@@ -260,6 +261,9 @@ function resolveSummarizerProviders({ includeLocalFallback = true } = {}) {
         'https://openrouter.ai/api/v1',
       );
 
+      // ИСПРАВЛЕНО: Используем переданный timeoutMs или дефолтный
+      const timeout = options.timeoutMs || CONDENSE_TIMEOUT_MS;
+
       descriptors.push({
         provider: 'openrouter',
         model,
@@ -267,7 +271,7 @@ function resolveSummarizerProviders({ includeLocalFallback = true } = {}) {
         options: {
           baseURL,
           apiKey,
-          timeout: CONDENSE_TIMEOUT_MS,
+          timeout,
           referer: resolveFirstNonEmpty(
             options.referer,
             openrouterConfig.referer,
@@ -295,6 +299,9 @@ function resolveSummarizerProviders({ includeLocalFallback = true } = {}) {
       }
 
       const model = resolveFirstNonEmpty(modelValue, ollamaConfig.model, 'gemma:7b-instruct');
+      
+      // ИСПРАВЛЕНО: Используем переданный timeoutMs или дефолтный
+      const timeout = options.timeoutMs || CONDENSE_TIMEOUT_MS;
 
       descriptors.push({
         provider: 'ollama',
@@ -302,7 +309,7 @@ function resolveSummarizerProviders({ includeLocalFallback = true } = {}) {
         label: `ollama:${model}`,
         options: {
           url,
-          timeout: CONDENSE_TIMEOUT_MS,
+          timeout,
         },
       });
       return true;
@@ -486,11 +493,29 @@ async function condenseContext({
   budgetChars = 12000,
   chunkChars = 20000,
   graphContext = null,
+  timeoutMs = null, // ДОБАВЛЕНО: Принимаем таймаут извне
 }) {
   const t0 = Date.now();
   try {
+    // ИСПРАВЛЕНО: Передаем timeoutMs в resolveSummarizerProviders
+    const effectiveTimeout = timeoutMs || CONDENSE_TIMEOUT_MS;
+    
+    logger.info('[RAG][condense] Configuration', {
+      budgetChars,
+      chunkChars,
+      timeoutMs: effectiveTimeout,
+      contextLength: contextText.length,
+    });
+    
     const { chain: providerChain, warnings, signature: chainSignature } = resolveSummarizerProviders();
     warnings.forEach((message) => logger.warn(`[RAG][condense] ${message}`));
+
+    // ИСПРАВЛЕНО: Обновляем таймауты в дескрипторах провайдеров
+    for (const descriptor of providerChain) {
+      if (descriptor.options && typeof descriptor.options === 'object') {
+        descriptor.options.timeout = effectiveTimeout;
+      }
+    }
 
     if (!providerChain.length) {
       logger.warn('[RAG][condense] Цепочка провайдеров пуста, возвращаем исходный контекст.');
@@ -505,7 +530,7 @@ async function condenseContext({
     const chunks = splitIntoChunks(contextText, chunkChars, Math.floor(chunkChars * 1.25));
     const providerChainLabel = describeProviderChain(providerChain);
     logger.info(
-      `[RAG][condense] MR-Start: chunks=${chunks.length}, budget=${budgetChars}, chunkChars=${chunkChars}, providers=${providerChainLabel}`,
+      `[RAG][condense] MR-Start: chunks=${chunks.length}, budget=${budgetChars}, chunkChars=${chunkChars}, timeout=${effectiveTimeout}ms, providers=${providerChainLabel}`,
     );
 
     const graphExtra = prepareGraphExtras(graphContext);
@@ -523,14 +548,14 @@ async function condenseContext({
     const limit = actualPLimit(CONCURRENCY);
 
     if (DEBUG_CONDENSE) {
-      logger.info(`[RAG][condense] Concurrency limit: ${CONCURRENCY}, Cache TTL: ${CACHE_TTL}s`);
+      logger.info(`[RAG][condense] Concurrency limit: ${CONCURRENCY}, Cache TTL: ${CACHE_TTL}s, Timeout: ${effectiveTimeout}ms`);
     }
 
     const summaries = await Promise.all(
       chunks.map((chunk, index) =>
         limit(async () => {
           const chunkNumber = index + 1;
-          const prompt = `${mapPrompt(userQuery, graphExtra)}\\n\\n=== Текст чанка ===\\n${chunk}`;
+          const prompt = `${mapPrompt(userQuery, graphExtra)}\n\n=== Текст чанка ===\n${chunk}`;
           const cacheKey = cacheKeyChunk(chainSignature, budgetChars, userQuery, chunk, graphExtra);
 
           if (r && CACHE_TTL > 0) {
@@ -615,7 +640,7 @@ async function condenseContext({
       ),
     );
 
-    const joined = summaries.filter(Boolean).join('\\n\\n---\\n\\n');
+    const joined = summaries.filter(Boolean).join('\n\n---\n\n');
     logger.info(
       `[RAG][condense] Map-Phase finished: ${summaries.length} chunks summarized into ${joined.length} chars. Wall-clock: ${(Date.now() - t0) / 1000}s`,
     );
@@ -667,7 +692,7 @@ async function condenseContext({
       }
     }
 
-    const reducePromptText = `${reducePrompt(userQuery, budgetChars, graphExtra)}\\n\\n=== Частичные выжимки ===\\n${joined}`;
+    const reducePromptText = `${reducePrompt(userQuery, budgetChars, graphExtra)}\n\n=== Частичные выжимки ===\n${joined}`;
     let { text: finalSummary, providerLabel: reduceProviderLabel } = await summarizeWithChain({
       chain: providerChain,
       prompt: reducePromptText,
@@ -693,7 +718,7 @@ async function condenseContext({
 
     let guard = 0;
     while (summaryText && summaryText.length > budgetChars && guard < 2) {
-      const guardPrompt = `Сожми ещё до ~${budgetChars} символов, сохранив ключевые факты и числа.\\n\\n=== Текст ===\\n${summaryText}`;
+      const guardPrompt = `Сожми ещё до ~${budgetChars} символов, сохранив ключевые факты и числа.\n\n=== Текст ===\n${summaryText}`;
       const { text: guardText, providerLabel: guardProvider } = await summarizeWithChain({
         chain: providerChain,
         prompt: guardPrompt,
