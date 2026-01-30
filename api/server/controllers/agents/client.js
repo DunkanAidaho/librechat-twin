@@ -313,7 +313,7 @@ function resolvePricingRates(modelName, overrideConfig) {
  */
 async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAPH_RELATIONS_LIMIT, timeoutMs = GRAPH_REQUEST_TIMEOUT_MS }) {
   if (!USE_GRAPH_CONTEXT || !conversationId) {
-    logger.warn('[DIAG-GRAPH] Graph context skipped', {
+    logger.debug('[rag.graph] Graph context skipped', {
       useGraphContext: USE_GRAPH_CONTEXT,
       conversationId,
     });
@@ -323,7 +323,7 @@ async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAP
   const url = `${toolsGatewayUrl}/neo4j/graph_context`;
   const requestPayload = { conversation_id: conversationId, limit };
 
-  logger.info('[DIAG-GRAPH] Fetching graph context', {
+  logger.debug('[rag.graph] Fetching graph context', {
     conversationId,
     toolsGatewayUrl,
     limit,
@@ -335,7 +335,7 @@ async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAP
     const lines = Array.isArray(response?.data?.lines) ? response.data.lines : [];
     const queryHint = response?.data?.query_hint ? String(response.data.query_hint) : '';
 
-    logger.info('[DIAG-GRAPH] Graph context response', {
+    logger.debug('[rag.graph] Graph context response', {
       conversationId,
       url,
       linesCount: lines.length,
@@ -367,14 +367,14 @@ async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAP
         : null,
     };
 
-    logger.error('[DIAG-GRAPH] Failed to fetch graph context', serializedError);
+    logger.error('[rag.graph] Failed to fetch graph context', serializedError);
 
     try {
       if (typeof error?.toJSON === 'function') {
-        logger.error('[DIAG-GRAPH] Axios error JSON', error.toJSON());
+        logger.error('[rag.graph] Axios error JSON', error.toJSON());
       }
     } catch (jsonErr) {
-        logger.warn('[DIAG-GRAPH] Failed to serialize axios error', {
+        logger.warn('[rag.graph] Failed to serialize axios error', {
           message: jsonErr?.message,
           stack: jsonErr?.stack,
         });
@@ -406,7 +406,7 @@ function calculateAdaptiveTimeout(contextLength, baseTimeoutMs) {
   const MAX_TIMEOUT = 300000;
   const adaptiveTimeout = Math.min(baseTimeoutMs + additionalTimeout, MAX_TIMEOUT);
   
-  logger.info('[rag.timeout.adaptive]', {
+  logger.debug('[rag.timeout.adaptive]', {
     contextLength,
     baseTimeoutMs,
     adaptiveTimeout,
@@ -1068,7 +1068,7 @@ class AgentClient extends BaseClient {
    * @returns {void}
    */
   setOptions(options) {
-    logger.info('[api/server/controllers/agents/client.js] setOptions', options);
+    logger.debug('[AgentClient] setOptions', options);
   }
 
   /**
@@ -1224,7 +1224,7 @@ class AgentClient extends BaseClient {
     const encoding = this.getEncoding ? this.getEncoding() : 'o200k_base';
 
     if (!runtimeCfg.useConversationMemory || !conversationId || !userQuery) {
-      logger.info('[rag.context.skip]', {
+      logger.debug('[rag.context.skip]', {
         conversationId,
         reason: 'disabled_or_empty_query',
         enableMemoryCache: runtimeCfg.enableMemoryCache,
@@ -1241,14 +1241,14 @@ class AgentClient extends BaseClient {
 
     const queryMaxChars = runtimeCfg?.ragQuery?.maxChars || 6000;
     if (userQuery.length > queryMaxChars) {
-      logger.info(
+      logger.debug(
         `[rag.context.limit] conversation=${conversationId} param=memory.ragQuery.maxChars limit=${queryMaxChars} original=${userQuery.length}`
       );
     }
 
     const normalizedQuery = userQuery.slice(0, queryMaxChars);
     const queryTokenCount = Tokenizer.getTokenCount(normalizedQuery, encoding);
-    logger.info(
+    logger.debug(
       `[rag.context.query.tokens] conversation=${conversationId} length=${normalizedQuery.length} tokens=${queryTokenCount}`
     );
 
@@ -1300,11 +1300,11 @@ class AgentClient extends BaseClient {
 
       cacheStatus = 'miss';
       observeCache('miss');
-      logger.info(
+      logger.debug(
         `[rag.context.cache.miss] conversation=${conversationId} cacheKey=${cacheKey}`
       );
     } else {
-      logger.info('[rag.context.cache.skip]', {
+      logger.debug('[rag.context.cache.skip]', {
         conversationId,
         cacheKey,
         reason: 'cache_disabled',
@@ -1349,7 +1349,7 @@ class AgentClient extends BaseClient {
           });
 
           if (rawGraphLinesCount > graphContextLines.length && graphMaxLines) {
-            logger.info(
+            logger.debug(
               `[rag.context.limit] conversation=${conversationId} param=memory.graphContext.maxLines limit=${graphMaxLines} original=${rawGraphLinesCount}`
             );
           }
@@ -1358,13 +1358,13 @@ class AgentClient extends BaseClient {
             graphContextLines.some((line) => line.endsWith('…')) &&
             graphMaxLineChars
           ) {
-            logger.info(
+            logger.debug(
               `[rag.context.limit] conversation=${conversationId} param=memory.graphContext.maxLineChars limit=${graphMaxLineChars}`
             );
           }
         }
 
-        logger.info(
+        logger.debug(
           `[rag.context.graph.raw] conversation=${conversationId} rawLines=${rawGraphLinesCount} sanitizedLines=${graphContextLines.length}`
         );
 
@@ -1375,7 +1375,7 @@ class AgentClient extends BaseClient {
               graphSummaryHintMaxChars &&
               trimmedHint.length > graphSummaryHintMaxChars
             ) {
-              logger.info(
+              logger.debug(
                 `[rag.context.limit] conversation=${conversationId} param=memory.graphContext.summaryHintMaxChars limit=${graphSummaryHintMaxChars} original=${trimmedHint.length}`
               );
             }
@@ -1393,7 +1393,7 @@ class AgentClient extends BaseClient {
         });
       }
     } else {
-      logger.warn('[rag.context.graph.skip]', {
+      logger.debug('[rag.context.graph.skip]', {
         conversationId,
         reason: 'tools_gateway_missing',
       });
@@ -1410,7 +1410,7 @@ Graph hints: ${graphQueryHint}`;
 
     const condensedQuery = condenseRagQuery(ragSearchQuery, queryMaxChars);
     if (condensedQuery.length < ragSearchQuery.length) {
-      logger.info('[rag.context.query.condensed]', {
+      logger.debug('[rag.context.query.condensed]', {
         conversationId,
         originalLength: ragSearchQuery.length,
         condensedLength: condensedQuery.length,
@@ -1448,10 +1448,10 @@ Graph hints: ${graphQueryHint}`;
           maxChars: vectorMaxChars,
         });
 
-        logger.info(
+        logger.debug(
           `[rag.context.vector.raw] conversation=${conversationId} rawResults=${rawVectorResults} sanitizedChunks=${vectorChunks.length} topK=${vectorTopK}`
         );
-        logger.info('[rag.context.vector.limits]', { 
+        logger.debug('[rag.context.vector.limits]', { 
           conversationId, 
           maxChunks: vectorMaxChunks, 
           recentTurns, 
@@ -1487,7 +1487,7 @@ Graph hints: ${graphQueryHint}`;
             maxChars: vectorMaxChars,
           });
 
-          logger.info('[rag.context.recent]', { 
+          logger.debug('[rag.context.recent]', { 
             conversationId, 
             recentTurns, 
             got: recentChunks.length 
@@ -1495,7 +1495,7 @@ Graph hints: ${graphQueryHint}`;
         } catch (e) {
           const status = e?.response?.status;
           if (status === 404 || status === 501) {
-            logger.info('[rag.context.recent.unavailable]', { conversationId, status });
+            logger.debug('[rag.context.recent.unavailable]', { conversationId, status });
           } else {
             logger.warn('[rag.context.recent.skip]', { 
               conversationId, 
@@ -1521,7 +1521,7 @@ Graph hints: ${graphQueryHint}`;
       vectorChunks = merged.slice(0, vectorMaxChunks);
 
       if (rawVectorResults > vectorChunks.length && vectorMaxChunks) {
-        logger.info(
+        logger.debug(
           `[rag.context.limit] conversation=${conversationId} param=memory.vectorContext.maxChunks limit=${vectorMaxChunks} original=${rawVectorResults}`
         );
       }
@@ -1530,12 +1530,12 @@ Graph hints: ${graphQueryHint}`;
         vectorChunks.some((chunk) => chunk.endsWith('…')) &&
         vectorMaxChars
       ) {
-        logger.info(
+        logger.debug(
           `[rag.context.limit] conversation=${conversationId} param=memory.vectorContext.maxChars limit=${vectorMaxChars}`
         );
       }
     } else {
-      logger.warn('[rag.context.vector.skip]', {
+      logger.debug('[rag.context.vector.skip]', {
         conversationId,
         reason: 'tools_gateway_missing',
       });
@@ -1544,14 +1544,15 @@ Graph hints: ${graphQueryHint}`;
     metrics.vectorChunks = vectorChunks.length;
 
     const hasGraph = graphContextLines.length > 0;
+    const hasVector = vectorChunks.length > 0;
     const policyIntro =
       'Ниже предоставлен внутренний контекст для твоего сведения: граф знаний и выдержки из беседы. ' +
       'Используй эти данные для формирования точного и полного ответа. ' +
       'Категорически запрещается цитировать или пересказывать этот контекст, особенно строки, содержащие "-->". ' +
       'Эта информация предназначена только для твоего внутреннего анализа.\n\n';
 
-    if (!hasGraph && vectorChunks.length === 0) {
-      logger.info(
+    if (!hasGraph && !hasVector) {
+      logger.debug(
         `[rag.context.tokens] conversation=${conversationId} graphTokens=0 vectorTokens=0 contextTokens=0`
       );
     } else {
@@ -1576,7 +1577,7 @@ Graph hints: ${graphQueryHint}`;
         summarizationCfg.enabled !== false && vectorText.length > budgetChars;
 
       if (shouldSummarize) {
-        logger.info(
+        logger.debug(
           `[rag.context.limit] conversation=${conversationId} param=memory.summarization.budgetChars limit=${budgetChars} original=${rawVectorTextLength}`
         );
         try {
@@ -1588,7 +1589,7 @@ Graph hints: ${graphQueryHint}`;
           // Вычисляем адаптивный таймаут на основе размера контекста
           const adaptiveTimeoutMs = calculateAdaptiveTimeout(rawVectorTextLength, baseTimeoutMs);
           
-          logger.info('[rag.context.summarize.timeout]', {
+          logger.debug('[rag.context.summarize.timeout]', {
             conversationId,
             contextLength: rawVectorTextLength,
             baseTimeoutMs,
@@ -1721,7 +1722,7 @@ Graph hints: ${graphQueryHint}`;
         metrics,
         expiresAt: now + ragCacheTtlMs,
       });
-      logger.info(
+      logger.debug(
         `[rag.context.cache.store] conversation=${conversationId} cacheKey=${cacheKey} contextTokens=${metrics.contextTokens} graphTokens=${metrics.graphTokens} vectorTokens=${metrics.vectorTokens} queryTokens=${metrics.queryTokens}`
       );
     }
@@ -1768,70 +1769,64 @@ Graph hints: ${graphQueryHint}`;
       
       logger.warn(`[PROMPT-LIMIT] Принудительно усекаем историю с ${otherMessages.length} до ${MAX_MESSAGES_TO_PROCESS} сообщений. Dropped: ${droppedMessages.length}`);
       
-      // Отправляем dropped messages в RAG
+      // Отправляем dropped messages в RAG асинхронно
       const convId = this.conversationId || this.options?.req?.body?.conversationId;
       const userId = this.options?.req?.user?.id;
 
       if (convId && userId && droppedMessages.length) {
-        const droppedTasks = [];
+        setImmediate(async () => {
+          const droppedTasks = [];
 
-        for (const m of droppedMessages) {
-          const rawText = extractMessageText(m, '[history->RAG][dropped]');
-          const normalizedText = normalizeMemoryText(rawText, '[history->RAG][dropped]');
+          for (const m of droppedMessages) {
+            const rawText = extractMessageText(m, '[history->RAG][dropped]');
+            const normalizedText = normalizeMemoryText(rawText, '[history->RAG][dropped]');
 
-          if (!normalizedText || normalizedText.length < 20) continue;
+            if (!normalizedText || normalizedText.length < 20) continue;
 
-          const dedupeKey = makeIngestKey(convId, m.messageId, normalizedText);
-          if (IngestedHistory.has(dedupeKey)) continue;
+            const dedupeKey = makeIngestKey(convId, m.messageId, normalizedText);
+            if (IngestedHistory.has(dedupeKey)) continue;
 
-          IngestedHistory.add(dedupeKey);
+            IngestedHistory.add(dedupeKey);
 
-          const stableId = m.messageId || `dropped-${hashPayload(normalizedText).slice(0, 12)}`;
-          droppedTasks.push({
-            type: 'add_turn',
-            payload: {
-              conversation_id: convId,
-              message_id: stableId,
-              role: m?.isCreatedByUser ? 'user' : 'assistant',
-              content: normalizedText,
-              user_id: userId,
-            },
-          });
-        }
+            const stableId = m.messageId || `dropped-${hashPayload(normalizedText).slice(0, 12)}`;
+            droppedTasks.push({
+              type: 'add_turn',
+              payload: {
+                conversation_id: convId,
+                message_id: stableId,
+                role: m?.isCreatedByUser ? 'user' : 'assistant',
+                content: normalizedText,
+                user_id: userId,
+              },
+            });
+          }
 
-        if (droppedTasks.length) {
-          try {
-            // For dropped messages, use fire-and-forget to avoid blocking user request
-            const result = await withTimeout(
-              enqueueMemoryTasks(droppedTasks, {
+          if (droppedTasks.length) {
+            try {
+              await enqueueMemoryTasks(droppedTasks, {
                 reason: 'history_window_drop',
                 conversationId: convId,
                 userId,
                 messageCount: droppedTasks.length,
-                fireAndForget: droppedTasks.length > 50, // Fire-and-forget for large batches
-              }),
-              Math.min(MEMORY_TASK_TIMEOUT_MS, 5000), // Cap timeout for dropped messages
-              'Dropped history ingest timed out',
-            );
-            
-            // Don't set didEnqueueIngest for dropped messages to avoid unnecessary waiting
-            logger.info(`[history->RAG][dropped] queued ${droppedTasks.length} dropped messages`, {
-              conversationId: convId,
-              status: result?.status,
-              actualCount: result?.count,
-            });
-          } catch (queueError) {
-            safeError('[history->RAG][dropped] Failed to enqueue dropped messages', {
-              conversationId: convId,
-              messageCount: droppedTasks.length,
-              message: queueError?.message,
-            });
+                fireAndForget: true,
+              });
+              
+              logger.debug(`[history->RAG][dropped] queued ${droppedTasks.length} dropped messages`, {
+                conversationId: convId,
+              });
+            } catch (queueError) {
+              safeError('[history->RAG][dropped] Failed to enqueue dropped messages', {
+                conversationId: convId,
+                messageCount: droppedTasks.length,
+                message: queueError?.message,
+              });
+            }
           }
-        }
+        });
       }
     }
     const runtimeCfg = runtimeMemoryConfig.getMemoryConfig();
-    logger.info({
+    logger.debug({
       msg: '[config.history]',
       conversationId: this.conversationId,
       dontShrinkLastN: runtimeCfg?.history?.dontShrinkLastN,
@@ -1839,7 +1834,7 @@ Graph hints: ${graphQueryHint}`;
     });
     ragCacheTtlMs = Math.max(Number(runtimeCfg?.ragCacheTtl) * 1000, 0);
     const endpointOption = this.options?.req?.body?.endpointOption ?? this.options?.endpointOption ?? {};
-    logger.info({
+    logger.debug({
       msg: '[AgentClient.buildMessages] start',
       conversationId: this.conversationId,
       orderedMessagesCount: orderedMessages.length,
@@ -1915,7 +1910,7 @@ Graph hints: ${graphQueryHint}`;
               };
               IngestedHistory.add(dedupeKey);
               toIngest.push(taskPayload);
-              logger.info('[history->RAG] prepared memory task', {
+              logger.debug('[history->RAG] prepared memory task', {
                 conversationId: convId,
                 messageId: taskPayload.message_id,
                 role: taskPayload.role,
@@ -1939,11 +1934,11 @@ Graph hints: ${graphQueryHint}`;
               const limitLabel = m?.isCreatedByUser ? 'HIST_LONG_USER_TO_RAG' : 'ASSIST_LONG_TO_RAG';
               const limitValue = m?.isCreatedByUser ? HIST_LONG_USER_TO_RAG : ASSIST_LONG_TO_RAG;
               const shrinkReason = looksHTML ? 'html' : hasThink ? 'reasoning' : 'length';
-              logger.info(
+              logger.debug(
                 `[prompt][shrink] idx=${idx} role=${roleTag} reason=${shrinkReason} limit=${limitLabel} limitValue=${limitValue} snippetLen=${snippet.length}`
               );
             } else {
-              logger.info(
+              logger.debug(
                 `[prompt][shrink] idx=${idx} role=${roleTag} len=${len} action=keep-full keepReason=memory.history.dontShrinkLastN value=${effectiveDontShrink}`
               );
             }
@@ -1977,9 +1972,11 @@ Graph hints: ${graphQueryHint}`;
             (acc, task) => acc + (task.payload.content?.length ?? 0),
             0,
           );
-          try {
-            const result = await withTimeout(
-              enqueueMemoryTasks(
+          
+          // Fire-and-forget для history_sync (не блокируем ответ)
+          setImmediate(async () => {
+            try {
+              await enqueueMemoryTasks(
                 tasks,
                 {
                   reason: 'history_sync',
@@ -1987,28 +1984,22 @@ Graph hints: ${graphQueryHint}`;
                   userId: requestUserId,
                   textLength: totalLength,
                 },
-              ),
-              MEMORY_TASK_TIMEOUT_MS,
-              'History sync timed out',
-            );
-            
-            // Set flag only for successful blocking operations
-            if (this.options?.req && result?.status === 'queued') {
-              this.options.req.didEnqueueIngest = true;
+              );
+              
+              logger.debug(
+                `[history->RAG] queued ${tasks.length} turn(s) через JetStream ` +
+                `(conversation=${convId}, totalChars=${totalLength}).`,
+              );
+            } catch (queueError) {
+              safeError('[history->RAG] Failed to enqueue history tasks', {
+                conversationId: convId,
+                messageCount: tasks.length,
+                message: queueError?.message,
+              });
             }
-            logger.info(
-              `[history->RAG] queued ${tasks.length} turn(s) через JetStream ` +
-              `(conversation=${convId}, totalChars=${totalLength}).`,
-            );
-          } catch (queueError) {
-            safeError('[history->RAG] Failed to enqueue history tasks', {
-              conversationId: convId,
-              messageCount: tasks.length,
-              message: queueError?.message,
-            });
-          }
+          });
         } else {
-          logger.info('[history->RAG] nothing enqueued (missing user_id).');
+          logger.debug('[history->RAG] nothing enqueued (missing user_id).');
         }
       }
     } catch (e) {
@@ -2027,9 +2018,9 @@ Graph hints: ${graphQueryHint}`;
      */
     if (orderedMessages.length === 0 && systemContent.length === 0) {
         systemContent = 'You are a helpful assistant.';
-        logger.info('[DEBUG] Applied fallback systemContent for new chat');
+        logger.debug('[AgentClient] Applied fallback systemContent for new chat');
     }
-    logger.info(`[DIAG-PROMPT] Initial systemContent (from instructions/additional_instructions): ${systemContent.length} chars`);
+    logger.debug(`[AgentClient] Initial systemContent: ${systemContent.length} chars`);
 
     let ragContextLength = 0;
     let ragCacheStatus = 'skipped';
@@ -2040,14 +2031,13 @@ Graph hints: ${graphQueryHint}`;
       req.ragCacheStatus = ragCacheStatus;
     }
 
-    // Часть A: Применение WAIT_FOR_RAG_INGEST_MS из runtimeCfg с upper bound
-    // Only wait for blocking operations (history_sync, index_file), not dropped messages
+    // Не ждем RAG ingest для новых чатов (оптимизация)
     const waitMsRaw = Number(runtimeCfg?.rag?.history?.waitForIngestMs ?? runtimeCfg?.history?.waitForIngestMs ?? 0);
-    const waitMs = Math.min(Math.max(waitMsRaw, 0), 3000); // Reduced max wait time
+    const waitMs = Math.min(Math.max(waitMsRaw, 0), 3000);
     const didIngest = Boolean(req?.didEnqueueIngest);
     
     if (didIngest && waitMs > 0) {
-      logger.info('[history->RAG] waiting before rag/search', { 
+      logger.debug('[history->RAG] waiting before rag/search', { 
         conversationId: this.conversationId, 
         waitMs,
         reqDidEnqueueIngest: req?.didEnqueueIngest
@@ -2079,14 +2069,16 @@ Graph hints: ${graphQueryHint}`;
         }
       }
 
-      logger.info('[rag.context.applied]', {
-        conversationId: this.conversationId,
-        cacheStatus: ragCacheStatus,
-        contextLength: ragContextLength,
-        contextTokens: ragResult?.metrics?.contextTokens ?? 0,
-        graphTokens: ragResult?.metrics?.graphTokens ?? 0,
-        vectorTokens: ragResult?.metrics?.vectorTokens ?? 0,
-      });
+      if (ragContextLength > 0) {
+        logger.info('[rag.context.applied]', {
+          conversationId: this.conversationId,
+          cacheStatus: ragCacheStatus,
+          contextLength: ragContextLength,
+          contextTokens: ragResult?.metrics?.contextTokens ?? 0,
+          graphTokens: ragResult?.metrics?.graphTokens ?? 0,
+          vectorTokens: ragResult?.metrics?.vectorTokens ?? 0,
+        });
+      }
     } catch (ragError) {
       logger.error('[rag.context.error]', {
         conversationId: this.conversationId,
@@ -2200,7 +2192,7 @@ Graph hints: ${graphQueryHint}`;
      formattedMessages,
      instructions,
    }));
-   logger.info('[prompt.payload]', {
+   logger.debug('[prompt.payload]', {
      conversationId: this.conversationId,
      promptTokens,
      ragContextTokens: this.options?.req?.ragContextTokens ?? 0,
@@ -2242,7 +2234,7 @@ Graph hints: ${graphQueryHint}`;
 
     const withoutKeys = await this.useMemory();
     if (withoutKeys) {
-      logger.warn('[DIAG-PROMPT] Memory (withoutKeys) generated but not explicitly added to prompt, as system message already formed.');
+      logger.debug('[AgentClient] Memory (withoutKeys) generated but not explicitly added to prompt, as system message already formed.');
     }
 
     return result;
@@ -2838,13 +2830,13 @@ Graph hints: ${graphQueryHint}`;
         }
 
         if (noSystemMessages === true && systemContent?.length) {
-          const latestMessageContent = _messages.pop().content;
+          let latestMessageContent = _messages[_messages.length - 1].content;
           if (typeof latestMessageContent !== 'string') {
             latestMessageContent[0].text = [systemContent, latestMessageContent[0].text].join('\n');
-            _messages.push(new HumanMessage({ content: latestMessageContent }));
+            _messages[_messages.length - 1] = new HumanMessage({ content: latestMessageContent });
           } else {
             const text = [systemContent, latestMessageContent].join('\n');
-            _messages.push(new HumanMessage(text));
+            _messages[_messages.length - 1] = new HumanMessage(text);
           }
         }
 
@@ -2870,8 +2862,7 @@ Graph hints: ${graphQueryHint}`;
           });
         }
 
-        // ДОБАВЛЕНО: Детальное логирование перед вызовом createRun
-        logger.info('[agent.run.debug] Agent configuration', {
+        logger.debug('[agent.run.debug] Agent configuration', {
           conversationId: this.conversationId,
           agentId: agent.id,
           agentName: agent.name,
@@ -2884,8 +2875,7 @@ Graph hints: ${graphQueryHint}`;
           recursionLimit: config.recursionLimit,
         });
 
-        // ДОБАВЛЕНО: Логирование запроса к модели
-        logger.info('[agent.run.request] Request to model', {
+        logger.debug('[agent.run.request] Request to model', {
           conversationId: this.conversationId,
           agentId: agent.id,
           model: agent.model_parameters?.model,
@@ -2936,8 +2926,7 @@ Graph hints: ${graphQueryHint}`;
           config.configurable.userMCPAuthMap = userMCPAuthMap;
         }
         
-        // ДОБАВЛЕНО: Логирование перед processStream
-        logger.info('[agent.run.processStream] Starting stream processing', {
+        logger.debug('[agent.run.processStream] Starting stream processing', {
           conversationId: this.conversationId,
           agentId: agent.id,
           messagesCount: messages.length,
