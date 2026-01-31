@@ -77,7 +77,6 @@ let ragCacheTtlMs = runtimeMemoryConfig.getMemoryConfig().ragCacheTtl * 1000;
 
 /**
  * Очищает истёкшие записи RAG-кэша.
- * @param {number} [now=Date.now()] - Текущая отметка времени.
  */
 function pruneExpiredRagCache(now = Date.now()) {
   for (const [key, entry] of ragCache.entries()) {
@@ -89,8 +88,6 @@ function pruneExpiredRagCache(now = Date.now()) {
 
 /**
  * Хэширует произвольные данные в SHA1.
- * @param {unknown} payload - Данные для хэширования.
- * @returns {string} SHA1-хеш.
  */
 function hashPayload(payload) {
   const normalized =
@@ -106,13 +103,6 @@ function hashPayload(payload) {
 
 /**
  * Формирует ключ для RAG-кэша.
- * @param {Object} params
- * @param {string} params.conversationId
- * @param {string} params.endpoint
- * @param {string} params.model
- * @param {string} params.queryHash
- * @param {string} params.configHash
- * @returns {string} Ключ кэша.
  */
 function createCacheKey({ conversationId, endpoint, model, queryHash, configHash }) {
   return hashPayload({
@@ -126,9 +116,6 @@ function createCacheKey({ conversationId, endpoint, model, queryHash, configHash
 
 /**
  * Обрезает и нормализует граф-контекст по лимитам.
- * @param {string[]} lines - Строки графового контента.
- * @param {{ maxLines: number, maxLineChars: number }} config - Настройки графа.
- * @returns {string[]} Нормализованные строки.
  */
 function sanitizeGraphContext(lines, config) {
   if (!Array.isArray(lines) || lines.length === 0) {
@@ -149,9 +136,6 @@ function sanitizeGraphContext(lines, config) {
 
 /**
  * Ограничивает массив фрагментов (vector context).
- * @param {string[]} chunks - Фрагменты контекста.
- * @param {{ maxChunks: number, maxChars: number }} config - Лимиты vector-контента.
- * @returns {string[]} Нормализованные фрагменты.
  */
 function sanitizeVectorChunks(chunks, config) {
   if (!Array.isArray(chunks) || chunks.length === 0) {
@@ -174,9 +158,6 @@ function sanitizeVectorChunks(chunks, config) {
 
 /**
  * Безопасно приводит значение к тарифу (USD за 1000 токенов).
- *
- * @param {unknown} value
- * @returns {number|null}
  */
 function parseUsdRate(value) {
   const parsed = Number(value);
@@ -185,15 +166,6 @@ function parseUsdRate(value) {
 
 /**
  * Определяет тарифы (prompt/completion) для расчёта стоимости токенов.
- *
- * Приоритет источников:
- * 1) pricing.models[model] или pricing.models.default;
- * 2) корневые поля pricing (promptUsdPer1k / completionUsdPer1k);
- * 3) env DEFAULT_PROMPT_USD_PER_1K / DEFAULT_COMPLETION_USD_PER_1K.
- *
- * @param {string} modelName
- * @param {object|undefined} pricingConfig
- * @returns {{ promptUsdPer1k: number|null, completionUsdPer1k: number|null, source: string }}
  */
 function resolvePricingRates(modelName, overrideConfig) {
   const sources = new Set();
@@ -300,7 +272,7 @@ function resolvePricingRates(modelName, overrideConfig) {
 }
 
 /**
- * @description Fetches graph context from tools-gateway for RAG enhancement in agent conversations.
+ * Fetches graph context from tools-gateway for RAG enhancement in agent conversations.
  */
 async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAPH_RELATIONS_LIMIT, timeoutMs = GRAPH_REQUEST_TIMEOUT_MS }) {
   if (!USE_GRAPH_CONTEXT || !conversationId) {
@@ -403,7 +375,7 @@ function calculateAdaptiveTimeout(contextLength, baseTimeoutMs) {
 }
 
 /**
- * @description Performs map-reduce condensation on context text for RAG using configured providers.
+ * Performs map-reduce condensation on context text for RAG using configured providers.
  */
 async function mapReduceContext({
   req,
@@ -688,7 +660,7 @@ function extractMessageText(message, logPrefix = '[AgentClient]', options = {}) 
 }
 
 /**
- * @description Normalizes and cleans memory text for RAG processing.
+ * Normalizes and cleans memory text for RAG processing.
  */
 function normalizeMemoryText(text, logPrefix = '[history->RAG]') {
   if (text == null) {
@@ -709,7 +681,7 @@ function normalizeMemoryText(text, logPrefix = '[history->RAG]') {
 }
 
 /**
- * @description Generates a unique ingest key for deduplication in RAG.
+ * Generates a unique ingest key for deduplication in RAG.
  */
 function makeIngestKey(convId, msgId, raw) {
   if (msgId) return `ing:${convId}:${msgId}`;
@@ -718,7 +690,7 @@ function makeIngestKey(convId, msgId, raw) {
 }
 
 /**
- * @description Condenses RAG query text by deduplicating and truncating.
+ * Condenses RAG query text by deduplicating and truncating.
  */
 function condenseRagQuery(text, limit = RAG_QUERY_MAX_CHARS) {
   if (!text) {
@@ -756,7 +728,7 @@ function condenseRagQuery(text, limit = RAG_QUERY_MAX_CHARS) {
 }
 
 /**
- * @description Checks if the agent uses a Google/Gemini model.
+ * Checks if the agent uses a Google/Gemini model.
  */
 function isGoogleModel(agent) {
   const model = agent?.model_parameters?.model || agent?.model || '';
@@ -764,7 +736,7 @@ function isGoogleModel(agent) {
 }
 
 /**
- * @description Parses model parameters based on endpoint type.
+ * Parses model parameters based on endpoint type.
  */
 const payloadParser = ({ req, agent, endpoint }) => {
   if (isAgentsEndpoint(endpoint)) {
@@ -782,7 +754,7 @@ const payloadParser = ({ req, agent, endpoint }) => {
 const noSystemModelRegex = [/\b(o1-preview|o1-mini|amazon\.titan-text)\b/gi];
 
 /**
- * @description Creates a token counter function for messages.
+ * Creates a token counter function for messages.
  */
 function createTokenCounter(encoding) {
   return function (message) {
@@ -792,7 +764,7 @@ function createTokenCounter(encoding) {
 }
 
 /**
- * @description Logs tool errors with structured details.
+ * Logs tool errors with structured details.
  */
 function logToolError(graph, error, toolId) {
   logAxiosError({
@@ -802,7 +774,7 @@ function logToolError(graph, error, toolId) {
 }
 
 /**
- * @description Detects if error is context overflow (400 with token limit message).
+ * Detects if error is context overflow (400 with token limit message).
  */
 function detectContextOverflow(error) {
   if (!error) {
@@ -825,7 +797,7 @@ function detectContextOverflow(error) {
 }
 
 /**
- * @description Aggressively compresses messages for retry after context overflow.
+ * Aggressively compresses messages for retry after context overflow.
  */
 function compressMessagesForRetry(messages, targetReduction = 0.5) {
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -885,8 +857,7 @@ function compressMessagesForRetry(messages, targetReduction = 0.5) {
 }
 
 /**
- * @description Agent client for handling AI agent interactions, RAG, and tool integrations.
- * @extends BaseClient
+ * Agent client for handling AI agent interactions, RAG, and tool integrations.
  */
 class AgentClient extends BaseClient {
   constructor(options = {}) {
@@ -1625,6 +1596,15 @@ Graph hints: ${graphQueryHint}`;
           const droppedTasks = [];
 
           for (const m of droppedMessages) {
+            // ДОБАВЛЕНО: Пропускаем уже векторизованные сообщения
+            if (m.isMemoryStored === true) {
+              logger.debug('[history->RAG][dropped] Пропуск уже векторизованного сообщения', {
+                conversationId: convId,
+                messageId: m.messageId,
+              });
+              continue;
+            }
+
             const rawText = extractMessageText(m, '[history->RAG][dropped]');
             const normalizedText = normalizeMemoryText(rawText, '[history->RAG][dropped]');
 
@@ -1658,7 +1638,7 @@ Graph hints: ${graphQueryHint}`;
                 fireAndForget: true,
               });
               
-              logger.debug(`[history->RAG][dropped] queued ${droppedTasks.length} dropped messages`, {
+              logger.debug(`[history->RAG][dropped] queued ${droppedTasks.length} dropped messages (skipped ${droppedMessages.length - droppedTasks.length} already vectorized)`, {
                 conversationId: convId,
               });
             } catch (queueError) {
@@ -1668,6 +1648,10 @@ Graph hints: ${graphQueryHint}`;
                 message: queueError?.message,
               });
             }
+          } else {
+            logger.debug(`[history->RAG][dropped] Все ${droppedMessages.length} dropped messages уже векторизованы`, {
+              conversationId: convId,
+            });
           }
         });
       }
@@ -1705,6 +1689,16 @@ Graph hints: ${graphQueryHint}`;
       for (let idx = 0; idx < orderedMessages.length; idx++) {
         const m = orderedMessages[idx];
         try {
+          // ДОБАВЛЕНО: Пропускаем уже векторизованные сообщения
+          if (m.isMemoryStored === true) {
+            logger.debug('[history->RAG] Пропуск уже векторизованного сообщения', {
+              conversationId: convId,
+              messageId: m.messageId,
+              index: idx,
+            });
+            continue;
+          }
+
           const rawText = extractMessageText(m, '[history->RAG]');
           const normalizedText = normalizeMemoryText(rawText);
           const len = normalizedText.length;

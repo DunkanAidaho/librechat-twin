@@ -1,0 +1,5 @@
+# Уменьшаем размер батча для предотвращения таймаутов Temporal
+MEMORY_QUEUE_ENQUEUE_BATCH_SIZE=10
+
+# Увеличиваем таймаут для Temporal activities
+MEMORY_TASK_TIMEOUT_MS=120000
