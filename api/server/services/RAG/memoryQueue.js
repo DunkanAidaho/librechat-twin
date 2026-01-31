@@ -135,7 +135,7 @@ async function enqueueBatch(client, batch, meta) {
   for (const task of batch) {
     const payload = task?.payload || task;
     if (!payload || !payload.conversation_id || !payload.message_id) {
-      errors.push(new Error('Invalid task payload: missing conversation_id/message_id'));
+      errors.push(new Error('Невалидный payload задачи: отсутствует conversation_id/message_id'));
       continue;
     }
 
@@ -148,7 +148,6 @@ async function enqueueBatch(client, batch, meta) {
         payload.message_id,
         missing.join(', '),
       );
-      // REMOVED: automatic delete call - this was dangerous
       continue;
     }
 
@@ -156,7 +155,7 @@ async function enqueueBatch(client, batch, meta) {
       const context = {
         ...payload,
         _metadata: {
-          reason: meta.reason,
+          reason: meta.reason || 'unknown',
           conversationId: meta.conversationId,
           userId: meta.userId,
         },
@@ -211,7 +210,7 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
       try {
         await enqueueMemoryTasksSync(client, tasks, meta, batchSize);
       } catch (error) {
-        logger.error('[memoryQueue] Fire-and-forget enqueue failed', {
+        logger.error('[memoryQueue] Асинхронная постановка в очередь не удалась', {
           reason: meta.reason,
           conversationId: meta.conversationId,
           taskCount: tasks.length,
@@ -221,7 +220,7 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
     });
 
     logger.info(
-      `[memoryQueue] Started fire-and-forget enqueue (reason=${meta.reason}, tasks=${tasks.length}, conversation=${meta.conversationId || 'n/a'})`,
+      `[memoryQueue] Запущена асинхронная постановка в очередь (reason=${meta.reason}, tasks=${tasks.length}, conversation=${meta.conversationId || 'n/a'})`,
     );
     return { status: 'queued_async', via: 'temporal', count: tasks.length };
   }
@@ -235,7 +234,7 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
     const timeoutPromise = new Promise((_, reject) => {
       timeoutId = setTimeout(() => {
         cancellation.aborted = true;
-        reject(new Error(`Enqueue timed out after ${maxTotalMs}ms`));
+        reject(new Error(`Постановка в очередь превысила таймаут ${maxTotalMs}мс`));
       }, maxTotalMs);
     });
 
@@ -252,7 +251,7 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
     return result;
   } catch (error) {
     const isTransient = isTransientError(error);
-    const isTimeout = error?.message?.includes('timed out');
+    const isTimeout = error?.message?.includes('таймаут');
 
     const partialCount =
       typeof error?.partialCount === 'number' ? error.partialCount : progress?.enqueued ?? 0;
@@ -307,7 +306,7 @@ async function enqueueMemoryTasksSync(
   }
 
   logger.info(
-    `[memoryQueue] Processing ${tasks.length} tasks in ${batches.length} batches (batchSize=${batchSize}, reason=${meta.reason})`,
+    `[memoryQueue] Обработка ${tasks.length} задач в ${batches.length} батчах (batchSize=${batchSize}, reason=${meta.reason || 'unknown'})`,
   );
 
   try {
@@ -316,12 +315,12 @@ async function enqueueMemoryTasksSync(
         if (progress) {
           progress.enqueued = enqueuedTotal;
         }
-        logger.warn('[memoryQueue] Cancellation signal received, stopping enqueue loop', {
+        logger.warn('[memoryQueue] Получен сигнал отмены, остановка цикла постановки в очередь', {
           reason: meta.reason,
           conversationId: meta.conversationId,
           enqueuedTotal,
         });
-        const abortError = new Error('Enqueue aborted because enqueue timed out');
+        const abortError = new Error('Постановка в очередь прервана из-за превышения таймаута');
         abortError.partialCount = enqueuedTotal;
         abortError.isTimeout = true;
         throw abortError;
@@ -339,11 +338,11 @@ async function enqueueMemoryTasksSync(
         }
 
         logger.info(
-          `[memoryQueue] Batch ${bi + 1}/${batches.length} enqueued=${enqueued}/${batch.length} total=${enqueuedTotal} reason=${meta.reason}`,
+          `[memoryQueue] Батч ${bi + 1}/${batches.length} enqueued=${enqueued}/${batch.length} total=${enqueuedTotal} reason=${meta.reason || 'unknown'}`,
         );
       } catch (batchError) {
         logger.error(
-          `[memoryQueue] Batch ${bi + 1}/${batches.length} failed completely: ${batchError?.message}`,
+          `[memoryQueue] Батч ${bi + 1}/${batches.length} полностью провалился: ${batchError?.message}`,
           { reason: meta.reason, conversationId: meta.conversationId },
         );
         allErrors.push(batchError);
@@ -354,7 +353,7 @@ async function enqueueMemoryTasksSync(
       progress.enqueued = enqueuedTotal;
     }
     // If we get interrupted (e.g., by timeout), attach partial count to error
-    if (outerError?.message?.includes('timed out')) {
+    if (outerError?.message?.includes('таймаут')) {
       outerError.partialCount = enqueuedTotal;
     }
     throw outerError;
@@ -369,7 +368,7 @@ async function enqueueMemoryTasksSync(
   }
 
   if (allErrors.length > 0) {
-    logger.warn(`[memoryQueue] Completed with ${allErrors.length} errors, ${enqueuedTotal} successful enqueues`);
+    logger.warn(`[memoryQueue] Завершено с ${allErrors.length} ошибками, ${enqueuedTotal} успешных постановок в очередь`);
   }
 
   if (progress) {
@@ -377,7 +376,7 @@ async function enqueueMemoryTasksSync(
   }
 
   logger.info(
-    `[memoryQueue] Поставлено ${enqueuedTotal} задач через Temporal (reason=${meta.reason}, conversation=${meta.conversationId || 'n/a'})`,
+    `[memoryQueue] Поставлено ${enqueuedTotal} задач через Temporal (reason=${meta.reason || 'unknown'}, conversation=${meta.conversationId || 'n/a'})`,
   );
 
   return { status: 'queued', via: 'temporal', count: enqueuedTotal };

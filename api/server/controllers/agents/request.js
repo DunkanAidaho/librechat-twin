@@ -256,7 +256,7 @@ async function shouldGenerateTitle(req, conversationId) {
     const msgs = await getMessages({ conversationId });
     return (msgs?.length || 0) <= 2;
   } catch (e) {
-    logger.error(`[title] проверка не удалась`, e);
+    logger.error(`[title] Проверка не удалась`, e);
     return false;
   }
 }
@@ -405,18 +405,18 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
 
       const textToIndex = isTextLike ? ocrText : null;
       if (!textToIndex) {
-        logger.info(
+        logger.debug(
           `[Pre-emptive Ingest] file_id=${file?.file_id} пропущен (тип=${file?.type}, текст отсутствует).`,
         );
       } else if (!conversationId) {
         logger.warn(
-          `[Pre-emptive Ingest] нет conversationId для file_id=${file.file_id}, user=${userId}.`,
+          `[Pre-emptive Ingest] Нет conversationId для file_id=${file.file_id}, user=${userId}.`,
         );
       } else {
         const dedupeKey = `ingest:file:${file.file_id}`;
         const dedupeResult = await ingestDeduplicator.markAsIngested(dedupeKey);
         if (dedupeResult.deduplicated) {
-          logger.info(
+          logger.debug(
             `[Pre-emptive Ingest][dedup] file_id=${file.file_id} пропущен (mode=${dedupeResult.mode}).`,
           );
         } else {
@@ -448,7 +448,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
               },
             );
             if (!enqueueResult.success) {
-              throw enqueueResult.error || new Error('Memory queue enqueue failed');
+              throw enqueueResult.error || new Error('Не удалось поставить задачу в очередь памяти');
             }
           } catch (err) {
             logger.error(
@@ -542,7 +542,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
             textLength: (userContent?.length || 0) + (assistantText?.length || 0),
           });
         } catch (err) {
-          logger.error('[processConversationArtifacts] Failed to enqueue memory tasks', {
+          logger.error('[processConversationArtifacts] Не удалось поставить задачи памяти в очередь', {
             conversationId: localConversationId,
             error: err?.message,
           });
@@ -551,7 +551,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
     }
 
     if (!assistantText || !assistantText.trim()) {
-      logger.debug('[GraphWorkflow] пропуск Graph (нет текста ассистента)', {
+      logger.debug('[GraphWorkflow] Пропуск Graph (нет текста ассистента)', {
         conversationId: localConversationId,
         assistantMessageId: localResponse?.messageId,
       });
@@ -573,7 +573,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
     setImmediate(async () => {
       try {
         await enqueueGraphTaskWithResilience(graphPayload);
-        logger.debug(`[GraphWorkflow] started for message ${localResponse?.messageId}`);
+        logger.debug(`[GraphWorkflow] Запущен для сообщения ${localResponse?.messageId}`);
       } catch (err) {
         logger.error(
           `[GraphWorkflow] Ошибка постановки/выполнения (conversation=${localConversationId}, message=${localResponse?.messageId}): ${err?.message || err}`,
@@ -695,7 +695,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
                 textLength: originalUserText.length,
               });
               if (!enqueueResult.success) {
-                throw enqueueResult.error || new Error('Memory queue enqueue failed');
+                throw enqueueResult.error || new Error('Не удалось поставить задачу в очередь памяти');
               }
             } catch (err) {
               logger.error(
@@ -778,9 +778,9 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       } catch (_) {}
 
       if (!initResult || !initResult.client)
-        throw new Error('Failed to initialize client (no result or client)');
+        throw new Error('Не удалось инициализировать клиент (нет результата или клиента)');
       if (prelimAbortController.signal?.aborted)
-        throw new Error('Request aborted before init');
+        throw new Error('Запрос прерван до инициализации');
 
       client = initResult.client;
       if (clientRegistry) clientRegistry.register(client, { userId }, client);
@@ -809,7 +809,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
         const closedAfterFinalize = responseFinalized || isResponseFinalized(res);
         if (closedAfterFinalize) {
           logger.debug(
-            '[AgentController] client connection closed after finalize (non-headless).',
+            '[AgentController] Соединение клиента закрыто после финализации (non-headless).',
           );
           return;
         }
@@ -872,7 +872,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
           (msg.includes('Symbol(Symbol.asyncIterator)') ||
             msg.includes('ERR_INTERNAL_ASSERTION'))
         ) {
-          logger.error('[AgentController] google stream error, retry non-stream once');
+          logger.error('[AgentController] Ошибка потока Google, повтор без потока');
           try {
             disableGoogleStreaming(endpointOption);
           } catch (_) {}
@@ -1001,13 +1001,13 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
     const onClose = () => {
       const closedAfterFinalize = responseFinalized || isResponseFinalized(dres);
       if (closedAfterFinalize) {
-        logger.debug('[AgentController] client connection closed after finalize (headless).');
+        logger.debug('[AgentController] Соединение клиента закрыто после финализации (headless).');
         return;
       }
       if (!detached) {
         dres.setDetached(true);
         detached = true;
-        logger.info('[AgentController] client disconnected, detach streaming');
+        logger.info('[AgentController] Клиент отключился, отсоединяем потоковую передачу');
       }
     };
     res.once('close', onClose);
@@ -1028,7 +1028,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       signal: undefined,
     });
     if (!headlessInitResult || !headlessInitResult.client)
-      throw new Error('Failed to initialize client (no result or client)');
+      throw new Error('Не удалось инициализировать клиент (нет результата или клиента)');
 
     client = headlessInitResult.client;
     if (clientRegistry) clientRegistry.register(client, { userId }, client);
