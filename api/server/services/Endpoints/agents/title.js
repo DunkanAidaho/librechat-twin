@@ -68,6 +68,18 @@ const addTitle = async (req, { text, response, client }) => {
         response?.conversationId ?? 'unknown',
         endpointName,
       );
+      
+      // Fallback to simple truncation
+      const cleaned = String(text || '').replace(/\s+/g, ' ').slice(0, 30).trim();
+      const fallbackTitle = cleaned.length ? cleaned : 'Новый диалог';
+      logger.warn(`[title][fallback-no-method] "${fallbackTitle}"`);
+      
+      await titleCache.set(key, fallbackTitle, 120000);
+      await saveConvo(
+        req,
+        { conversationId: response.conversationId, title: fallbackTitle },
+        { context: 'api/server/services/Endpoints/agents/title.js' },
+      );
       return;
     }
     
@@ -118,6 +130,18 @@ const addTitle = async (req, { text, response, client }) => {
           endpointName,
           modelName,
         );
+        
+        // Fallback to simple truncation
+        const cleaned = String(text || '').replace(/\s+/g, ' ').slice(0, 30).trim();
+        const fallbackTitle = cleaned.length ? cleaned : 'Новый диалог';
+        logger.warn(`[title][fallback-empty-result] "${fallbackTitle}"`);
+        
+        await titleCache.set(key, fallbackTitle, 120000);
+        await saveConvo(
+          req,
+          { conversationId: response.conversationId, title: fallbackTitle },
+          { context: 'api/server/services/Endpoints/agents/title.js' },
+        );
         return;
       }
       
@@ -148,7 +172,18 @@ const addTitle = async (req, { text, response, client }) => {
         titleDur,
         e?.message || e,
       );
-      throw e;
+      
+      // Fallback to simple truncation on error
+      const cleaned = String(text || '').replace(/\s+/g, ' ').slice(0, 30).trim();
+      const fallbackTitle = cleaned.length ? cleaned : 'Новый диалог';
+      logger.warn(`[title][fallback-error] "${fallbackTitle}"`);
+      
+      await titleCache.set(key, fallbackTitle, 120000);
+      await saveConvo(
+        req,
+        { conversationId: response.conversationId, title: fallbackTitle },
+        { context: 'api/server/services/Endpoints/agents/title.js' },
+      );
     }
   } catch (error) {
     if (!abortController.signal.aborted) {
@@ -166,6 +201,22 @@ const addTitle = async (req, { text, response, client }) => {
       modelName,
       error?.message ?? error,
     );
+    
+    // Final fallback
+    const cleaned = String(text || '').replace(/\s+/g, ' ').slice(0, 30).trim();
+    const fallbackTitle = cleaned.length ? cleaned : 'Новый диалог';
+    logger.warn(`[title][fallback-final] "${fallbackTitle}"`);
+    
+    try {
+      await titleCache.set(key, fallbackTitle, 120000);
+      await saveConvo(
+        req,
+        { conversationId: response.conversationId, title: fallbackTitle },
+        { context: 'api/server/services/Endpoints/agents/title.js' },
+      );
+    } catch (saveError) {
+      logger.error('[title] Не удалось сохранить fallback title:', saveError);
+    }
   }
 };
 

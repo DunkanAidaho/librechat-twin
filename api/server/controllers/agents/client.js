@@ -556,6 +556,7 @@ const RAG_QUERY_MAX_CHARS = configService.getNumber('memory.ragQuery.maxChars', 
 
 const MEMORY_TASK_TIMEOUT_MS = configService.getNumber('memory.queue.taskTimeoutMs', 30000);
 const DEFAULT_ENCODING = getString('agents.encoding.defaultTokenizerEncoding', 'o200k_base');
+const DEFAULT_SYSTEM_PROMPT = 'Ты самый полезный ИИ-помощник. Всегда в приоритете используй русский язык для ответов.';
 
 /**
  * Provides safe logger methods with environment-aware fallbacks.
@@ -2011,14 +2012,14 @@ Graph hints: ${graphQueryHint}`;
       .filter(Boolean)
       .join('\n')
       .trim();
+    
     /**
      * @description Fallback для новых чатов: если нет истории сообщений и systemContent пуст,
-     * устанавливаем базовый промпт 'You are a helpful assistant.' для работы RAG.
-     * TODO: рассмотреть взятие дефолтного промпта из конфигурации агента.
+     * устанавливаем базовый промпт для работы RAG.
      */
     if (orderedMessages.length === 0 && systemContent.length === 0) {
-        systemContent = 'You are a helpful assistant.';
-        logger.debug('[AgentClient] Applied fallback systemContent for new chat');
+        systemContent = DEFAULT_SYSTEM_PROMPT;
+        logger.debug('[AgentClient] Applied default system prompt for new chat');
     }
     logger.debug(`[AgentClient] Initial systemContent: ${systemContent.length} chars`);
 
@@ -2810,6 +2811,12 @@ Graph hints: ${graphQueryHint}`;
           .join('\n')
           .trim();
 
+        // Применяем дефолтный промпт если systemContent пуст
+        if (!systemContent || systemContent.length === 0) {
+          systemContent = DEFAULT_SYSTEM_PROMPT;
+          logger.debug(`[AgentClient][runAgent:${agent.id}] Applied default system prompt`);
+        }
+
         const normalizedSystem = normalizeInstructionsPayload(
           systemContent,
           () => this.getEncoding(),
@@ -3201,9 +3208,9 @@ Graph hints: ${graphQueryHint}`;
    * @throws {Error} If title generation fails.
    */
   async titleConvo({ text, abortController }) {
-    const ollamaConfig = configService.get('ollama', {});
+    const ollamaConfig = configService.get('providers.ollama', {});
     const USE_OLLAMA_FOR_TITLES = configService.getBoolean('features.useOllamaForTitles', false);
-    const OLLAMA_TITLE_URL = ollamaConfig.titleUrl || ollamaConfig.url || 'http://127.0.0.1:11434';
+    const OLLAMA_TITLE_URL = ollamaConfig.url || 'http://127.0.0.1:11434';
     const OLLAMA_TITLE_MODEL_NAME = this.options.titleModel || ollamaConfig.titleModel || 'gemma:7b-instruct';
 
     if (USE_OLLAMA_FOR_TITLES) {
