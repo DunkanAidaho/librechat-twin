@@ -31,6 +31,7 @@ const {
   getMessages,
   getConvoTitle,
   saveConvo,
+  updateMessage,
 } = require('~/models');
 
 const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
@@ -262,6 +263,39 @@ async function shouldGenerateTitle(req, conversationId) {
 }
 
 /**
+ * Marks messages as stored in memory
+ * @param {Object} req
+ * @param {Array<string>} messageIds
+ * @returns {Promise<void>}
+ */
+async function markMessagesAsStored(req, messageIds) {
+  if (!Array.isArray(messageIds) || messageIds.length === 0) {
+    return;
+  }
+
+  try {
+    const result = await updateMessage(
+      req,
+      {
+        messageId: { $in: messageIds },
+        isMemoryStored: true,
+      },
+      { context: 'markMessagesAsStored', multi: true },
+    );
+
+    logger.debug('[markMessagesAsStored] Marked messages as stored', {
+      messageIds,
+      modifiedCount: result?.modifiedCount,
+    });
+  } catch (error) {
+    logger.error('[markMessagesAsStored] Failed to mark messages', {
+      messageIds,
+      error: error?.message,
+    });
+  }
+}
+
+/**
  * Main controller for agent requests
  * @param {Object} req
  * @param {Object} res
@@ -312,12 +346,12 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
           }
         }
       }
-      return { success: true, error: null };
+      return { success: true, error: null, result };
     } catch (err) {
       logger.error(
         `[MemoryQueue] Ошибка постановки задачи: причина=${meta?.reason}, диалог=${meta?.conversationId}, сообщение=${err?.message || err}.`,
       );
-      return { success: false, error: err };
+      return { success: false, error: err, result: null };
     }
   };
 
@@ -489,6 +523,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
     }
 
     const tasks = [];
+    const messageIdsToMark = [];
     const userContent = localUserMessage ? localUserMessage.text || '' : '';
     let assistantText = localResponse ? localResponse.text || '' : '';
 
@@ -514,6 +549,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
           created_at: userCreatedAt,
         },
       });
+      messageIdsToMark.push(localUserMessage.messageId);
     }
 
     if (assistantText) {
@@ -528,19 +564,25 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
           created_at: assistantCreatedAt,
         },
       });
+      messageIdsToMark.push(localResponse?.messageId);
     }
 
     if (tasks.length > 0) {
       // Fire-and-forget для новых чатов (не блокируем ответ)
       setImmediate(async () => {
         try {
-          await enqueueMemoryTasksSafe(tasks, {
+          const enqueueResult = await enqueueMemoryTasksSafe(tasks, {
             reason: 'regular_turn',
             conversationId: localConversationId,
             userId,
             fileId: null,
             textLength: (userContent?.length || 0) + (assistantText?.length || 0),
           });
+
+          // ДОБАВЛЕНО: Проставляем флаг isMemoryStored после успешной постановки в очередь
+          if (enqueueResult.success && messageIdsToMark.length > 0) {
+            await markMessagesAsStored(req, messageIdsToMark);
+          }
         } catch (err) {
           logger.error('[processConversationArtifacts] Не удалось поставить задачи памяти в очередь', {
             conversationId: localConversationId,
