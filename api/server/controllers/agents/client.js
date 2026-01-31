@@ -63,6 +63,7 @@ const {
 const crypto = require('crypto');
 const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
 const { writeTokenReport } = require('~/utils/tokenReport');
+const { updateMessage } = require('~/models');
 
 const {
   computePromptTokenBreakdown: computePromptTokenBreakdown,
@@ -857,6 +858,41 @@ function compressMessagesForRetry(messages, targetReduction = 0.5) {
 }
 
 /**
+ * Marks messages as stored in memory (bulk update)
+ * @param {Object} req - Request object
+ * @param {Array<string>} messageIds - Array of message IDs to mark
+ * @returns {Promise<void>}
+ */
+async function markMessagesAsStored(req, messageIds) {
+  if (!Array.isArray(messageIds) || messageIds.length === 0) {
+    return;
+  }
+
+  try {
+    const Message = require('~/db/models').Message;
+    const result = await Message.updateMany(
+      {
+        messageId: { $in: messageIds },
+        user: req.user.id,
+      },
+      {
+        $set: { isMemoryStored: true },
+      },
+    );
+
+    logger.debug('[markMessagesAsStored] Marked messages as stored', {
+      messageIds,
+      modifiedCount: result?.modifiedCount,
+    });
+  } catch (error) {
+    logger.error('[markMessagesAsStored] Failed to mark messages', {
+      messageIds,
+      error: error?.message,
+    });
+  }
+}
+
+/**
  * Agent client for handling AI agent interactions, RAG, and tool integrations.
  */
 class AgentClient extends BaseClient {
@@ -1594,9 +1630,9 @@ Graph hints: ${graphQueryHint}`;
       if (convId && userId && droppedMessages.length) {
         setImmediate(async () => {
           const droppedTasks = [];
+          const droppedMessageIds = [];
 
           for (const m of droppedMessages) {
-            // ДОБАВЛЕНО: Пропускаем уже векторизованные сообщения
             if (m.isMemoryStored === true) {
               logger.debug('[history->RAG][dropped] Пропуск уже векторизованного сообщения', {
                 conversationId: convId,
@@ -1626,17 +1662,28 @@ Graph hints: ${graphQueryHint}`;
                 user_id: userId,
               },
             });
+            
+            if (m.messageId) {
+              droppedMessageIds.push(m.messageId);
+            }
           }
 
           if (droppedTasks.length) {
             try {
-              await enqueueMemoryTasks(droppedTasks, {
+              const result = await enqueueMemoryTasks(droppedTasks, {
                 reason: 'history_window_drop',
                 conversationId: convId,
                 userId,
                 messageCount: droppedTasks.length,
                 fireAndForget: true,
               });
+              
+              // ДОБАВЛЕНО: Проставляем флаг после успешной постановки в очередь
+              if (result?.status === 'queued' || result?.status === 'queued_async') {
+                if (droppedMessageIds.length > 0 && this.options?.req) {
+                  await markMessagesAsStored(this.options.req, droppedMessageIds);
+                }
+              }
               
               logger.debug(`[history->RAG][dropped] queued ${droppedTasks.length} dropped messages (skipped ${droppedMessages.length - droppedTasks.length} already vectorized)`, {
                 conversationId: convId,
@@ -1679,6 +1726,7 @@ Graph hints: ${graphQueryHint}`;
       const convId = this.conversationId || this.options?.req?.body?.conversationId;
       const requestUserId = this.options?.req?.user?.id || null;
       const toIngest = [];
+      const messageIdsToMark = [];
       const totalMessages = orderedMessages.length;
       const dontShrinkConfigured = runtimeCfg?.history?.dontShrinkLastN;
       const effectiveDontShrink = Number.isFinite(dontShrinkConfigured)
@@ -1689,7 +1737,6 @@ Graph hints: ${graphQueryHint}`;
       for (let idx = 0; idx < orderedMessages.length; idx++) {
         const m = orderedMessages[idx];
         try {
-          // ДОБАВЛЕНО: Пропускаем уже векторизованные сообщения
           if (m.isMemoryStored === true) {
             logger.debug('[history->RAG] Пропуск уже векторизованного сообщения', {
               conversationId: convId,
@@ -1751,6 +1798,11 @@ Graph hints: ${graphQueryHint}`;
               };
               IngestedHistory.add(dedupeKey);
               toIngest.push(taskPayload);
+              
+              if (m.messageId) {
+                messageIdsToMark.push(m.messageId);
+              }
+              
               logger.debug('[history->RAG] prepared memory task', {
                 conversationId: convId,
                 messageId: taskPayload.message_id,
@@ -1816,7 +1868,7 @@ Graph hints: ${graphQueryHint}`;
           
           setImmediate(async () => {
             try {
-              await enqueueMemoryTasks(
+              const result = await enqueueMemoryTasks(
                 tasks,
                 {
                   reason: 'history_sync',
@@ -1825,6 +1877,11 @@ Graph hints: ${graphQueryHint}`;
                   textLength: totalLength,
                 },
               );
+              
+              // ДОБАВЛЕНО: Проставляем флаг после успешной постановки в очередь
+              if (result?.status === 'queued' && messageIdsToMark.length > 0 && this.options?.req) {
+                await markMessagesAsStored(this.options.req, messageIdsToMark);
+              }
               
               logger.debug(
                 `[history->RAG] queued ${tasks.length} turn(s) через JetStream ` +
