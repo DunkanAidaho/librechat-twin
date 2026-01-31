@@ -301,15 +301,6 @@ function resolvePricingRates(modelName, overrideConfig) {
 
 /**
  * @description Fetches graph context from tools-gateway for RAG enhancement in agent conversations.
- * @param {Object} params - Parameters for graph context fetching.
- * @param {string} params.conversationId - Unique identifier of the conversation.
- * @param {string} params.toolsGatewayUrl - Base URL for the tools-gateway service.
- * @param {number} [params.limit=GRAPH_RELATIONS_LIMIT] - Maximum number of relations to fetch.
- * @param {number} [params.timeoutMs=GRAPH_REQUEST_TIMEOUT_MS] - Timeout for the request in milliseconds.
- * @returns {Promise<{lines: string[], queryHint: string}|null>} Graph context data or null if skipped/failed.
- * @throws {Error} If the request fails and cannot be handled gracefully.
- * @example
- * const context = await fetchGraphContext({ conversationId: '123', toolsGatewayUrl: 'http://gateway' });
  */
 async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAPH_RELATIONS_LIMIT, timeoutMs = GRAPH_REQUEST_TIMEOUT_MS }) {
   if (!USE_GRAPH_CONTEXT || !conversationId) {
@@ -386,23 +377,17 @@ async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAP
 
 /**
  * Вычисляет адаптивный таймаут для суммаризации на основе размера контекста.
- * @param {number} contextLength - Длина контекста в символах.
- * @param {number} baseTimeoutMs - Базовый таймаут из конфигурации.
- * @returns {number} Адаптивный таймаут в миллисекундах.
  */
 function calculateAdaptiveTimeout(contextLength, baseTimeoutMs) {
-  // Базовый таймаут для контекста до 50k символов
   const BASE_CONTEXT_SIZE = 50000;
   
   if (contextLength <= BASE_CONTEXT_SIZE) {
     return baseTimeoutMs;
   }
 
-  // Добавляем 20 секунд на каждые дополнительные 50k символов
   const extraChunks = Math.ceil((contextLength - BASE_CONTEXT_SIZE) / BASE_CONTEXT_SIZE);
   const additionalTimeout = extraChunks * 20000;
   
-  // Максимальный таймаут - 5 минут
   const MAX_TIMEOUT = 300000;
   const adaptiveTimeout = Math.min(baseTimeoutMs + additionalTimeout, MAX_TIMEOUT);
   
@@ -419,18 +404,6 @@ function calculateAdaptiveTimeout(contextLength, baseTimeoutMs) {
 
 /**
  * @description Performs map-reduce condensation on context text for RAG using configured providers.
- * @param {Object} params - Parameters for context condensation.
- * @param {Object} params.req - Express request object.
- * @param {Object} params.res - Express response object.
- * @param {Object} params.endpointOption - Endpoint configuration options.
- * @param {string} params.contextText - Raw context text to condense.
- * @param {string} params.userQuery - User query for relevance scoring.
- * @param {Object|null} [params.graphContext=null] - Optional graph context data.
- * @param {{ budgetChars: number, chunkChars: number, provider?: string, timeoutMs?: number }|null} [params.summarizationConfig=null] - Summarization limits from runtime config.
- * @returns {Promise<string>} Condensed context text.
- * @throws {Error} If condensation fails, falls back to raw context.
- * @example
- * const condensed = await mapReduceContext({ req, res, endpointOption, contextText: 'long text', userQuery: 'query', summarizationConfig });
  */
 async function mapReduceContext({
   req,
@@ -450,7 +423,7 @@ async function mapReduceContext({
   const defaults = {
     budgetChars: 50000,
     chunkChars: 30000,
-    timeoutMs: 125000, // Увеличен дефолтный таймаут
+    timeoutMs: 125000,
   };
 
   const {
@@ -466,7 +439,6 @@ async function mapReduceContext({
     Number.isFinite(cfgChunk) && cfgChunk > 0 ? Number(cfgChunk) : defaults.chunkChars;
   const provider = cfgProvider && typeof cfgProvider === 'string' ? cfgProvider : undefined;
   
-  // Используем адаптивный таймаут
   const baseTimeout = Number.isFinite(cfgTimeout) && cfgTimeout > 0 ? Number(cfgTimeout) : defaults.timeoutMs;
   const adaptiveTimeout = calculateAdaptiveTimeout(contextText.length, baseTimeout);
 
@@ -481,7 +453,7 @@ async function mapReduceContext({
       budgetChars,
       chunkChars,
       provider,
-      timeoutMs: adaptiveTimeout, // Передаем адаптивный таймаут
+      timeoutMs: adaptiveTimeout,
     });
 
     logger.info('[rag.context.summarize.complete]', {
@@ -560,7 +532,6 @@ const DEFAULT_SYSTEM_PROMPT = 'Ты самый полезный ИИ-помощ�
 
 /**
  * Provides safe logger methods with environment-aware fallbacks.
- * @returns {{info: function(...[*]): void, warn: function(...[*]): void, error: function(...[*]): void}}
  */
 const createSafeLogger = () => {
   const noop = () => {};
@@ -578,11 +549,6 @@ const { info: safeInfo, warn: safeWarn, error: safeError } = createSafeLogger();
 
 /**
  * Wraps a promise with a timeout.
- * @template T
- * @param {Promise<T>} promise - The promise to wrap.
- * @param {number} timeoutMs - Timeout in milliseconds.
- * @param {string} [timeoutMessage='Operation timed out'] - Error message on timeout.
- * @returns {Promise<T>} A promise that rejects on timeout.
  */
 function withTimeout(promise, timeoutMs, timeoutMessage = 'Operation timed out') {
   if (!timeoutMs || timeoutMs <= 0) {
@@ -601,25 +567,8 @@ function withTimeout(promise, timeoutMs, timeoutMessage = 'Operation timed out')
   ]).finally(() => clearTimeout(timer));
 }
 
-/* Example withTimeout usage:
- * withTimeout(fetchData(), 5000, 'Fetch timed out').catch(console.error);
- */
-
 /**
  * Normalizes instruction payload into a consistent object format.
- * @param {string|{content: string, tokenCount?: number}|null|undefined} rawInstructions - Raw instructions value.
- * @param {(() => string)|string} getEncoding - Function or string describing tokenizer encoding.
- * @param {string} [logPrefix='[AgentClient]'] - Prefix for log messages.
- * @returns {{content: string, tokenCount: number}} Normalized instructions.
- */
-/**
- * @description Normalizes instruction payload into a consistent object format with token counting.
- * @param {string|{content: string, tokenCount?: number}|null|undefined} rawInstructions - Raw instructions value.
- * @param {(() => string)|string} getEncoding - Function or string describing tokenizer encoding.
- * @param {string} [logPrefix='[AgentClient]'] - Prefix for log messages.
- * @returns {{content: string, tokenCount: number}} Normalized instructions.
- * @example
- * const normalized = normalizeInstructionsPayload('instructions', 'o200k_base');
  */
 function normalizeInstructionsPayload(rawInstructions, getEncoding, logPrefix = '[AgentClient]') {
   const resolveEncoding = () => {
@@ -693,25 +642,8 @@ function normalizeInstructionsPayload(rawInstructions, getEncoding, logPrefix = 
   };
 }
 
-/* Example normalizeInstructionsPayload usage:
- * normalizeInstructionsPayload(null, () => 'o200k_base');
- * normalizeInstructionsPayload('Some instructions', 'o200k_base');
- * normalizeInstructionsPayload({ content: 'Structured', tokenCount: 10 }, () => 'o200k_base');
- */
-
 /**
  * Extracts text content from a message object.
- * @param {Object|null|undefined} message - The message object.
- * @param {string} [logPrefix='[AgentClient]'] - Prefix for log messages.
- * @param {{silent?: boolean}} [options] - Options for extraction.
- * @returns {string} Extracted text content.
- */
-/**
- * @description Extracts text content from a message object.
- * @param {Object|null|undefined} message - The message object.
- * @param {string} [logPrefix='[AgentClient]'] - Prefix for log messages.
- * @param {{silent?: boolean}} [options] - Options for extraction.
- * @returns {string} Extracted text content.
  */
 function extractMessageText(message, logPrefix = '[AgentClient]', options = {}) {
   const { silent = false } = options ?? {};
@@ -757,9 +689,6 @@ function extractMessageText(message, logPrefix = '[AgentClient]', options = {}) 
 
 /**
  * @description Normalizes and cleans memory text for RAG processing.
- * @param {string|null|undefined} text - Input text to normalize.
- * @param {string} [logPrefix='[history->RAG]'] - Prefix for log messages.
- * @returns {string} Normalized and cleaned text.
  */
 function normalizeMemoryText(text, logPrefix = '[history->RAG]') {
   if (text == null) {
@@ -779,20 +708,8 @@ function normalizeMemoryText(text, logPrefix = '[history->RAG]') {
   return cleaned.trim();
 }
 
-/* Example extractMessageText usage:
- * extractMessageText(null);
- * extractMessageText({ text: 'Hello' });
- * extractMessageText({ content: 'Line' });
- * extractMessageText({ content: [{ type: 'text', text: 'A' }] });
- * extractMessageText({ content: { foo: 'bar' } }, '[AgentClient]', { silent: true });
- */
-
 /**
  * @description Generates a unique ingest key for deduplication in RAG.
- * @param {string} convId - Conversation ID.
- * @param {string|null} msgId - Message ID, if available.
- * @param {string} raw - Raw content for hashing if msgId is missing.
- * @returns {string} Unique ingest key.
  */
 function makeIngestKey(convId, msgId, raw) {
   if (msgId) return `ing:${convId}:${msgId}`;
@@ -802,9 +719,6 @@ function makeIngestKey(convId, msgId, raw) {
 
 /**
  * @description Condenses RAG query text by deduplicating and truncating.
- * @param {string} text - Input query text.
- * @param {number} [limit=RAG_QUERY_MAX_CHARS] - Maximum character limit.
- * @returns {string} Condensed query text.
  */
 function condenseRagQuery(text, limit = RAG_QUERY_MAX_CHARS) {
   if (!text) {
@@ -843,8 +757,6 @@ function condenseRagQuery(text, limit = RAG_QUERY_MAX_CHARS) {
 
 /**
  * @description Checks if the agent uses a Google/Gemini model.
- * @param {Object} agent - Agent configuration object.
- * @returns {boolean} True if Google/Gemini model, false otherwise.
  */
 function isGoogleModel(agent) {
   const model = agent?.model_parameters?.model || agent?.model || '';
@@ -853,11 +765,6 @@ function isGoogleModel(agent) {
 
 /**
  * @description Parses model parameters based on endpoint type.
- * @param {Object} params - Parsing parameters.
- * @param {Object} params.req - Express request object.
- * @param {Object} params.agent - Agent configuration.
- * @param {string} params.endpoint - Endpoint type.
- * @returns {Object} Parsed model parameters.
  */
 const payloadParser = ({ req, agent, endpoint }) => {
   if (isAgentsEndpoint(endpoint)) {
@@ -876,8 +783,6 @@ const noSystemModelRegex = [/\b(o1-preview|o1-mini|amazon\.titan-text)\b/gi];
 
 /**
  * @description Creates a token counter function for messages.
- * @param {string} encoding - Tokenizer encoding.
- * @returns {function(Object): number} Token counting function.
  */
 function createTokenCounter(encoding) {
   return function (message) {
@@ -888,10 +793,6 @@ function createTokenCounter(encoding) {
 
 /**
  * @description Logs tool errors with structured details.
- * @param {Object} graph - Graph context.
- * @param {Error} error - Error object.
- * @param {string} toolId - Tool identifier.
- * @returns {void}
  */
 function logToolError(graph, error, toolId) {
   logAxiosError({
@@ -902,8 +803,6 @@ function logToolError(graph, error, toolId) {
 
 /**
  * @description Detects if error is context overflow (400 with token limit message).
- * @param {Error} error - Error object to check.
- * @returns {boolean} True if context overflow detected.
  */
 function detectContextOverflow(error) {
   if (!error) {
@@ -927,9 +826,6 @@ function detectContextOverflow(error) {
 
 /**
  * @description Aggressively compresses messages for retry after context overflow.
- * @param {Array} messages - Original messages array.
- * @param {number} targetReduction - Target reduction percentage (0-1).
- * @returns {Array} Compressed messages array.
  */
 function compressMessagesForRetry(messages, targetReduction = 0.5) {
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -1055,34 +951,16 @@ class AgentClient extends BaseClient {
     };
   }
 
-  /**
-     * @description Returns the content parts associated with the agent client.
-     * @returns {Array} Array of content parts.
-     */
   getContentParts() {
     return this.contentParts;
   }
 
-  /**
-   * @description Sets options for the agent client and logs them.
-   * @param {Object} options - Options object to set.
-   * @returns {void}
-   */
   setOptions(options) {
     logger.debug('[AgentClient] setOptions', options);
   }
 
-  /**
-   * @description Checks if the request involves vision capabilities (placeholder implementation).
-   * @returns {void}
-   */
   checkVisionRequest() {}
 
-  /**
-   * @description Generates save options by parsing model parameters and removing nullish values.
-   * @returns {Object} Parsed and cleaned save options.
-   * @throws {Error} If payload parsing fails.
-   */
   getSaveOptions() {
     let runOptions = {};
     try {
@@ -1111,10 +989,6 @@ class AgentClient extends BaseClient {
     );
   }
 
-  /**
-   * @description Returns options for building messages, including instructions.
-   * @returns {Object} Options object with instructions and additional_instructions.
-   */
   getBuildMessagesOptions() {
     return {
       instructions: this.options.agent.instructions,
@@ -1122,13 +996,6 @@ class AgentClient extends BaseClient {
     };
   }
 
-  /**
-   * @description Adds image URLs to the message and handles file ingestion for RAG if applicable.
-   * @param {Object} message - Message object to modify.
-   * @param {Array} attachments - Array of file attachments.
-   * @returns {Promise<Array>} Array of processed files.
-   * @throws {Error} If file encoding or task enqueueing fails.
-   */
   async addImageURLs(message, attachments) {
     const { files, text: ocrText, image_urls } = await encodeAndFormat(
       this.options.req,
@@ -1175,11 +1042,10 @@ class AgentClient extends BaseClient {
                 textLength: ocrText.length,
               },
             ),
-            Math.min(MEMORY_TASK_TIMEOUT_MS, 10000), // Cap timeout for file indexing
+            Math.min(MEMORY_TASK_TIMEOUT_MS, 10000),
             'Memory indexing timed out',
           );
             
-          // Set flag only for successful blocking operations
           if (this.options?.req && result?.status === 'queued') {
             this.options.req.didEnqueueIngest = true;
           }
@@ -1199,17 +1065,6 @@ class AgentClient extends BaseClient {
   }
 
 
-  /**
-   * Формирует RAG-контекст для текущего разговора с использованием кеша, лимитов и метрик.
-   * @param {Object} params
-   * @param {Array<Object>} params.orderedMessages - Сообщения беседы в упорядоченном виде.
-   * @param {string} params.systemContent - Исходный системный промпт до вставки RAG-контента.
-   * @param {Object} params.runtimeCfg - Текущая конфигурация памяти.
-   * @param {Object} params.req - Express Request.
-   * @param {Object} params.res - Express Response.
-   * @param {Object} params.endpointOption - Настройки конца, включая модель.
-   * @returns {Promise<{ patchedSystemContent: string, contextLength: number, cacheStatus: 'hit'|'miss'|'skipped', metrics: Object }>}
-   */
   async buildRagContext({
     orderedMessages,
     systemContent,
@@ -1317,7 +1172,6 @@ class AgentClient extends BaseClient {
     const graphLimits = runtimeCfg.graphContext || {};
     const vectorLimits = runtimeCfg.vectorContext || {};
 
-    // Нормализация лимитов для защиты от undefined - ДОЛЖНО БЫТЬ ЗДЕСЬ
     const graphMaxLines = Number(graphLimits.maxLines ?? 40);
     const graphMaxLineChars = Number(graphLimits.maxLineChars ?? 200);
     const graphSummaryHintMaxChars = Number(graphLimits.summaryHintMaxChars ?? 2000);
@@ -1424,7 +1278,6 @@ Graph hints: ${graphQueryHint}`;
     let rawVectorResults = 0;
 
     if (toolsGatewayUrl) {
-      // Semantic search
       try {
         const response = await axios.post(
           `${toolsGatewayUrl}/rag/search`,
@@ -1466,7 +1319,6 @@ Graph hints: ${graphQueryHint}`;
         });
       }
 
-      // Часть C: Recent turns для устойчивости
       if (recentTurns > 0) {
         try {
           const recentResp = await axios.post(
@@ -1507,7 +1359,6 @@ Graph hints: ${graphQueryHint}`;
         }
       }
 
-      // Объединяем recent + semantic с дедупликацией
       const merged = [];
       const seen = new Set();
 
@@ -1561,7 +1412,7 @@ Graph hints: ${graphQueryHint}`;
       const defaults = { 
         budgetChars: 12000, 
         chunkChars: 20000,
-        timeoutMs: 125000, // Увеличен дефолтный таймаут
+        timeoutMs: 125000,
       };
       const budgetChars =
         Number.isFinite(summarizationCfg?.budgetChars) && summarizationCfg.budgetChars > 0
@@ -1582,12 +1433,10 @@ Graph hints: ${graphQueryHint}`;
           `[rag.context.limit] conversation=${conversationId} param=memory.summarization.budgetChars limit=${budgetChars} original=${rawVectorTextLength}`
         );
         try {
-          // Получаем базовый таймаут из конфигурации
           const baseTimeoutMs = Number.isFinite(summarizationCfg?.timeoutMs) && summarizationCfg.timeoutMs > 0
             ? summarizationCfg.timeoutMs
             : defaults.timeoutMs;
           
-          // Вычисляем адаптивный таймаут на основе размера контекста
           const adaptiveTimeoutMs = calculateAdaptiveTimeout(rawVectorTextLength, baseTimeoutMs);
           
           logger.debug('[rag.context.summarize.timeout]', {
@@ -1612,7 +1461,7 @@ Graph hints: ${graphQueryHint}`;
                 budgetChars,
                 chunkChars,
                 provider: summarizationCfg.provider,
-                timeoutMs: adaptiveTimeoutMs, // Передаем адаптивный таймаут
+                timeoutMs: adaptiveTimeoutMs,
               },
             }),
             adaptiveTimeoutMs,
@@ -1626,7 +1475,6 @@ Graph hints: ${graphQueryHint}`;
             contextLength: rawVectorTextLength,
           });
           
-          // On timeout, fall back to truncated text
           if (summarizeError?.message?.includes('timed out')) {
             const fallbackLength = Math.min(vectorText.length, budgetChars);
             vectorText = vectorText.slice(0, fallbackLength);
@@ -1757,7 +1605,6 @@ Graph hints: ${graphQueryHint}`;
     
     const MAX_MESSAGES_TO_PROCESS = 25;
     
-    // Часть B: Обработка dropped messages для RAG
     let systemMessage = orderedMessages.find(m => m.role === 'system');
     let otherMessages = orderedMessages.filter(m => m.role !== 'system');
     let droppedMessages = [];
@@ -1770,7 +1617,6 @@ Graph hints: ${graphQueryHint}`;
       
       logger.warn(`[PROMPT-LIMIT] Принудительно усекаем историю с ${otherMessages.length} до ${MAX_MESSAGES_TO_PROCESS} сообщений. Dropped: ${droppedMessages.length}`);
       
-      // Отправляем dropped messages в RAG асинхронно
       const convId = this.conversationId || this.options?.req?.body?.conversationId;
       const userId = this.options?.req?.user?.id;
 
@@ -1974,7 +1820,6 @@ Graph hints: ${graphQueryHint}`;
             0,
           );
           
-          // Fire-and-forget для history_sync (не блокируем ответ)
           setImmediate(async () => {
             try {
               await enqueueMemoryTasks(
@@ -2013,10 +1858,6 @@ Graph hints: ${graphQueryHint}`;
       .join('\n')
       .trim();
     
-    /**
-     * @description Fallback для новых чатов: если нет истории сообщений и systemContent пуст,
-     * устанавливаем базовый промпт для работы RAG.
-     */
     if (orderedMessages.length === 0 && systemContent.length === 0) {
         systemContent = DEFAULT_SYSTEM_PROMPT;
         logger.debug('[AgentClient] Applied default system prompt for new chat');
@@ -2032,7 +1873,6 @@ Graph hints: ${graphQueryHint}`;
       req.ragCacheStatus = ragCacheStatus;
     }
 
-    // Не ждем RAG ingest для новых чатов (оптимизация)
     const waitMsRaw = Number(runtimeCfg?.rag?.history?.waitForIngestMs ?? runtimeCfg?.history?.waitForIngestMs ?? 0);
     const waitMs = Math.min(Math.max(waitMsRaw, 0), 3000);
     const didIngest = Boolean(req?.didEnqueueIngest);
@@ -2241,12 +2081,6 @@ Graph hints: ${graphQueryHint}`;
     return result;
   }
 
-  /**
-   * @description Awaits memory processing with a timeout to prevent hanging.
-   * @param {Promise} memoryPromise - Promise for memory processing.
-   * @param {number} [timeoutMs=3000] - Timeout in milliseconds.
-   * @returns {Promise<any>} Resolved attachments or undefined on timeout/error.
-   */
   async awaitMemoryWithTimeout(memoryPromise, timeoutMs = 3000) {
     if (!memoryPromise) {
       return;
@@ -2269,11 +2103,6 @@ Graph hints: ${graphQueryHint}`;
     }
   }
 
-  /**
-   * @description Initializes and configures memory processing for the agent.
-   * @returns {Promise<Object|null>} Memory processor configuration or null if disabled/unavailable.
-   * @throws {Error} If agent loading or initialization fails.
-   */
   async useMemory() {
     const user = this.options.req.user;
     if (user.personalization?.memories === false) {
@@ -2379,11 +2208,6 @@ Graph hints: ${graphQueryHint}`;
     return withoutKeys;
   }
 
-  /**
-   * @description Filters out image URLs from message content for memory processing.
-   * @param {Object} message - Message object to filter.
-   * @returns {Object} Filtered message without image URLs.
-   */
   removeImageContentFromMessage(message) {
     if (!message.content || typeof message.content === 'string') {
       return message;
@@ -2412,17 +2236,6 @@ Graph hints: ${graphQueryHint}`;
     return message;
   }
 
-  /**
-   * @description Processes messages through memory agent for context enhancement.
-   * @param {Array} messages - Array of messages to process.
-   * @returns {Promise<any>} Processed memory result or undefined on error.
-   * @throws {Error} If memory processing fails.
-   */
-  /**
-   * Анализирует последние сообщения и отправляет уникальные фрагменты в memory-агент.
-   * @param {Array} messages
-   * @returns {Promise<any>}
-   */
   async enrichContextWithMemoryAgent(messages) {
     try {
       if (this.processMemory == null) {
@@ -2456,13 +2269,6 @@ Graph hints: ${graphQueryHint}`;
     }
   }
 
-  /**
-   * @description Sends completion request and returns content parts.
-   * @param {Object} payload - Payload for completion.
-   * @param {Object} [opts] - Options including onProgress, userMCPAuthMap, abortController.
-   * @returns {Promise<Array>} Content parts from completion.
-   * @throws {Error} If chat completion fails.
-   */
   async sendCompletion(payload, opts = {}) {
     await this.chatCompletion({
       payload,
@@ -2636,20 +2442,10 @@ Graph hints: ${graphQueryHint}`;
     }
   }
 
-  /**
-   * @description Returns the current stream usage statistics.
-   * @returns {Object} Usage object with input/output tokens.
-   */
   getStreamUsage() {
     return this.usage;
   }
 
-  /**
-   * @description Calculates token count for assistant response content.
-   * @param {Object} params - Response parameters.
-   * @param {string} params.content - Response content.
-   * @returns {number} Token count.
-   */
   getTokenCountForResponse({ content }) {
     return this.getTokenCountForMessage({
       role: 'assistant',
@@ -2657,14 +2453,6 @@ Graph hints: ${graphQueryHint}`;
     });
   }
 
-  /**
-   * @description Calculates current message token count from usage and map.
-   * @param {Object} params - Calculation parameters.
-   * @param {Object} params.tokenCountMap - Map of token counts.
-   * @param {string} params.currentMessageId - Current message ID.
-   * @param {Object} params.usage - Usage statistics.
-   * @returns {number} Calculated token count.
-   */
   calculateCurrentTokenCount({ tokenCountMap, currentMessageId, usage }) {
     const originalEstimate = tokenCountMap[currentMessageId] || 0;
 
@@ -2683,15 +2471,6 @@ Graph hints: ${graphQueryHint}`;
     return currentMessageTokens > 0 ? currentMessageTokens : originalEstimate;
   }
 
-  /**
-   * @description Executes chat completion with agent processing, streaming, and tool handling.
-   * @param {Object} params - Completion parameters.
-   * @param {Object} params.payload - Payload for completion.
-   * @param {Object} [params.userMCPAuthMap] - MCP authentication map.
-   * @param {AbortController} [params.abortController] - Abort controller for cancellation.
-   * @returns {Promise<void>}
-   * @throws {Error} If agent run or processing fails.
-   */
   async chatCompletion({ payload, userMCPAuthMap, abortController = null }) {
     let config;
     let run;
@@ -2811,7 +2590,6 @@ Graph hints: ${graphQueryHint}`;
           .join('\n')
           .trim();
 
-        // Применяем дефолтный промпт если systemContent пуст
         if (!systemContent || systemContent.length === 0) {
           systemContent = DEFAULT_SYSTEM_PROMPT;
           logger.debug(`[AgentClient][runAgent:${agent.id}] Applied default system prompt`);
@@ -2953,15 +2731,14 @@ Graph hints: ${graphQueryHint}`;
         config.signal = null;
       };
 
-      // Main execution loop with retry logic
       while (retryAttempt <= MAX_RETRIES) {
         try {
           await runAgent(this.options.agent, initialMessages);
-          break; // Success, exit retry loop
+          break;
         } catch (runError) {
           if (detectContextOverflow(runError) && retryAttempt < MAX_RETRIES) {
             retryAttempt++;
-            const reductionFactor = 0.3 + (retryAttempt * 0.2); // 30%, 50%, 70% reduction
+            const reductionFactor = 0.3 + (retryAttempt * 0.2);
             
             logger.warn('[context.overflow.retry]', {
               conversationId: this.conversationId,
@@ -2971,7 +2748,6 @@ Graph hints: ${graphQueryHint}`;
               originalError: runError?.message,
             });
 
-            // Compress messages for retry
             initialMessages = compressMessagesForRetry(initialMessages, reductionFactor);
             
             logger.info('[context.overflow.compressed]', {
@@ -2981,12 +2757,10 @@ Graph hints: ${graphQueryHint}`;
               reductionFactor,
             });
 
-            // Wait a bit before retry
             await new Promise(resolve => setTimeout(resolve, 500 * retryAttempt));
             continue;
           }
           
-          // If not overflow or max retries reached, throw error
           throw runError;
         }
       }
@@ -3149,7 +2923,6 @@ Graph hints: ${graphQueryHint}`;
         return;
       }
 
-      // Check if this is a context overflow error after all retries
       if (detectContextOverflow(err) && retryAttempt >= MAX_RETRIES) {
         logger.error('[context.overflow.max_retries]', {
           conversationId: this.conversationId,
@@ -3165,7 +2938,6 @@ Graph hints: ${graphQueryHint}`;
         return;
       }
 
-      // ИСПРАВЛЕНО: Используем JSON.stringify для вывода объекта с деталями ошибки
       const errorDetails = {
         message: err?.message,
         code: err?.code,
@@ -3199,14 +2971,6 @@ Graph hints: ${graphQueryHint}`;
     }
   }
 
-  /**
-   * @description Generates a conversation title using Ollama or fallback.
-   * @param {Object} params - Title generation parameters.
-   * @param {string} params.text - Text to base title on.
-   * @param {AbortController} params.abortController - Abort controller.
-   * @returns {Promise<string>} Generated title.
-   * @throws {Error} If title generation fails.
-   */
   async titleConvo({ text, abortController }) {
     const ollamaConfig = configService.get('providers.ollama', {});
     const USE_OLLAMA_FOR_TITLES = configService.getBoolean('features.useOllamaForTitles', false);
@@ -3289,23 +3053,14 @@ Graph hints: ${graphQueryHint}`;
     }
   }
 
-  /**
-   * @description Returns the tokenizer encoding based on model.
-   * @returns {string} Encoding name (e.g., 'cl100k_base' or 'o200k_base').
-   */
   getEncoding() {
     const model = this.options?.agent?.model_parameters?.model || this.model;
     if (model && /gemini/i.test(model)) {
-        return 'cl100k_base'; // Gemini использует похожий токенизатор
+        return 'cl100k_base';
     }
-    return 'o200k_base'; // Для GPT-4o
+    return 'o200k_base';
   }
 
-  /**
-   * @description Counts tokens in the given text using the current encoding.
-   * @param {string} text - Text to count tokens for.
-   * @returns {number} Token count.
-   */
   getTokenCount(text) {
     const encoding = this.getEncoding();
     return Tokenizer.getTokenCount(text, encoding);
