@@ -183,6 +183,12 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
     return { status: 'skipped', reason: 'empty_tasks' };
   }
 
+  // Ensure meta.reason is always set
+  if (!meta.reason) {
+    meta.reason = 'unknown';
+    logger.debug('[memoryQueue] meta.reason was undefined, defaulting to "unknown"');
+  }
+
   if (!temporalEnabled) {
     incMemoryQueueSkipped('temporal_disabled');
     logger.warn('[memoryQueue] Temporal выключен, задачи пропущены', meta);

@@ -272,6 +272,7 @@ class ConfigService {
           budgetChars: z.number().int().positive(),
           chunkChars: z.number().int().positive(),
           provider: z.string().optional(),
+          timeoutMs: z.number().int().positive().optional(),
         })
         .optional(),
       history: z
@@ -316,9 +317,11 @@ class ConfigService {
       refreshIntervalSec: z.number().int().positive().optional(),
       cachePath: z.string().min(1).optional(),
     });
+    
     const securitySchema = z.object({
       ragInternalKey: z.string().optional(),
     });
+    
     const limitsSchema = z.object({
       request: z.record(z.number().int().positive()).optional(),
       token: z.object({
@@ -412,6 +415,11 @@ class ConfigService {
         location: z.string().min(1),
         titleModel: z.string().min(1).optional(),
       }),
+      ollama: z.object({
+        url: z.string().min(1).optional(),
+        titleModel: z.string().min(1).optional(),
+        model: z.string().min(1).optional(),
+      }).optional(),
     });
 
     const agentsSchema = z.object({
@@ -547,12 +555,10 @@ class ConfigService {
       rag: {
         schema: ragSchema,
         loader: () => {
-          // Конфигурация Retrieval-Augmented Generation (RAG).
-          // Ожидаются подсекции gateway, query, graph, vector, summarization и history.
           const toolsGatewayUrl = sanitizeUrl(this.env.TOOLS_GATEWAY_URL);
           if (!toolsGatewayUrl) {
             logger.warn(
-              '[ConfigService] rag.gateway.url is not configured; tools-gateway features are disabled.',
+              '[ConfigService] rag.gateway.url не настроен; функции tools-gateway отключены.',
             );
           }
 	  const ragCacheTtl = parseOptionalInt(this.env.RAG_CACHE_TTL) ?? 900;
@@ -586,6 +592,7 @@ class ConfigService {
           const ragSummaryProvider = sanitizeOptionalString(
             this.env.RAG_VECTOR_SUMMARY_PROVIDER,
           );
+          const ragSummaryTimeout = parseOptionalInt(this.env.RAG_SUMMARY_TIMEOUT_MS) ?? 125000;
 
           const ragQueryMaxChars =
             parseOptionalInt(this.env.RAG_QUERY_MAX_CHARS) ?? 6_000;
@@ -678,7 +685,7 @@ class ConfigService {
               budgetChars: ragSummaryBudget,
               chunkChars: ragSummaryChunk,
               provider: ragSummaryProvider || '',
-              timeoutMs: parseOptionalInt(this.env.RAG_SUMMARY_TIMEOUT_MS) ?? 25000,
+              timeoutMs: ragSummaryTimeout,
             },
             history: {
               histLongUserToRag: historyHistLongUser,
@@ -869,14 +876,16 @@ class ConfigService {
             location: sanitizeOptionalString(this.env.GOOGLE_LOC) || 'us-central1',
             titleModel: sanitizeOptionalString(this.env.GOOGLE_TITLE_MODEL),
           },
+          ollama: {
+            url: sanitizeUrl(this.env.OLLAMA_URL) || undefined,
+            titleModel: sanitizeOptionalString(this.env.OLLAMA_TITLE_MODEL),
+            model: sanitizeOptionalString(this.env.OLLAMA_MODEL),
+          },
         }),
       },
       limits: {
         schema: limitsSchema,
         loader: () => {
-          // Обрабатываем LIMITS_REQUEST_* переменные окружения и мапим их в секцию limits.request.
-          // Читаем переменные окружения формата LIMITS_REQUEST_<NAME>.
-          // Значения должны быть положительными целыми числами.
           const requestLimits = {};
           for (const [key, value] of Object.entries(this.env)) {
             if (!key.startsWith('LIMITS_REQUEST_')) {
@@ -968,7 +977,7 @@ class ConfigService {
 
     const entry = this.schemas[name];
     if (!entry) {
-      throw new Error(`[ConfigService] Unknown section "${name}"`);
+      throw new Error(`[ConfigService] Неизвестная секция "${name}"`);
     }
 
     try {
@@ -979,12 +988,12 @@ class ConfigService {
     } catch (error) {
       if (error instanceof z.ZodError) {
         logger.error(
-          '[ConfigService] Validation error in section %s: %o',
+          '[ConfigService] Ошибка валидации в секции %s: %o',
           name,
           error.flatten().fieldErrors,
         );
       } else {
-        logger.error('[ConfigService] Failed to load section %s: %s', name, error.message);
+        logger.error('[ConfigService] Не удалось загрузить секцию %s: %s', name, error.message);
       }
       throw error;
     }
@@ -1010,17 +1019,17 @@ class ConfigService {
           // Загружаем секцию 'endpoints' из YAML и кешируем ее
           if (fileConfig.endpoints) {
             this.cache.set('endpoints', deepFreeze(fileConfig.endpoints));
-            logger.info(`[ConfigService] Successfully loaded 'endpoints' from YAML: ${configPath}`);
+            logger.info(`[ConfigService] Успешно загружена секция 'endpoints' из YAML: ${configPath}`);
           }
 
           // Загружаем также другие корневые секции из YAML, если они есть (например, fileConfig)
           if (fileConfig.fileConfig) {
             this.cache.set('fileConfig', deepFreeze(fileConfig.fileConfig));
-            logger.info(`[ConfigService] Successfully loaded 'fileConfig' from YAML: ${configPath}`);
+            logger.info(`[ConfigService] Успешно загружена секция 'fileConfig' из YAML: ${configPath}`);
           }
         }
       } catch (e) {
-        logger.error(`[ConfigService] Failed to load or parse YAML config at ${configPath}`, e);
+        logger.error(`[ConfigService] Не удалось загрузить или распарсить YAML конфиг по пути ${configPath}`, e);
       }
     }
     // [CUSTOM PATCH] END: YAML config loading logic
@@ -1107,10 +1116,15 @@ class ConfigService {
   }
 
   #useDefault(path, defaultValue) {
+    // Suppress warning for ollama section when not configured
+    if (path === 'ollama' && defaultValue !== undefined) {
+      return defaultValue;
+    }
+    
     if (!this.missingDefaults.has(path)) {
       this.missingDefaults.add(path);
-      logger.warn(
-        `[ConfigService] Value for "${path}" is missing; falling back to default (${JSON.stringify(defaultValue)})`,
+      logger.debug(
+        `[ConfigService] Значение для "${path}" отсутствует; используется дефолт (${JSON.stringify(defaultValue)})`,
       );
     }
     return defaultValue;
@@ -1119,31 +1133,31 @@ class ConfigService {
   #assertCritical() {
     const mongo = this.getSection('mongo');
     if (!mongo.uri) {
-      throw new Error('MONGO_URI is required but not configured.');
+      throw new Error('MONGO_URI обязателен, но не настроен.');
     }
 
     if (this.env.MONGODB_URI && !this.env.MONGO_URI) {
       logger.warn(
-        '[ConfigService] MONGODB_URI detected. Please migrate to MONGO_URI and remove the legacy variable.',
+        '[ConfigService] Обнаружен MONGODB_URI. Пожалуйста, мигрируйте на MONGO_URI и удалите устаревшую переменную.',
       );
     }
 
     const nats = this.getSection('nats');
     if (nats.enabled && nats.servers.length === 0) {
-      throw new Error('NATS_SERVERS must be configured when NATS_ENABLED=true.');
+      throw new Error('NATS_SERVERS должен быть настроен когда NATS_ENABLED=true.');
     }
 
     const queues = this.getSection('queues');
     if (!queues.toolsGatewayUrl) {
       logger.warn(
-        '[ConfigService] toolsGatewayUrl is not configured. Temporal HTTP fallback may be unavailable.',
+        '[ConfigService] toolsGatewayUrl не настроен. Temporal HTTP fallback может быть недоступен.',
       );
     }
 
     const rag = this.getSection('rag');
     if (!rag.url) {
       logger.warn(
-        '[ConfigService] RAG service URL is not configured. RAG context enrichment may fail.',
+        '[ConfigService] URL сервиса RAG не настроен. Обогащение контекста RAG может не работать.',
       );
     }
   }
@@ -1153,4 +1167,3 @@ const configService = new ConfigService();
 
 module.exports = configService;
 module.exports.ConfigService = ConfigService;
-
