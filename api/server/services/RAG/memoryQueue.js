@@ -17,6 +17,8 @@ const REQUIRED_FIELDS = new Set([
   'content',
 ]);
 
+const TEXT_REQUIRED_FIELDS = new Set(['conversation_id', 'user_id', 'content']);
+
 const TEMPORAL_STATUS_REASON = 'memory_queue';
 
 // Transient error patterns that should not disable Temporal globally
@@ -134,21 +136,36 @@ async function enqueueBatch(client, batch, meta) {
 
   for (const task of batch) {
     const payload = task?.payload || task;
-    if (!payload || !payload.conversation_id || !payload.message_id) {
-      errors.push(new Error('Невалидный payload задачи: отсутствует conversation_id/message_id'));
-      continue;
-    }
+    const taskType = task?.type || payload?.type;
 
-    const missing = [...REQUIRED_FIELDS].filter((key) => !(key in payload));
-    if (missing.length) {
-      incMemoryQueueSkipped('missing_fields');
-      logger.warn(
-        '[memoryQueue] Пропуск задачи для Temporal (conversation=%s, message=%s) — отсутствуют поля: %s',
-        payload.conversation_id,
-        payload.message_id,
-        missing.join(', '),
-      );
-      continue;
+    if (taskType === 'index_text') {
+      const missingText = [...TEXT_REQUIRED_FIELDS].filter((key) => !(key in (payload || {})));
+      if (missingText.length) {
+        incMemoryQueueSkipped('missing_text_fields');
+        logger.warn(
+          '[memoryQueue] Пропуск index_text (conversation=%s) — отсутствуют поля: %s',
+          payload?.conversation_id,
+          missingText.join(', '),
+        );
+        continue;
+      }
+    } else {
+      if (!payload || !payload.conversation_id || !payload.message_id) {
+        incMemoryQueueSkipped('missing_fields');
+        continue;
+      }
+
+      const missing = [...REQUIRED_FIELDS].filter((key) => !(key in payload));
+      if (missing.length) {
+        incMemoryQueueSkipped('missing_fields');
+        logger.warn(
+          '[memoryQueue] Пропуск задачи для Temporal (conversation=%s, message=%s) — отсутствуют поля: %s',
+          payload.conversation_id,
+          payload.message_id,
+          missing.join(', '),
+        );
+        continue;
+      }
     }
 
     try {

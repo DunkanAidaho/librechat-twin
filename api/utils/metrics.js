@@ -118,6 +118,13 @@ const temporalStatus = new client.Gauge({
   registers: [register],
 });
 
+const longTextTasks = new client.Counter({
+  name: 'long_text_tasks_total',
+  help: 'Состояния обработки больших текстов',
+  labelNames: ['status'],
+  registers: [register],
+});
+
 function safeLabels(labels = {}) {
   return Object.fromEntries(
     Object.entries(labels).map(([key, value]) => [
@@ -204,6 +211,10 @@ function setTemporalStatus(reason, isAvailable) {
   }
 }
 
+function incLongTextTask(status) {
+  longTextTasks.inc(safeLabels({ status }));
+}
+
 module.exports = {
   register,
   renderMetrics,
@@ -222,4 +233,5 @@ module.exports = {
   incGraphEnqueueFailure,
   incGraphEnqueueTotal,
   setTemporalStatus,
+  incLongTextTask,
 };

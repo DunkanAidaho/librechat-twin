@@ -18,13 +18,15 @@ const sc = StringCodec();
 
 const ingestionConfig = config.getSection('ingestion');
 
-const DEDUPE_BUCKET = ingestionConfig.dedupeBucket;
+const FILE_DEDUPE_BUCKET = ingestionConfig.dedupeBucket;
+const TEXT_DEDUPE_BUCKET = ingestionConfig.textDedupeBucket || 'text_ingest_dedupe';
 const LOCAL_TTL_MS = ingestionConfig.dedupeLocalTtlMs;
 const LOCAL_MAX_ITEMS = ingestionConfig.dedupeLocalMax;
 const KV_TTL_MS = ingestionConfig.dedupeKvTtlMs;
 const KV_TTL_NS = KV_TTL_MS > 0 ? KV_TTL_MS * 1e6 : undefined;
 
 let kvBucket = null;
+let currentBucketName = FILE_DEDUPE_BUCKET;
 let watcherHandle = null;
 let initialized = false;
 let initializingPromise = null;
@@ -128,7 +130,11 @@ async function startWatcher() {
   }
 }
 
-async function initialize() {
+function getBucketName(taskType) {
+  return taskType === 'index_text' ? TEXT_DEDUPE_BUCKET : FILE_DEDUPE_BUCKET;
+}
+
+async function initialize(bucketName = FILE_DEDUPE_BUCKET) {
   if (initialized && kvBucket) {
     return true;
   }
@@ -154,7 +160,7 @@ async function initialize() {
     }
 
     try {
-      kvBucket = await getOrCreateKV(DEDUPE_BUCKET, {
+      kvBucket = await getOrCreateKV(bucketName, {
         ttl: KV_TTL_MS,
         history: 1,
         maxValueSize: 64,
@@ -165,9 +171,10 @@ async function initialize() {
         return false;
       }
 
+      currentBucketName = bucketName;
       await startWatcher();
       initialized = true;
-      logger.info(`[ingestDeduplicator] Инициализация завершена (bucket=${DEDUPE_BUCKET})`);
+      logger.info(`[ingestDeduplicator] Инициализация завершена (bucket=${bucketName})`);
       return true;
     } catch (error) {
       logger.error(`[ingestDeduplicator] Ошибка инициализации KV: ${error.message}`);
@@ -182,7 +189,17 @@ async function initialize() {
   return result;
 }
 
-async function markAsIngested(key) {
+async function ensureBucket(taskType) {
+  const targetBucket = getBucketName(taskType);
+  if (currentBucketName !== targetBucket) {
+    await shutdown();
+    await initialize(targetBucket);
+  } else if (!kvBucket) {
+    await initialize(targetBucket);
+  }
+}
+
+async function markAsIngested(key, taskType = 'index_file') {
   if (!key) {
     return { deduplicated: false, mode: 'fallback' };
   }
@@ -194,7 +211,8 @@ async function markAsIngested(key) {
 
   markMiss('memory');
 
-  const kvReady = await initialize();
+  await ensureBucket(taskType);
+  const kvReady = Boolean(kvBucket);
   if (!kvReady || !kvBucket) {
     markMiss('fallback');
     cache.set(key, true);

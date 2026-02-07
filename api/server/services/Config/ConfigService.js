@@ -298,6 +298,7 @@ class ConfigService {
       dedupeLocalTtlMs: z.number().int().nonnegative(),
       dedupeLocalMax: z.number().int().positive(),
       dedupeKvTtlMs: z.number().int().nonnegative(),
+      textDedupeBucket: z.string().min(1).optional(),
     });
 
     const featuresSchema = z.object({
@@ -366,6 +367,7 @@ class ConfigService {
           maxChars: z.number().int().positive(),
         })
         .optional(),
+      longTextMaxChars: z.number().int().positive().optional(),
     });
 
     const searchSchema = z.object({
@@ -721,6 +723,7 @@ class ConfigService {
           dedupeLocalTtlMs: parseOptionalInt(this.env.INGEST_DEDUP_LOCAL_TTL_MS) ?? 600_000,
           dedupeLocalMax: parseOptionalInt(this.env.INGEST_DEDUP_LOCAL_MAX) ?? 5_000,
           dedupeKvTtlMs: parseOptionalInt(this.env.INGEST_DEDUP_KV_TTL_MS) ?? 259_200_000,
+          textDedupeBucket: sanitizeOptionalString(this.env.TEXT_INGEST_DEDUPE_BUCKET),
         }),
       },
       pricing: {
@@ -819,6 +822,7 @@ class ConfigService {
             ragQuery: {
               maxChars: ragQueryMaxChars,
             },
+            longTextMaxChars: parseOptionalInt(this.env.LONG_TEXT_MAX_CHARS) ?? undefined,
           };
         },
       },

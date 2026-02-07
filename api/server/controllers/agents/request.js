@@ -36,6 +36,7 @@ const {
 
 const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
 const ingestDeduplicator = require('~/server/services/Deduplication/ingestDeduplicator');
+const { incLongTextTask } = require('~/utils/metrics');
 const { enqueueGraphTask, enqueueSummaryTask } = require('~/utils/temporalClient');
 const { makeIngestKey } = require('~/server/utils/messageUtils');
 
@@ -50,6 +51,7 @@ const memoryConfig = config.getSection('memory');
 
 const HEADLESS_STREAM = Boolean(featuresConfig.headlessStream);
 const MAX_USER_MSG_TO_MODEL_CHARS = agentsThresholdsConfig.maxUserMessageChars;
+const MAX_TEXT_SIZE = config.getNumber('memory.longTextMaxChars', 500000);
 const GOOGLE_NOSTREAM_THRESHOLD = agentsThresholdsConfig.googleNoStreamThreshold;
 
 const SUMMARIZATION_THRESHOLD = summariesConfig.threshold;
@@ -422,6 +424,8 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
   });
 
   // Pre-emptive file ingestion
+  const makeDedupeKey = (scope, id) => `ingest_${scope}_${id}`;
+
   if (req.body.files && req.body.files.length > 0) {
     try {
       const { encodeAndFormat } = require('../../services/Files/images/encode');
@@ -447,8 +451,8 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
           `[Pre-emptive Ingest] Нет conversationId для file_id=${file.file_id}, user=${userId}.`,
         );
       } else {
-        const dedupeKey = `ingest:file:${file.file_id}`;
-        const dedupeResult = await ingestDeduplicator.markAsIngested(dedupeKey);
+        const dedupeKey = makeDedupeKey('file', file.file_id);
+        const dedupeResult = await ingestDeduplicator.markAsIngested(dedupeKey, 'index_file');
         if (dedupeResult.deduplicated) {
           logger.debug(
             `[Pre-emptive Ingest][dedup] file_id=${file.file_id} пропущен (mode=${dedupeResult.mode}).`,
@@ -698,12 +702,34 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
   try {
     const originalUserText = text || '';
     if (originalUserText.length > MAX_USER_MSG_TO_MODEL_CHARS) {
+      if (MAX_TEXT_SIZE && originalUserText.length > MAX_TEXT_SIZE) {
+        const oversizedResponse = {
+          conversationId: initialConversationId,
+          messageId: `ack-${Date.now()}`,
+          parentMessageId: userMessageId,
+          sender: 'assistant',
+          text: 'Текст слишком большой, разбейте его на части.',
+          createdAt: new Date().toISOString(),
+        };
+
+        sendEvent(res, {
+          final: true,
+          conversation: { id: initialConversationId },
+          requestMessage: userMessage,
+          responseMessage: oversizedResponse,
+        });
+        try {
+          res.end();
+        } catch {}
+        return;
+      }
       const convId = initialConversationId || req.body.conversationId;
       const fileId = `pasted-${Date.now()}`;
       try {
         if (convId) {
-          const dedupeKey = `ingest:text:${fileId}`;
-          const dedupeResult = await ingestDeduplicator.markAsIngested(dedupeKey);
+        const dedupeKey = makeDedupeKey('text', fileId);
+        const dedupeResult = await ingestDeduplicator.markAsIngested(dedupeKey, 'index_text');
+        incLongTextTask('received');
 
           if (dedupeResult.deduplicated) {
             logger.info(
@@ -712,16 +738,14 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
           } else {
             const tasks = [
               {
-                type: 'index_file',
+                type: 'index_text',
                 payload: {
                   ingest_dedupe_key: dedupeKey,
                   user_id: userId,
                   conversation_id: convId,
-                  file_id: fileId,
-                  text_content: originalUserText,
-                  source_filename: 'pasted_text.txt',
-                  mime_type: 'text/plain',
-                  file_size: originalUserText.length,
+                  content: originalUserText,
+                  content_type: 'plain_text',
+                  created_at: new Date().toISOString(),
                 },
                 meta: { dedupe_key: dedupeKey },
               },
@@ -730,21 +754,22 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
             pendingIngestMarks.add(dedupeKey);
             try {
               const enqueueResult = await enqueueMemoryTasksSafe(tasks, {
-                reason: 'index_file',
+                reason: 'index_text',
                 conversationId: convId,
                 userId,
-                fileId,
                 textLength: originalUserText.length,
               });
               if (!enqueueResult.success) {
                 throw enqueueResult.error || new Error('Не удалось поставить задачу в очередь памяти');
               }
+              incLongTextTask('queued');
             } catch (err) {
               logger.error(
                 '[AgentController][large-text] Не удалось поставить задачу на индексацию (conversation=%s): %s',
                 convId,
                 err?.message || err,
               );
+              incLongTextTask('failed');
               throw err;
             }
 
@@ -760,22 +785,26 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       }
 
       const ackConversationId = convId || conversationId || initialConversationId;
+      const ackMessageId = `ack-${Date.now()}`;
       const ack = {
-        text: `Принял большой фрагмент (~${(originalUserText.length / 1024 / 1024).toFixed(2)} МБ). Индексация. Спросите по содержанию — отвечу через память (RAG).`,
-        messageId: `ack-${Date.now()}`,
+        conversationId: ackConversationId,
+        messageId: ackMessageId,
+        parentMessageId: userMessageId || req.body.parentMessageId,
+        sender: 'assistant',
+        text: 'Большой фрагмент принят и индексируется. Спросите позже — отвечу через память.',
         createdAt: new Date().toISOString(),
       };
 
       sendEvent(res, {
         final: true,
         conversation: { id: ackConversationId },
-        title: undefined,
-        requestMessage: {
-          text: '[Большой текст принят, отправлен в индексирование]',
-          messageId: `usr-${Date.now()}`,
+        requestMessage: userMessage ?? {
+          text: originalUserText,
+          messageId: req.body.messageId || `usr-${Date.now()}`,
         },
         responseMessage: ack,
       });
+      incLongTextTask('acked');
       try {
         res.end();
       } catch {}
