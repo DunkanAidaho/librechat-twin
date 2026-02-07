@@ -33,7 +33,7 @@ let initializingPromise = null;
 
 const stats = {
   hits: { memory: 0, jetstream: 0, fallback: 0 },
-  misses: { memory: 0, jetstream: 0, fallback: 0 },
+  misses: { memory: 0, jetstream: 0, fallback: 0, jetstream_transient: 0 },
 };
 
 const cache = new LRU({
@@ -74,6 +74,32 @@ function cacheDelete(key) {
     return cache.del(key);
   }
   return undefined;
+}
+
+function isTransientKvError(error) {
+  const message = String(error?.message || error || '');
+  return error?.code === '503' || /503|tempor/i.test(message);
+}
+
+async function retryTransient(operation, description) {
+  const attempts = 3;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await operation();
+    } catch (error) {
+      const isTransient = isTransientKvError(error);
+      const isLastAttempt = i === attempts - 1;
+      if (!isTransient || isLastAttempt) {
+        throw error;
+      }
+      const delay = 150 + Math.random() * 150;
+      logger.info(
+        `[ingestDeduplicator] transient KV error during ${description}, retry ${i + 1}/${attempts - 1}: ${error.message}`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  return null;
 }
 
 async function stopWatcher() {
@@ -223,7 +249,7 @@ async function markAsIngested(key, taskType = 'index_file') {
   }
 
   try {
-    const entry = await kvBucket.get(key);
+    const entry = await retryTransient(() => kvBucket.get(key), 'kv.get');
     if (entry?.value) {
       markHit('jetstream');
       cache.set(key, true);
@@ -232,10 +258,19 @@ async function markAsIngested(key, taskType = 'index_file') {
 
     markMiss('jetstream');
     const options = KV_TTL_NS ? { ttl: KV_TTL_NS } : undefined;
-    await kvBucket.put(key, sc.encode('1'), options);
+    await retryTransient(() => kvBucket.put(key, sc.encode('1'), options), 'kv.put');
     cache.set(key, true);
     return { deduplicated: false, mode: 'jetstream' };
   } catch (error) {
+    if (isTransientKvError(error)) {
+      logger.info(
+        `[ingestDeduplicator] transient KV put failure (bucket=${currentBucketName}, key=${key}): ${error.message}`,
+      );
+      markMiss('jetstream_transient');
+      cache.set(key, true);
+      return { deduplicated: false, mode: 'fallback_transient' };
+    }
+
     logger.warn(`[ingestDeduplicator] Ошибка KV при markAsIngested(${key}): ${error.message}`);
     markMiss('fallback');
     cache.set(key, true);
@@ -256,9 +291,17 @@ async function clearIngestedMark(key) {
   }
 
   try {
-    await kvBucket.delete(key);
+    await retryTransient(() => kvBucket.delete(key), 'kv.delete');
   } catch (error) {
-    logger.warn(`[ingestDeduplicator] Не удалось удалить KV ключ ${key}: ${error.message}`);
+    if (isTransientKvError(error)) {
+      logger.info(
+        `[ingestDeduplicator] transient KV delete failure (bucket=${currentBucketName}, key=${key}): ${error.message}`,
+      );
+      markMiss('jetstream_transient');
+    } else {
+      logger.warn(`[ingestDeduplicator] Не удалось удалить KV ключ ${key}: ${error.message}`);
+      markMiss('fallback');
+    }
   }
 }
 

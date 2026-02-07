@@ -89,7 +89,7 @@ function initTemporalClient() {
 function disableTemporal(reason) {
   if (temporalEnabled) {
     temporalEnabled = false;
-    logger.error('[memoryQueue] Temporal отключён из-за ошибки: %s', reason);
+    logger.error(`[memoryQueue] Temporal отключён из-за ошибки: ${reason}`);
     setTemporalStatus(TEMPORAL_STATUS_REASON, false);
   }
 }
@@ -98,8 +98,7 @@ async function callToolsGatewayDelete(conversationId, userId) {
   const { url, timeoutMs } = getToolsGatewayConfig();
   if (!url) {
     logger.warn(
-      '[memoryQueue] Пропуск очистки через tools-gateway: toolsGatewayUrl не настроен (conversation=%s)',
-      conversationId,
+      `[memoryQueue] Пропуск очистки через tools-gateway: toolsGatewayUrl не настроен (conversation=${conversationId})`,
     );
     incMemoryQueueSkipped('tools_gateway_missing');
     return;
@@ -115,8 +114,7 @@ async function callToolsGatewayDelete(conversationId, userId) {
       { timeout: timeoutMs },
     );
     logger.info(
-      '[memoryQueue] Вызвана очистка через tools-gateway (/neo4j/delete_conversation, conversation=%s).',
-      conversationId,
+      `[memoryQueue] Вызвана очистка через tools-gateway (/neo4j/delete_conversation, conversation=${conversationId}).`,
     );
   } catch (error) {
     incMemoryQueueToolsGatewayFailure();
@@ -143,9 +141,7 @@ async function enqueueBatch(client, batch, meta) {
       if (missingText.length) {
         incMemoryQueueSkipped('missing_text_fields');
         logger.warn(
-          '[memoryQueue] Пропуск index_text (conversation=%s) — отсутствуют поля: %s',
-          payload?.conversation_id,
-          missingText.join(', '),
+          `[memoryQueue] Пропуск index_text (conversation=${payload?.conversation_id}) — отсутствуют поля: ${missingText.join(', ')}`,
         );
         continue;
       }
@@ -159,10 +155,7 @@ async function enqueueBatch(client, batch, meta) {
       if (missing.length) {
         incMemoryQueueSkipped('missing_fields');
         logger.warn(
-          '[memoryQueue] Пропуск задачи для Temporal (conversation=%s, message=%s) — отсутствуют поля: %s',
-          payload.conversation_id,
-          payload.message_id,
-          missing.join(', '),
+          `[memoryQueue] Пропуск задачи для Temporal (conversation=${payload.conversation_id}, message=${payload.message_id}) — отсутствуют поля: ${missing.join(', ')}`,
         );
         continue;
       }
@@ -182,12 +175,9 @@ async function enqueueBatch(client, batch, meta) {
       enqueued++;
     } catch (error) {
       errors.push(error);
-      logger.warn(
-        '[memoryQueue] Ошибка enqueue отдельной задачи (conversation=%s, message=%s): %s',
-        payload.conversation_id,
-        payload.message_id,
-        error?.message,
-      );
+        logger.warn(
+          `[memoryQueue] Ошибка enqueue отдельной задачи (conversation=${payload.conversation_id}, message=${payload.message_id}): ${error?.message}`,
+        );
     }
   }
 
