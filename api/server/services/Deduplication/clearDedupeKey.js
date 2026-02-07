@@ -1,13 +1,13 @@
 'use strict';
 
 const { logger } = require('@librechat/data-schemas');
-const natsClient = require('~/utils/natsClient');
+const { publish: publishNats, isEnabled: isNatsEnabled } = require('~/utils/natsClient');
 const ingestDeduplicator = require('./ingestDeduplicator');
 
 const DEDUPE_CLEAR_SUBJECT = 'tasks.clear';
 
 function canPublish() {
-  return Boolean(natsClient?.publish) && Boolean(natsClient?.isEnabled?.());
+  return Boolean(isNatsEnabled?.()) && Boolean(publishNats);
 }
 
 async function publishClearRequest(key) {
@@ -19,7 +19,7 @@ async function publishClearRequest(key) {
   }
 
   try {
-    await natsClient.publish(DEDUPE_CLEAR_SUBJECT, { action: 'clearIngestedMark', key });
+    await publishNats(DEDUPE_CLEAR_SUBJECT, { action: 'clearIngestedMark', key });
   } catch (error) {
     logger.debug(
       `[clearDedupeKey] Не удалось опубликовать clearIngestedMark для ${key}: ${error?.message || error}`,

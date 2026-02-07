@@ -66,11 +66,9 @@ function normalizeInstructionsPayload(rawInstructions, encodingResolver, logPref
     }
     const tokenCount = computeTokens(rawInstructions.content);
     if (rawInstructions.tokenCount != null && rawInstructions.tokenCount !== tokenCount) {
+      const previousTokens = rawInstructions.tokenCount;
       logger.info(
-        '%s Пересчитано количество токенов: было %d, стало %d.',
-        logPrefix,
-        rawInstructions.tokenCount,
-        tokenCount,
+        `${logPrefix} Пересчитано количество токенов: было ${previousTokens}, стало ${tokenCount}.`,
       );
     }
     return {
@@ -91,10 +89,7 @@ function normalizeInstructionsPayload(rawInstructions, encodingResolver, logPref
 
   const tokenCount = computeTokens(trimmed);
   logger.info(
-    '%s Инструкции преобразованы в строку. Символов: %d, токенов: %d.',
-    logPrefix,
-    trimmed.length,
-    tokenCount,
+    `${logPrefix} Инструкции преобразованы в строку. Символов: ${trimmed.length}, токенов: ${tokenCount}.`,
   );
 
   return {

@@ -728,19 +728,23 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
             );
           } else {
             const messageId = dedupeKey;
+            const payload = {
+              ingest_dedupe_key: dedupeKey,
+              message_id: messageId,
+              user_id: userId,
+              conversation_id: convId,
+              role: 'user',
+              content: originalUserText,
+              content_type: 'plain_text',
+              created_at: new Date().toISOString(),
+            };
+            if (!payload.message_id) {
+              payload.message_id = dedupeKey;
+            }
             const tasks = [
               {
                 type: 'index_text',
-                payload: {
-                  ingest_dedupe_key: dedupeKey,
-                  message_id: dedupeKey,
-                  user_id: userId,
-                  conversation_id: convId,
-                  role: 'user',
-                  content: originalUserText,
-                  content_type: 'plain_text',
-                  created_at: new Date().toISOString(),
-                },
+                payload,
                 meta: { dedupe_key: dedupeKey },
               },
             ];

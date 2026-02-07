@@ -28,6 +28,21 @@ const MAX_REQUEST_TEXT_LENGTH = getNumericEnv('MAX_REQUEST_TEXT_LENGTH', 40000);
 const MAX_REQUEST_FILES_COUNT = getNumericEnv('MAX_REQUEST_FILES_COUNT', 5);
 const MAX_REQUEST_FILE_SIZE_MB = getNumericEnv('MAX_REQUEST_FILE_SIZE_MB', 25);
 const MAX_REQUEST_TOTAL_FILES_SIZE_MB = getNumericEnv('MAX_REQUEST_TOTAL_FILES_SIZE_MB', 75);
+const HARD_LONG_TEXT_LIMIT = (() => {
+  const envValue = configService.get('limits.hardLongTextLimit');
+  const parsed = Number.parseInt(envValue ?? '', 10);
+  return Number.isFinite(parsed) && parsed > MAX_REQUEST_TEXT_LENGTH ? parsed : 800000;
+})();
+
+const SOFT_LONG_TEXT_CONFIRM = (() => {
+  const envValue = configService.get('limits.softLongTextConfirm');
+  const parsed = Number.parseInt(envValue ?? '', 10);
+  if (Number.isFinite(parsed) && parsed >= MAX_REQUEST_TEXT_LENGTH && parsed < HARD_LONG_TEXT_LIMIT) {
+    return parsed;
+  }
+  return null;
+})();
+
 
 const MAX_REQUEST_FILE_SIZE_BYTES = MAX_REQUEST_FILE_SIZE_MB * 1024 * 1024;
 const MAX_REQUEST_TOTAL_FILES_SIZE_BYTES = MAX_REQUEST_TOTAL_FILES_SIZE_MB * 1024 * 1024;
@@ -158,10 +173,26 @@ function validateAgentRequest(req, res, next) {
   }
 
   if (hasText && text.length > MAX_REQUEST_TEXT_LENGTH) {
-    appendIssue(
-      issues,
-      `Превышен допустимый размер текста (${text.length} > ${MAX_REQUEST_TEXT_LENGTH} символов).`,
-    );
+    if (text.length > HARD_LONG_TEXT_LIMIT) {
+      logger.warn(
+        `[validateAgentRequest] Текст превышает жесткий лимит (${text.length} > ${HARD_LONG_TEXT_LIMIT}).`,
+      );
+      return res.status(413).json({ message: 'Текст слишком большой, разбейте его на части.' });
+    }
+
+    if (
+      SOFT_LONG_TEXT_CONFIRM &&
+      text.length > SOFT_LONG_TEXT_CONFIRM &&
+      !body.confirmLongText
+    ) {
+      logger.info(
+        `[validateAgentRequest] Текст требует подтверждения (${text.length} > ${SOFT_LONG_TEXT_CONFIRM}).`,
+      );
+      return res.status(409).json({
+        message: 'Текст очень большой. Отправьте повторно, если уверены.',
+        code: 'long_text_confirm',
+      });
+    }
   }
 
   if (files !== undefined && !Array.isArray(files)) {

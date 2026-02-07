@@ -21,7 +21,7 @@ const KV_OP_PURGE = KVOperation.PURGE ?? 'PURGE';
 const ingestionConfig = config.getSection('ingestion');
 
 const FILE_DEDUPE_BUCKET = ingestionConfig.dedupeBucket;
-const TEXT_DEDUPE_BUCKET = ingestionConfig.textDedupeBucket || 'text_ingest_dedupe';
+const TEXT_DEDUPE_BUCKET = ingestionConfig.textDedupeBucket;
 const LOCAL_TTL_MS = ingestionConfig.dedupeLocalTtlMs;
 const LOCAL_MAX_ITEMS = ingestionConfig.dedupeLocalMax;
 const KV_TTL_MS = ingestionConfig.dedupeKvTtlMs;

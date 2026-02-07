@@ -17,7 +17,7 @@ const REQUIRED_FIELDS = new Set([
   'content',
 ]);
 
-const TEXT_REQUIRED_FIELDS = new Set(['conversation_id', 'user_id', 'content', 'role']);
+const TEXT_REQUIRED_FIELDS = new Set(['conversation_id', 'user_id', 'content', 'role', 'message_id']);
 
 const TEMPORAL_STATUS_REASON = 'memory_queue';
 
