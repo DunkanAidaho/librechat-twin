@@ -714,6 +714,8 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       }
       const convId = initialConversationId || req.body.conversationId;
       const fileId = `pasted-${Date.now()}`;
+      const textSize = originalUserText.length;
+      const approxMb = (textSize / 1024 / 1024).toFixed(2);
       try {
         if (convId) {
         const dedupeKey = makeDedupeKey('text', fileId);
@@ -755,6 +757,23 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
                 throw enqueueResult.error || new Error('Не удалось поставить задачу в очередь памяти');
               }
               incLongTextTask('queued');
+
+              try {
+                sendEvent(res, {
+                  meta: {
+                    longTextInfo: {
+                      status: 'indexed',
+                      conversationId: convId,
+                      textSize,
+                      messageId: dedupeKey,
+                    },
+                  },
+                });
+              } catch (notifyError) {
+                logger.warn(
+                  `[AgentController][large-text] Не удалось отправить уведомление об индексации: ${notifyError?.message || notifyError}`,
+                );
+              }
             } catch (err) {
               logger.error(
                 `[AgentController][large-text] Не удалось поставить задачу на индексацию (conversation=${convId}): ${err?.message || err}`,
@@ -775,24 +794,65 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       }
 
       const ackConversationId = convId || conversationId || initialConversationId;
+      const baseUserMessage =
+        userMessage ?? {
+          conversationId: ackConversationId,
+          messageId: req.body.messageId || `usr-${Date.now()}`,
+          parentMessageId: req.body.parentMessageId || parentMessageId || null,
+          sender: 'user',
+          text: originalUserText,
+          createdAt: new Date().toISOString(),
+        };
+
+      if (!userMessage) {
+        userMessage = baseUserMessage;
+        userMessageId = userMessage.messageId;
+      }
+
       const ackMessageId = `ack-${Date.now()}`;
       const ack = {
         conversationId: ackConversationId,
         messageId: ackMessageId,
         parentMessageId: userMessageId || req.body.parentMessageId,
         sender: 'assistant',
-        text: 'Большой фрагмент принят и индексируется. Спросите позже — отвечу через память.',
+        text: `Принял большой фрагмент (~${approxMb} МБ). Индексация…`,
         createdAt: new Date().toISOString(),
+        metadata: {
+          acknowledgement: true,
+          longTextStatus: 'accepted',
+          textSize,
+        },
       };
+
+      try {
+        await saveMessage(req, { ...baseUserMessage, user: userId });
+      } catch (userSaveError) {
+        logger.error(
+          `[AgentController][large-text] Не удалось сохранить пользовательское сообщение: ${userSaveError?.message || userSaveError}`,
+        );
+      }
+
+      try {
+        await saveMessage(req, { ...ack, user: userId, role: 'assistant' });
+      } catch (ackSaveError) {
+        logger.error(
+          `[AgentController][large-text] Не удалось сохранить ack-сообщение: ${ackSaveError?.message || ackSaveError}`,
+        );
+      }
 
       sendEvent(res, {
         final: true,
         conversation: { id: ackConversationId },
-        requestMessage: userMessage ?? {
-          text: originalUserText,
-          messageId: req.body.messageId || `usr-${Date.now()}`,
-        },
+        requestMessage: userMessage ?? baseUserMessage,
         responseMessage: ack,
+        meta: {
+          longTextInfo: {
+            status: 'accepted',
+            textSize,
+            conversationId: ackConversationId,
+            messageId: ackMessageId,
+          },
+        },
       });
       incLongTextTask('acked');
       try {
