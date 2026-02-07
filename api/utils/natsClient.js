@@ -27,7 +27,14 @@ function getRetrySettings(runtimeConfig = getNatsConfig()) {
   };
 }
 
-const isEnabled = getNatsConfig().enabled;
+/**
+ * Проверяет актуальное состояние включения NATS, читая конфиг каждый вызов.
+ * Это важно для сценариев динамической перезагрузки, чтобы не «замораживать» значение.
+ */
+function isEnabled() {
+  const runtimeConfig = getNatsConfig();
+  return Boolean(runtimeConfig?.enabled);
+}
 
 function resetConnectionState() {
   connectionPromise = null;
