@@ -1,7 +1,7 @@
 'use strict';
 
 const LRU = require('lru-cache');
-const { StringCodec, KVOperation } = require('nats');
+const { StringCodec, KVOperation = {} } = require('nats');
 const { logger } = require('@librechat/data-schemas');
 const config = require('~/server/services/Config/ConfigService');
 const {
@@ -15,6 +15,8 @@ const {
 } = require('~/utils/metrics');
 
 const sc = StringCodec();
+const KV_OP_DELETE = KVOperation.DELETE ?? 'DEL';
+const KV_OP_PURGE = KVOperation.PURGE ?? 'PURGE';
 
 const ingestionConfig = config.getSection('ingestion');
 
@@ -130,7 +132,8 @@ async function startWatcher() {
             continue;
           }
 
-          if (entry.operation === KVOperation.DELETE || entry.operation === KVOperation.PURGE) {
+          const op = entry.operation || entry.op;
+          if (op === KV_OP_DELETE || op === KV_OP_PURGE) {
             cacheDelete(entry.key);
             continue;
           }

@@ -17,7 +17,7 @@ const REQUIRED_FIELDS = new Set([
   'content',
 ]);
 
-const TEXT_REQUIRED_FIELDS = new Set(['conversation_id', 'user_id', 'content']);
+const TEXT_REQUIRED_FIELDS = new Set(['conversation_id', 'user_id', 'content', 'role']);
 
 const TEMPORAL_STATUS_REASON = 'memory_queue';
 
@@ -142,6 +142,13 @@ async function enqueueBatch(client, batch, meta) {
         payload.message_id = dedupeKey || `text-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
         logger.debug(
           `[memoryQueue] Автогенерация message_id для index_text (conversation=${payload?.conversation_id}, message_id=${payload.message_id})`,
+        );
+      }
+
+      if (!payload.role) {
+        payload.role = 'user';
+        logger.debug(
+          `[memoryQueue] Автоподстановка role=user для index_text (conversation=${payload?.conversation_id}, message_id=${payload.message_id})`,
         );
       }
 

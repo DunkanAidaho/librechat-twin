@@ -734,6 +734,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
                   message_id: dedupeKey,
                   user_id: userId,
                   conversation_id: convId,
+                  role: 'user',
                   content: originalUserText,
                   content_type: 'plain_text',
                   created_at: new Date().toISOString(),
