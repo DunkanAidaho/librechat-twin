@@ -66,6 +66,16 @@ function markMiss(mode) {
   }
 }
 
+function cacheDelete(key) {
+  if (typeof cache.delete === 'function') {
+    return cache.delete(key);
+  }
+  if (typeof cache.del === 'function') {
+    return cache.del(key);
+  }
+  return undefined;
+}
+
 async function stopWatcher() {
   if (watcherHandle) {
     try {
@@ -95,7 +105,7 @@ async function startWatcher() {
           }
 
           if (entry.operation === KVOperation.DELETE || entry.operation === KVOperation.PURGE) {
-            cache.delete(entry.key);
+            cacheDelete(entry.key);
             continue;
           }
 
@@ -159,7 +169,7 @@ async function initialize(bucketName = FILE_DEDUPE_BUCKET) {
       });
 
       if (!kvBucket) {
-        logger.warn('[ingestDeduplicator] KV bucket недоступен, fallback (bucket=%s)', bucketName);
+        logger.warn(`[ingestDeduplicator] KV bucket недоступен, fallback (bucket=${bucketName})`);
         initialized = false;
         return false;
       }
@@ -238,7 +248,7 @@ async function clearIngestedMark(key) {
     return;
   }
 
-  cache.delete(key);
+  cacheDelete(key);
 
   if (!kvBucket) {
     logger.debug(`[ingestDeduplicator] KV bucket не инициализирован, пропускаем удаление ${key}`);

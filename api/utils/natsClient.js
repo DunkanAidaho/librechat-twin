@@ -195,7 +195,7 @@ async function ensureKvStream(manager, bucketName) {
 
 async function createKvStream(manager, bucketName, options = {}) {
   const { stream, subject } = resolveKvNames(bucketName);
-  logger.info('[natsClient] creating KV stream %s', stream);
+  logger.info(`[natsClient] creating KV stream ${stream}`);
   await manager.streams.add({
     name: stream,
     subjects: [subject],
