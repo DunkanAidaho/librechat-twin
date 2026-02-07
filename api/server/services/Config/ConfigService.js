@@ -298,7 +298,7 @@ class ConfigService {
       dedupeLocalTtlMs: z.number().int().nonnegative(),
       dedupeLocalMax: z.number().int().positive(),
       dedupeKvTtlMs: z.number().int().nonnegative(),
-      textDedupeBucket: z.string().min(1).optional(),
+      textDedupeBucket: z.string().min(1),
     });
 
     const featuresSchema = z.object({
@@ -719,11 +719,12 @@ class ConfigService {
       ingestion: {
         schema: ingestionSchema,
         loader: () => ({
-          dedupeBucket: this.env.INGEST_DEDUP_BUCKET_NAME || 'ingest_dedupe',
+          dedupeBucket: sanitizeOptionalString(this.env.INGEST_DEDUPE_BUCKET) || 'ingest_dedupe',
           dedupeLocalTtlMs: parseOptionalInt(this.env.INGEST_DEDUP_LOCAL_TTL_MS) ?? 600_000,
           dedupeLocalMax: parseOptionalInt(this.env.INGEST_DEDUP_LOCAL_MAX) ?? 5_000,
           dedupeKvTtlMs: parseOptionalInt(this.env.INGEST_DEDUP_KV_TTL_MS) ?? 259_200_000,
-          textDedupeBucket: sanitizeOptionalString(this.env.TEXT_INGEST_DEDUPE_BUCKET),
+          textDedupeBucket:
+            sanitizeOptionalString(this.env.TEXT_INGEST_DEDUPE_BUCKET) || 'text_ingest_dedupe',
         }),
       },
       pricing: {
@@ -992,12 +993,11 @@ class ConfigService {
     } catch (error) {
       if (error instanceof z.ZodError) {
         logger.error(
-          '[ConfigService] Ошибка валидации в секции %s: %o',
-          name,
+          `[ConfigService] Ошибка валидации в секции ${name}:`,
           error.flatten().fieldErrors,
         );
       } else {
-        logger.error('[ConfigService] Не удалось загрузить секцию %s: %s', name, error.message);
+        logger.error(`[ConfigService] Не удалось загрузить секцию ${name}: ${error.message}`);
       }
       throw error;
     }

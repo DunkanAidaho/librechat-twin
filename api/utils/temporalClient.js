@@ -46,11 +46,9 @@ async function publishWithFallback(subjectKey, payload, fallbackPath, workflowLa
     try {
       await publish(subject, payload);
       return { status: 'queued', via: 'nats' };
-    } catch (err) {
+    } catch (error) {
       logger.error(
-        '[TemporalClient] Ошибка публикации в NATS (%s): %s',
-        workflowLabel,
-        err?.message || err,
+        `[TemporalClient] Ошибка публикации в NATS (${workflowLabel}): ${error?.message || error}`,
       );
     }
   }

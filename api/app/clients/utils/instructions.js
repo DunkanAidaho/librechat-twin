@@ -27,7 +27,7 @@ function normalizeInstructionsPayload(rawInstructions, encodingResolver, logPref
           return resolved;
         }
       } catch (error) {
-        logger.warn('%s Не удалось получить кодировку: %s', logPrefix, error?.message || error);
+        logger.warn(`${logPrefix} Не удалось получить кодировку: ${error?.message || error}`);
       }
     } else if (typeof encodingResolver === 'string' && encodingResolver.length > 0) {
       return encodingResolver;
@@ -50,7 +50,7 @@ function normalizeInstructionsPayload(rawInstructions, encodingResolver, logPref
     try {
       return Tokenizer.getTokenCount(text, encoding);
     } catch (error) {
-      logger.warn('%s Ошибка подсчёта токенов (%s): %s', logPrefix, encoding, error?.message || error);
+      logger.warn(`${logPrefix} Ошибка подсчёта токенов (${encoding}): ${error?.message || error}`);
     }
     return text.length;
   };
@@ -61,7 +61,7 @@ function normalizeInstructionsPayload(rawInstructions, encodingResolver, logPref
 
   if (typeof rawInstructions === 'object') {
     if (typeof rawInstructions.content !== 'string' || rawInstructions.content.length === 0) {
-      logger.warn('%s Объект инструкций без корректного поля content.', logPrefix);
+      logger.warn(`${logPrefix} Объект инструкций без корректного поля content.`);
       return { content: '', tokenCount: 0 };
     }
     const tokenCount = computeTokens(rawInstructions.content);
@@ -80,7 +80,7 @@ function normalizeInstructionsPayload(rawInstructions, encodingResolver, logPref
   }
 
   if (typeof rawInstructions !== 'string') {
-    logger.warn('%s Неподдерживаемый тип инструкций: %s', logPrefix, typeof rawInstructions);
+    logger.warn(`${logPrefix} Неподдерживаемый тип инструкций: ${typeof rawInstructions}`);
     return { content: '', tokenCount: 0 };
   }
 

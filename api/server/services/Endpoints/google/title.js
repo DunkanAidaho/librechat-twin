@@ -30,10 +30,7 @@ const addTitle = async (req, { text, response, client }) => {
   }
   const inputLength = typeof text === 'string' ? text.length : 0;
   logger.debug(
-    '[title][google] start (conversation=%s, resolvedModel=%s, textLen=%d)',
-    response?.conversationId ?? 'unknown',
-    model,
-    inputLength,
+    `[title][google] start (conversation=${response?.conversationId ?? 'unknown'}, resolvedModel=${model}, textLen=${inputLength})`,
   );
   const titleEndpointOptions = {
     ...client?.options,
@@ -45,19 +42,14 @@ const addTitle = async (req, { text, response, client }) => {
     initResult = await initializeClient({ req, res: response, endpointOption: titleEndpointOptions });
   } catch (error) {
     logger.error(
-      '[title][google] initializeClient failed (conversation=%s, model=%s): %s',
-      response?.conversationId ?? 'unknown',
-      model,
-      error?.message ?? error,
+      `[title][google] initializeClient failed (conversation=${response?.conversationId ?? 'unknown'}, model=${model}): ${error?.message ?? error}`,
     );
     return;
   }
   const titleClient = initResult?.client;
   if (!titleClient || typeof titleClient.titleConvo !== 'function') {
     logger.warn(
-      '[title][google] titleClient missing titleConvo (conversation=%s, model=%s)',
-      response?.conversationId ?? 'unknown',
-      model,
+      `[title][google] titleClient missing titleConvo (conversation=${response?.conversationId ?? 'unknown'}, model=${model})`,
     );
     return;
   }
@@ -70,26 +62,18 @@ const addTitle = async (req, { text, response, client }) => {
     });
   } catch (error) {
     logger.error(
-      '[title][google] titleConvo failed (conversation=%s, model=%s): %s',
-      response?.conversationId ?? 'unknown',
-      model,
-      error?.message ?? error,
+      `[title][google] titleConvo failed (conversation=${response?.conversationId ?? 'unknown'}, model=${model}): ${error?.message ?? error}`,
     );
     return;
   }
   if (!title) {
     logger.debug(
-      '[title][google] empty result (conversation=%s, model=%s)',
-      response?.conversationId ?? 'unknown',
-      model,
+      `[title][google] empty result (conversation=${response?.conversationId ?? 'unknown'}, model=${model})`,
     );
     return;
   }
   logger.debug(
-    '[title][google] generated (conversation=%s, model=%s): %s',
-    response?.conversationId ?? 'unknown',
-    model,
-    String(title).slice(0, 120),
+    `[title][google] generated (conversation=${response?.conversationId ?? 'unknown'}, model=${model}): ${String(title).slice(0, 120)}`,
   );
   const titleCache = getLogStores(CacheKeys.GEN_TITLE);
   const key = `${req.user.id}-${response.conversationId}`;

@@ -78,7 +78,7 @@ function cacheDelete(key) {
 
 function isTransientKvError(error) {
   const message = String(error?.message || error || '');
-  return error?.code === '503' || /503|tempor/i.test(message);
+  return error?.code === '503' || /\b503\b/.test(message) || /tempor/i.test(message);
 }
 
 async function retryTransient(operation, description) {
@@ -203,7 +203,9 @@ async function initialize(bucketName = FILE_DEDUPE_BUCKET) {
       currentBucketName = bucketName;
       await startWatcher();
       initialized = true;
-      logger.info(`[ingestDeduplicator] Инициализация завершена (bucket=${bucketName})`);
+      logger.info(
+        `[ingestDeduplicator] Инициализация завершена (bucket=${bucketName})`,
+      );
       return true;
     } catch (error) {
       logger.error(`[ingestDeduplicator] Ошибка инициализации KV: ${error.message}`);
@@ -264,7 +266,7 @@ async function markAsIngested(key, taskType = 'index_file') {
   } catch (error) {
     if (isTransientKvError(error)) {
       logger.info(
-        `[ingestDeduplicator] transient KV put failure (bucket=${currentBucketName}, key=${key}): ${error.message}`,
+        `[ingestDeduplicator] transient KV failure (bucket=${currentBucketName}, key=${key}): ${error.message}`,
       );
       markMiss('jetstream_transient');
       cache.set(key, true);

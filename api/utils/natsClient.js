@@ -61,7 +61,7 @@ async function connectOnce(runtimeConfig) {
 
   connection.closed().then((err) => {
     if (err) {
-      logger.warn('[natsClient] Соединение закрыто с ошибкой: %s', err.message);
+      logger.warn(`[natsClient] Соединение закрыто с ошибкой: ${err.message}`);
     } else {
       logger.info('[natsClient] Соединение закрыто');
     }
@@ -99,15 +99,13 @@ async function ensureConnection() {
         factor: retrySettings.retryFactor,
         jitter: retrySettings.retryJitter,
         onRetry: async (error, attempt) => {
-          logger.warn(
-            '[natsClient] попытка #%d подключения не удалась: %s',
-            attempt,
-            error.message,
-          );
+        logger.warn(
+          `[natsClient] попытка #${attempt} подключения не удалась: ${error.message}`,
+        );
         },
       },
     ).catch((error) => {
-      logger.error('[natsClient] Не удалось подключиться к NATS: %s', error.message);
+      logger.error(`[natsClient] Не удалось подключиться к NATS: ${error.message}`);
       resetConnectionState();
       return null;
     });
@@ -163,7 +161,7 @@ async function getOrCreateStream(configInput) {
       error.code === '503' ||
       /stream .+ not found/i.test(message)
     ) {
-      logger.info('[natsClient] Создаём стрим %s', configInput.name);
+      logger.info(`[natsClient] Создаём стрим ${configInput.name}`);
       await manager.streams.add(configInput);
       return manager.streams.info(configInput.name);
     }
@@ -216,7 +214,7 @@ async function getOrCreateKV(name, options = {}) {
   const jetstream = await getJetStream();
 
   if (!manager || !jetstream) {
-    logger.warn('[natsClient] JetStream manager unavailable, KV %s skipped', name);
+    logger.warn(`[natsClient] JetStream manager unavailable, KV ${name} skipped`);
     return null;
   }
 
@@ -275,11 +273,11 @@ async function close() {
     try {
       await nc.drain();
     } catch (error) {
-      logger.warn('[natsClient] Ошибка при drain(): %s', error.message);
+      logger.warn(`[natsClient] Ошибка при drain(): ${error.message}`);
       try {
         await nc.close();
       } catch (closeError) {
-        logger.error('[natsClient] Ошибка при close(): %s', closeError.message);
+        logger.error(`[natsClient] Ошибка при close(): ${closeError.message}`);
       }
     }
   }

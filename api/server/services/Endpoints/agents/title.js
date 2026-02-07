@@ -38,11 +38,7 @@ const addTitle = async (req, { text, response, client }) => {
   const textLength = typeof text === 'string' ? text.length : 0;
   
   logger.debug(
-    '[title] Начало генерации (conversation=%s, endpoint=%s, model=%s, textLen=%d)',
-    response?.conversationId ?? 'unknown',
-    endpointName,
-    modelName,
-    textLength,
+    `[title] Начало генерации (conversation=${response?.conversationId ?? 'unknown'}, endpoint=${endpointName}, model=${modelName}, textLen=${textLength})`,
   );
   
   let timeoutId;
@@ -53,20 +49,14 @@ const addTitle = async (req, { text, response, client }) => {
       timeoutId = setTimeout(() => reject(new Error('Таймаут генерации заголовка')), 45000);
     }).catch((error) => {
       logger.error(
-        '[title] Таймаут (conversation=%s, endpoint=%s, model=%s): %s',
-        response?.conversationId ?? 'unknown',
-        endpointName,
-        modelName,
-        error?.message ?? error,
+        `[title] Таймаут (conversation=${response?.conversationId ?? 'unknown'}, endpoint=${endpointName}, model=${modelName}): ${error?.message ?? error}`,
       );
       throw error;
     });
     
     if (!client || typeof client.titleConvo !== 'function') {
       logger.warn(
-        '[title] У клиента отсутствует titleConvo (conversation=%s, endpoint=%s)',
-        response?.conversationId ?? 'unknown',
-        endpointName,
+        `[title] У клиента отсутствует titleConvo (conversation=${response?.conversationId ?? 'unknown'}, endpoint=${endpointName})`,
       );
       
       // Fallback to simple truncation
@@ -93,11 +83,7 @@ const addTitle = async (req, { text, response, client }) => {
           Promise.race([
             client.titleConvo({ text, abortController }).catch((error) => {
               logger.error(
-                '[title] client.titleConvo провалился (conversation=%s, endpoint=%s, model=%s): %s',
-                response?.conversationId ?? 'unknown',
-                endpointName,
-                modelName,
-                error?.message ?? error,
+                `[title] client.titleConvo провалился (conversation=${response?.conversationId ?? 'unknown'}, endpoint=${endpointName}, model=${modelName}): ${error?.message ?? error}`,
               );
               throw error;
             }),
@@ -108,11 +94,7 @@ const addTitle = async (req, { text, response, client }) => {
       
       const titleDur = Date.now() - titleStart;
       logger.info(
-        '[title] Успех для conv=%s (endpoint=%s, dur=%dms): %s',
-        response?.conversationId ?? 'unknown',
-        endpointName,
-        titleDur,
-        String(title).slice(0, 120),
+        `[title] Успех для conv=${response?.conversationId ?? 'unknown'} (endpoint=${endpointName}, dur=${titleDur}ms): ${String(title).slice(0, 120)}`,
       );
       observeAgentTitle({ endpoint: endpointName }, titleDur);
 
@@ -125,10 +107,7 @@ const addTitle = async (req, { text, response, client }) => {
       
       if (!title) {
         logger.debug(
-          '[title] Пустой результат (conversation=%s, endpoint=%s, model=%s)',
-          response?.conversationId ?? 'unknown',
-          endpointName,
-          modelName,
+          `[title] Пустой результат (conversation=${response?.conversationId ?? 'unknown'}, endpoint=${endpointName}, model=${modelName})`,
         );
         
         // Fallback to simple truncation
@@ -146,11 +125,7 @@ const addTitle = async (req, { text, response, client }) => {
       }
       
       logger.debug(
-        '[title] Сгенерирован (conversation=%s, endpoint=%s, model=%s): %s',
-        response?.conversationId ?? 'unknown',
-        endpointName,
-        modelName,
-        String(title).slice(0, 120),
+        `[title] Сгенерирован (conversation=${response?.conversationId ?? 'unknown'}, endpoint=${endpointName}, model=${modelName}): ${String(title).slice(0, 120)}`,
       );
       
       await titleCache.set(key, title, 120000);
@@ -166,11 +141,7 @@ const addTitle = async (req, { text, response, client }) => {
         reason: e?.message || 'unknown',
       });
       logger.error(
-        '[title] Ошибка для conv=%s (dur=%dms): %s',
-        response?.conversationId ?? 'unknown',
-        endpointName,
-        titleDur,
-        e?.message || e,
+        `[title] Ошибка для conv=${response?.conversationId ?? 'unknown'} (endpoint=${endpointName}, dur=${titleDur}ms): ${e?.message || e}`,
       );
       
       // Fallback to simple truncation on error
@@ -195,11 +166,7 @@ const addTitle = async (req, { text, response, client }) => {
       clearTimeout(timeoutId);
     }
     logger.error(
-      '[title] Ошибка генерации заголовка (conversation=%s, endpoint=%s, model=%s): %s',
-      response?.conversationId ?? 'unknown',
-      endpointName,
-      modelName,
-      error?.message ?? error,
+      `[title] Ошибка генерации заголовка (conversation=${response?.conversationId ?? 'unknown'}, endpoint=${endpointName}, model=${modelName}): ${error?.message ?? error}`,
     );
     
     // Final fallback

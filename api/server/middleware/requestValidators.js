@@ -222,7 +222,7 @@ function validateAgentRequest(req, res, next) {
   validateIdentifiers(body, issues);
 
   if (issues.length > 0) {
-    logger.warn('[validateAgentRequest] Валидация отклонена: %o', issues);
+    logger.warn('[validateAgentRequest] Валидация отклонена:', issues);
     return res.status(400).json({
       error: 'Некорректный запрос.',
       details: issues,

@@ -71,7 +71,7 @@ router.get('/metrics', (req, res) => {
     res.setHeader('Content-Type', 'text/plain');
     res.send(metrics);
   } catch (err) {
-    logger.error('[Metrics] Error fetching metrics: %s', err?.message || err);
+    logger.error(`[Metrics] Error fetching metrics: ${err?.message || err}`);
     res.status(500).send('Error');
   }
 });
@@ -96,10 +96,12 @@ router.get('/diagnostics/ingest-dedupe', checkAgentAccess, async (req, res) => {
       };
     res.json(diagnostics);
   } catch (err) {
-    logger.error('[Diagnostics] Error fetching dedupe diagnostics: %s', err?.message || err);
+    logger.error(`[Diagnostics] Error fetching dedupe diagnostics: ${err?.message || err}`);
     res.status(500).json({ error: 'Failed to fetch diagnostics' });
   } finally {
-    await ingestDeduplicator.shutdown().catch((err) => logger.error('[Diagnostics] Shutdown error: %s', err?.message || err));
+    await ingestDeduplicator
+      .shutdown()
+      .catch((err) => logger.error(`[Diagnostics] Shutdown error: ${err?.message || err}`));
   }
 });
 module.exports = router;

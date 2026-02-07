@@ -137,6 +137,14 @@ async function enqueueBatch(client, batch, meta) {
     const taskType = task?.type || payload?.type;
 
     if (taskType === 'index_text') {
+      const dedupeKey = task?.meta?.dedupe_key || payload?.ingest_dedupe_key;
+      if (!payload.message_id) {
+        payload.message_id = dedupeKey || `text-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        logger.debug(
+          `[memoryQueue] Автогенерация message_id для index_text (conversation=${payload?.conversation_id}, message_id=${payload.message_id})`,
+        );
+      }
+
       const missingText = [...TEXT_REQUIRED_FIELDS].filter((key) => !(key in (payload || {})));
       if (missingText.length) {
         incMemoryQueueSkipped('missing_text_fields');

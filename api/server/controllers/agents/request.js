@@ -15,7 +15,7 @@ const {
 const { sendEvent } = require('@librechat/api');
 const { logger } = require('@librechat/data-schemas');
 const config = require('~/server/services/Config/ConfigService');
-const natsClient = require('~/utils/natsClient');
+const { clearDedupeKey } = require('~/server/services/Deduplication/clearDedupeKey');
 const { runWithResilience, normalizeLabelValue } = require('~/server/utils/resilience');
 const { canWrite, isResponseFinalized, makeDetachableRes } = require('~/server/utils/responseUtils');
 
@@ -322,29 +322,8 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
   let conversationId = initialConversationId;
   const pendingIngestMarks = new Set();
 
-  const canPublishDedupClear = () => Boolean(natsClient?.publish) && Boolean(natsClient?.isEnabled?.());
-
-  const clearDedupeKey = async (key, logPrefix = '[AgentController]') => {
-    if (!key) {
-      return;
-    }
-
-    if (canPublishDedupClear()) {
-      try {
-        await natsClient.publish('tasks.clear', { action: 'clearIngestedMark', key });
-      } catch (error) {
-        logger.debug(
-          `${logPrefix} Не удалось опубликовать clearIngestedMark для ${key}: ${error?.message || error}`,
-        );
-      }
-    } else {
-      logger.debug(
-        `${logPrefix} JetStream недоступен — пропускаем публикацию clearIngestedMark для ${key}`,
-      );
-    }
-
-    await ingestDeduplicator.clearIngestedMark(key);
-  };
+  const clearDedupeKeyWithLogging = (key, logPrefix = '[AgentController]') =>
+    clearDedupeKey(key, logPrefix);
 
   /**
    * Safely enqueues memory tasks with dedupe key management
@@ -511,10 +490,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
             }
           } catch (err) {
             logger.error(
-              '[Pre-emptive Ingest] Ошибка постановки задачи (file=%s, conversation=%s): %s',
-              file.file_id,
-              conversationId,
-              err?.message || err,
+              `[Pre-emptive Ingest] Ошибка постановки задачи (file=${file.file_id}, conversation=${conversationId}): ${err?.message || err}`,
             );
             throw err;
           }
@@ -522,10 +498,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       }
     } catch (e) {
       logger.error(
-        `[Предв. индексация] Сбой подготовки файлов (conv=%s, user=%s): %s.`,
-        conversationId,
-        req.user?.id,
-        e?.message || e,
+        `[Предв. индексация] Сбой подготовки файлов (conv=${conversationId}, user=${req.user?.id}): ${e?.message || e}.`,
       );
     }
   }
@@ -752,11 +725,13 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
               `[AgentController][large-text] Текст уже в обработке (dedupe mode=${dedupeResult.mode}).`,
             );
           } else {
+            const messageId = dedupeKey;
             const tasks = [
               {
                 type: 'index_text',
                 payload: {
                   ingest_dedupe_key: dedupeKey,
+                  message_id: dedupeKey,
                   user_id: userId,
                   conversation_id: convId,
                   content: originalUserText,
@@ -781,9 +756,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
               incLongTextTask('queued');
             } catch (err) {
               logger.error(
-                '[AgentController][large-text] Не удалось поставить задачу на индексацию (conversation=%s): %s',
-                convId,
-                err?.message || err,
+                `[AgentController][large-text] Не удалось поставить задачу на индексацию (conversation=${convId}): ${err?.message || err}`,
               );
               incLongTextTask('failed');
               throw err;

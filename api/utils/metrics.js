@@ -207,7 +207,7 @@ function setTemporalStatus(reason, isAvailable) {
   const labels = safeLabels({ reason });
   temporalStatus.set(labels, isAvailable ? 1 : 0);
   if (!isAvailable) {
-    logger.warn('[metrics] Temporal компонент %s недоступен', labels.reason);
+    logger.warn(`[metrics] Temporal компонент ${labels.reason} недоступен`);
   }
 }
 

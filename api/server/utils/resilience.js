@@ -66,22 +66,17 @@ async function runWithResilience(operationName, fn, options = {}) {
     signal,
     onRetry: async (error, attemptNumber) => {
       const nextAttempt = attemptNumber + 1;
-      logger.warn(
-        '[Resilience] Повторная попытка %d после ошибки в %s: %s',
-        nextAttempt,
-        operationName,
-        error?.message || error,
+      logger.info(
+        `[Resilience] Повторная попытка ${nextAttempt} после ошибки в ${operationName}: ${error?.message || error}`,
       );
       if (typeof onRetry === 'function') {
         try {
           await onRetry(error, nextAttempt);
-        } catch (hookErr) {
+        } catch (hookError) {
           logger.error(
-            '[Resilience] Ошибка в пользовательском onRetry (%s): %s',
-            operationName,
-            hookErr?.message || hookErr,
+            `[Resilience] Ошибка в пользовательском onRetry (${operationName}): ${hookError?.message || hookError}`,
           );
-          throw hookErr;
+          throw hookError;
         }
       }
     },
@@ -91,19 +86,13 @@ async function runWithResilience(operationName, fn, options = {}) {
     const result = await retryAsync(attemptExecutor, retryOptions);
     const durationMs = Date.now() - startedAt;
     logger.debug(
-      '[Resilience] Операция %s завершена, попыток=%d, длительность=%dms',
-      operationName,
-      normalizedRetries + 1,
-      durationMs,
+      `[Resilience] Операция ${operationName} завершена, попыток=${normalizedRetries - retryOptions.retries}, длительность=${durationMs}ms`,
     );
     return result;
   } catch (err) {
     const durationMs = Date.now() - startedAt;
     logger.error(
-      '[Resilience] Операция %s провалилась спустя %dms: %s',
-      operationName,
-      durationMs,
-      err?.message || err,
+      `[Resilience] Операция ${operationName} провалилась спустя ${durationMs}ms: ${err?.message || err}`,
     );
     throw err;
   }

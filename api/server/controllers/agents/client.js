@@ -953,7 +953,9 @@ class AgentClient extends BaseClient {
         }
         logger.info(`[trace] ${JSON.stringify(Object.assign(meta, cleaned))}`);
       } catch (error) {
-        logger.warn('[trace] failed to emit trace log: %s', error?.message || error);
+        logger.warn(
+          `[trace] failed to emit trace log: ${error?.message || error}`,
+        );
       }
     };
   }
