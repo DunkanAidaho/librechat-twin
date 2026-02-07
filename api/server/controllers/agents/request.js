@@ -322,6 +322,30 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
   let conversationId = initialConversationId;
   const pendingIngestMarks = new Set();
 
+  const canPublishDedupClear = () => Boolean(natsClient?.publish) && Boolean(natsClient?.isEnabled?.());
+
+  const clearDedupeKey = async (key, logPrefix = '[AgentController]') => {
+    if (!key) {
+      return;
+    }
+
+    if (canPublishDedupClear()) {
+      try {
+        await natsClient.publish('tasks.clear', { action: 'clearIngestedMark', key });
+      } catch (error) {
+        logger.debug(
+          `${logPrefix} Не удалось опубликовать clearIngestedMark для ${key}: ${error?.message || error}`,
+        );
+      }
+    } else {
+      logger.debug(
+        `${logPrefix} JetStream недоступен — пропускаем публикацию clearIngestedMark для ${key}`,
+      );
+    }
+
+    await ingestDeduplicator.clearIngestedMark(key);
+  };
+
   /**
    * Safely enqueues memory tasks with dedupe key management
    * @param {Array} tasks
@@ -336,10 +360,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       if (result?.status === 'queued' && dedupeKeys.length > 0) {
         for (const key of dedupeKeys) {
           try {
-            if (natsClient) {
-              await natsClient.publish('tasks.clear', { action: 'clearIngestedMark', key });
-            }
-            await ingestDeduplicator.clearIngestedMark(key);
+            await clearDedupeKey(key, '[MemoryQueue]');
             pendingIngestMarks.delete(key);
           } catch (err) {
             logger.warn(
@@ -678,15 +699,10 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
     if (pendingIngestMarks.size > 0) {
       for (const key of Array.from(pendingIngestMarks)) {
         try {
-          if (natsClient) {
-            await natsClient.publish('tasks.clear', { action: 'clearIngestedMark', key });
-          }
-          await ingestDeduplicator.clearIngestedMark(key);
+          await clearDedupeKey(key);
         } catch (err) {
           logger.warn(
-            '[AgentController] Не удалось очистить дедуп-ключ %s: %s',
-            key,
-            err?.message || err,
+            `[AgentController] Не удалось очистить дедуп-ключ ${key}: ${err?.message || err}`,
           );
         }
       }

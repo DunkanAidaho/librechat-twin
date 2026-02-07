@@ -151,14 +151,6 @@ async function initialize(bucketName = FILE_DEDUPE_BUCKET) {
       return false;
     }
 
-    const jetstream = await getJetStream();
-    if (!jetstream) {
-      logger.warn('[ingestDeduplicator] JetStream недоступен → fallback на локальный кеш');
-      initialized = false;
-      kvBucket = null;
-      return false;
-    }
-
     try {
       kvBucket = await getOrCreateKV(bucketName, {
         ttl: KV_TTL_MS,
@@ -167,6 +159,7 @@ async function initialize(bucketName = FILE_DEDUPE_BUCKET) {
       });
 
       if (!kvBucket) {
+        logger.warn('[ingestDeduplicator] KV bucket недоступен, fallback (bucket=%s)', bucketName);
         initialized = false;
         return false;
       }
@@ -248,6 +241,7 @@ async function clearIngestedMark(key) {
   cache.delete(key);
 
   if (!kvBucket) {
+    logger.debug(`[ingestDeduplicator] KV bucket не инициализирован, пропускаем удаление ${key}`);
     return;
   }
 

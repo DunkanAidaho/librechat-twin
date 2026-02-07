@@ -171,45 +171,82 @@ async function getOrCreateStream(configInput) {
   }
 }
 
+function resolveKvNames(name) {
+  const bucket = String(name || '')
+    .trim()
+    .replace(/[^A-Za-z0-9_-]/g, '_');
+  const stream = `KV_${bucket}`;
+  const subject = `_KV.${bucket}.>`;
+  return { bucket, stream, subject };
+}
+
+async function ensureKvStream(manager, bucketName) {
+  const { stream } = resolveKvNames(bucketName);
+  try {
+    return await manager.streams.info(stream);
+  } catch (error) {
+    const message = error?.message || '';
+    if (error?.code === '404' || /not found/i.test(message)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function createKvStream(manager, bucketName, options = {}) {
+  const { stream, subject } = resolveKvNames(bucketName);
+  logger.info('[natsClient] creating KV stream %s', stream);
+  await manager.streams.add({
+    name: stream,
+    subjects: [subject],
+    storage: options.storage ?? StorageType.File,
+    num_replicas: options.replicaCount,
+    max_age: ttlToNanosNumber(options.ttl),
+    max_msgs_per_subject: options.history ?? 1,
+    max_msg_size: options.maxValueSize ?? 1024,
+    max_bytes: options.maxBucketSize,
+    allow_rollup_hdrs: true,
+    discard: options.discardPolicy,
+  });
+  return manager.streams.info(stream);
+}
+
 async function getOrCreateKV(name, options = {}) {
   const manager = await getJetStreamManager();
   const jetstream = await getJetStream();
-  if (!manager || !jetstream) {
-    return null;
-  }
 
-  try {
-    const info = await manager.kv.stream(name);
-    if (info) {
-      return jetstream.views.kv(name);
-    }
-  } catch (error) {
-    const message = error.message || '';
-    if (
-      error.code !== '404' &&
-      error.code !== '503' &&
-      !/not found/i.test(message)
-    ) {
-      throw error;
-    }
+  if (!manager || !jetstream) {
+    logger.warn('[natsClient] JetStream manager unavailable, KV %s skipped', name);
+    return null;
   }
 
   const runtimeConfig = getNatsConfig();
   const replicas = options.replicaCount ?? runtimeConfig.streamReplicas;
+  const storage = options.storage ?? StorageType.File;
+  const ttlMs = options.ttl ?? 0;
+  const history = options.history ?? 1;
+  const maxValueSize = options.maxValueSize ?? 1024;
+  const maxBucketSize = options.maxBucketSize;
 
-  const bucketConfig = {
-    name,
-    history: options.history || 1,
-    ttl: ttlToNanosNumber(options.ttl || 0),
-    storage: options.storage || StorageType.File,
-    replicas,
-    maxValueSize: options.maxValueSize || 1024,
-    maxBucketSize: options.maxBucketSize || undefined,
-  };
+  const { bucket } = resolveKvNames(name);
 
-  logger.info('[natsClient] Создаём KV bucket %s', name);
-  await manager.kv.add(bucketConfig);
-  return jetstream.views.kv(name);
+  let streamInfo = await ensureKvStream(manager, bucket);
+  if (!streamInfo) {
+    streamInfo = await createKvStream(manager, bucket, {
+      storage,
+      ttl: ttlMs,
+      history,
+      maxValueSize,
+      maxBucketSize,
+      replicaCount: replicas,
+    });
+  }
+
+  if (!streamInfo) {
+    throw new Error(`[natsClient] Не удалось получить или создать KV stream для ${bucket}`);
+  }
+
+  return jetstream.views.kv(bucket);
 }
 
 async function publish(subject, payload, opts = {}) {
@@ -256,6 +293,9 @@ module.exports = {
   sc,
   getJetStream,
   getJetStreamManager,
+  resolveKvNames,
+  ensureKvStream,
+  createKvStream,
   getOrCreateStream,
   getOrCreateKV,
   publish,
