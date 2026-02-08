@@ -189,7 +189,10 @@ class ChunkStore {
     if (!conversationId || !chunkHash) {
       throw new Error("conversationId и chunkHash обязательны для chunkStore");
     }
-    return `chunk_status:${conversationId}:${chunkHash}`;
+    const safeConversationId = sanitizeKeyPart(conversationId);
+    const safeHash = sanitizeKeyPart(chunkHash);
+    // JetStream KV требует ключи только из [A-Za-z0-9_-]
+    return `chunk_status_${safeConversationId}_${safeHash}`;
   }
 
   async get(conversationId, chunkHash) {
@@ -210,7 +213,7 @@ class ChunkStore {
   async set(conversationId, chunkHash, data = {}) {
     const kv = await this.init();
     const key = this.#createKey(conversationId, chunkHash);
-    const payload = JSON.stringify(data || {});
+    const payload = JSON.stringify({ conversationId, chunkHash, ...(data || {}) });
     await kv.put(key, sc.encode(payload));
     return data;
   }
@@ -221,6 +224,13 @@ class ChunkStore {
     await this.set(conversationId, chunkHash, merged);
     return merged;
   }
+}
+
+function sanitizeKeyPart(value = "") {
+  return String(value)
+    .trim()
+    .replace(/[^A-Za-z0-9_-]/g, "_")
+    .slice(0, 256);
 }
 
 const chunkStore = new ChunkStore();
