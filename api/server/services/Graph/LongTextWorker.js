@@ -20,6 +20,7 @@ const { enqueueGraphTask } = require("~/utils/temporalClient");
  */
 const memoryConfig = configService.getSection("memory");
 const graphConfig = memoryConfig.graphContext || {};
+const longTextConfig = memoryConfig.longTextChunk || {};
 
 const GRAPH_REQUEST_TIMEOUT_MS = graphConfig.requestTimeoutMs || 30_000;
 const GRAPH_RELATIONS_LIMIT = configService.getNumber(
@@ -39,23 +40,11 @@ const GRAPH_CONTEXT_SUMMARY_HINT_MAX_CHARS = configService.getNumber(
   2_000,
 );
 
-const CHUNK_MAX_CHARS = configService.getNumber(
-  "memory.longTextChunk.maxChars",
-  4_000,
-);
-const CHUNK_MIN_CHARS = Math.max(
-  1_000,
-  configService.getNumber("memory.longTextChunk.minChars", 1_500),
-);
-const CHUNK_ADAPTIVE_DELTA_MS = Math.max(
-  5_000,
-  configService.getNumber("memory.longTextChunk.adaptiveDeltaMs", 5_000),
-);
-const CHUNK_TIMEOUT_MAX_MS = Math.max(
-  60_000,
-  configService.getNumber("memory.longTextChunk.maxTimeoutMs", 300_000),
-);
-const LONG_TEXT_CHUNK_BUCKET = process.env.LONG_TEXT_CHUNK_BUCKET || "long_text_chunks";
+const CHUNK_MAX_CHARS = longTextConfig.maxChars || 4_000;
+const CHUNK_MIN_CHARS = longTextConfig.minChars || 1_500;
+const CHUNK_ADAPTIVE_DELTA_MS = longTextConfig.adaptiveDeltaMs || 5_000;
+const CHUNK_TIMEOUT_MAX_MS = longTextConfig.maxTimeoutMs || 300_000;
+const LONG_TEXT_CHUNK_BUCKET = longTextConfig.bucket || "long_text_chunks";
 
 /**
  * Regex для мягкого разделения текста по предложениям/абзацам.
@@ -338,6 +327,14 @@ class LongTextGraphWorker {
           },
         });
       } catch (error) {
+        logger.error("[long-text-graph] Отладка chunk", {
+          conversationId,
+          chunkIdx: chunk.idx,
+          chunkHash: chunk.hash,
+          dedupeKey,
+          error: error?.message || error,
+          stack: error?.stack,
+        });
         logger.error("[long-text-graph] Ошибка chunk", {
           conversationId,
           chunkIdx: chunk.idx,

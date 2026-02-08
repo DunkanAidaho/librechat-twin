@@ -792,6 +792,17 @@ class ConfigService {
           const ragQueryMaxChars =
             parseOptionalInt(this.env.RAG_QUERY_MAX_CHARS) ?? 6_000;
 
+          const longTextChunkBucket =
+            sanitizeOptionalString(this.env.LONG_TEXT_CHUNK_BUCKET) || 'long_text_chunks';
+          const longTextChunkMaxChars =
+            parseOptionalInt(this.env.MEMORY_LONG_TEXT_CHUNK_MAXCHARS) ?? 4_000;
+          const longTextChunkMinChars =
+            parseOptionalInt(this.env.MEMORY_LONG_TEXT_CHUNK_MINCHARS) ?? 1_500;
+          const longTextChunkAdaptiveDeltaMs =
+            parseOptionalInt(this.env.MEMORY_LONG_TEXT_CHUNK_ADAPTIVE_DELTA_MS) ?? 5_000;
+          const longTextChunkMaxTimeoutMs =
+            parseOptionalInt(this.env.MEMORY_LONG_TEXT_CHUNK_MAX_TIMEOUT_MS) ?? 300_000;
+
           return {
             temporalEnabled: parseOptionalBool(this.env.TEMPORAL_MEMORY_ENABLED) ?? false,
             graphWorkflowEnabled:
@@ -824,6 +835,13 @@ class ConfigService {
               maxChars: ragQueryMaxChars,
             },
             longTextMaxChars: parseOptionalInt(this.env.LONG_TEXT_MAX_CHARS) ?? undefined,
+            longTextChunk: {
+              bucket: longTextChunkBucket,
+              maxChars: longTextChunkMaxChars,
+              minChars: Math.min(longTextChunkMaxChars, Math.max(1, longTextChunkMinChars)),
+              adaptiveDeltaMs: Math.max(1, longTextChunkAdaptiveDeltaMs),
+              maxTimeoutMs: Math.max(1, longTextChunkMaxTimeoutMs),
+            },
           };
         },
       },
