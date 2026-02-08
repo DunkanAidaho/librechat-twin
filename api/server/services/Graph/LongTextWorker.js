@@ -327,23 +327,27 @@ class LongTextGraphWorker {
           },
         });
       } catch (error) {
-        logger.error("[long-text-graph] Отладка chunk", {
-          conversationId,
-          chunkIdx: chunk.idx,
-          chunkHash: chunk.hash,
-          dedupeKey,
-          error: error?.message || error,
-          stack: error?.stack,
-        });
-        logger.error("[long-text-graph] Ошибка chunk", {
-          conversationId,
-          chunkIdx: chunk.idx,
-          chunkHash: chunk.hash,
-          length: chunk.content.length,
-          dedupeKey,
-          error: error?.message || error,
-          stack: error?.stack,
-        });
+        logger.error(
+          `[long-text-graph] Отладка chunk ${chunk.idx}: ${error?.message || error}`,
+          {
+            conversationId,
+            chunkIdx: chunk.idx,
+            chunkHash: chunk.hash,
+            dedupeKey,
+            stack: error?.stack,
+          },
+        );
+        logger.error(
+          `[long-text-graph] Ошибка chunk ${chunk.idx}: ${error?.message || error}`,
+          {
+            conversationId,
+            chunkIdx: chunk.idx,
+            chunkHash: chunk.hash,
+            length: chunk.content.length,
+            dedupeKey,
+            stack: error?.stack,
+          },
+        );
       }
     }
 
@@ -373,13 +377,15 @@ class LongTextGraphWorker {
         await chunkStore.merge(conversationId, hash, { [VECTOR_FLAG]: new Date().toISOString() });
         incLongTextGraphChunk("vectorized");
       } catch (error) {
-        logger.error("[long-text-graph] Ошибка vector chunk", {
-          conversationId,
-          chunkIdx: idx,
-          dedupeKey,
-          error: error?.message || error,
-          stack: error?.stack,
-        });
+        logger.error(
+          `[long-text-graph] Ошибка vector chunk ${idx}: ${error?.message || error}`,
+          {
+            conversationId,
+            chunkIdx: idx,
+            dedupeKey,
+            stack: error?.stack,
+          },
+        );
         throw error;
       }
     }
@@ -399,13 +405,15 @@ class LongTextGraphWorker {
         });
         incLongTextGraphChunk("graph_enqueued");
       } catch (error) {
-        logger.error("[long-text-graph] Ошибка graph chunk", {
-          conversationId,
-          chunkIdx: idx,
-          dedupeKey,
-          error: error?.message || error,
-          stack: error?.stack,
-        });
+        logger.error(
+          `[long-text-graph] Ошибка graph chunk ${idx}: ${error?.message || error}`,
+          {
+            conversationId,
+            chunkIdx: idx,
+            dedupeKey,
+            stack: error?.stack,
+          },
+        );
         throw error;
       }
     }
