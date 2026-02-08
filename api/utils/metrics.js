@@ -125,6 +125,13 @@ const longTextTasks = new client.Counter({
   registers: [register],
 });
 
+const longTextGraphChunks = new client.Counter({
+  name: 'long_text_graph_chunks_total',
+  help: 'Статусы обработки chunkов длинных текстов (vector/graph)',
+  labelNames: ['status'],
+  registers: [register],
+});
+
 function safeLabels(labels = {}) {
   return Object.fromEntries(
     Object.entries(labels).map(([key, value]) => [
@@ -215,6 +222,10 @@ function incLongTextTask(status) {
   longTextTasks.inc(safeLabels({ status }));
 }
 
+function incLongTextGraphChunk(status) {
+  longTextGraphChunks.inc(safeLabels({ status }));
+}
+
 module.exports = {
   register,
   renderMetrics,
@@ -234,4 +245,5 @@ module.exports = {
   incGraphEnqueueTotal,
   setTemporalStatus,
   incLongTextTask,
+  incLongTextGraphChunk,
 };

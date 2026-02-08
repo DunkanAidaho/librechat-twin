@@ -38,6 +38,8 @@ const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
 const ingestDeduplicator = require('~/server/services/Deduplication/ingestDeduplicator');
 const { incLongTextTask } = require('~/utils/metrics');
 const { enqueueGraphTask, enqueueSummaryTask } = require('~/utils/temporalClient');
+const { LongTextGraphWorker } = require('~/server/services/Graph/LongTextWorker');
+LongTextGraphWorker.start({ sendProgressEvents: true });
 const { makeIngestKey } = require('~/server/utils/messageUtils');
 
 const featuresConfig = config.getSection('features');
@@ -762,15 +764,36 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
               }
               incLongTextTask('queued');
 
+              const indexedEvent = {
+                status: 'indexed',
+                conversationId: convId,
+                textSize,
+                messageId: dedupeKey,
+              };
+
+              setImmediate(() => {
+                try {
+                  LongTextGraphWorker.enqueue({
+                    conversationId: convId,
+                    userId,
+                    messageId: dedupeKey,
+                    text: originalUserText,
+                    dedupeKey,
+                    res,
+                  });
+                } catch (workerError) {
+                  logger.error('[AgentController][long-text] Не удалось запустить LongTextGraphWorker', {
+                    conversationId: convId,
+                    messageId: dedupeKey,
+                    error: workerError?.message,
+                  });
+                }
+              });
+
               try {
                 sendEvent(res, {
                   meta: {
-                    longTextInfo: {
-                      status: 'indexed',
-                      conversationId: convId,
-                      textSize,
-                      messageId: dedupeKey,
-                    },
+                    longTextInfo: indexedEvent,
                   },
                 });
               } catch (notifyError) {
