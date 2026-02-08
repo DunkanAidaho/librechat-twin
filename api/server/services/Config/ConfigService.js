@@ -714,6 +714,7 @@ class ConfigService {
           maxMessagesPerSummary: parseOptionalInt(this.env.MAX_MESSAGES_PER_SUMMARY) ?? 40,
           lockTtlSeconds: parseOptionalInt(this.env.SUMMARIZATION_LOCK_TTL) ?? 20,
           overlap: parseOptionalInt(this.env.SUMMARY_OVERLAP) ?? 5,
+          maxPayloadBytes: parseOptionalInt(this.env.SUMMARIES_MAX_PAYLOAD_BYTES) ?? 900_000,
         }),
       },
       ingestion: {

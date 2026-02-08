@@ -1317,6 +1317,8 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
  */
 async function triggerSummarization(req, conversationId) {
   const userId = req.user.id;
+  const summariesConfig = config.getSection('summaries');
+  const MAX_PAYLOAD_BYTES = summariesConfig.maxPayloadBytes || 900000;
 
   if (!acquireSummarizationLock(conversationId)) {
     logger.debug(`[Суммаризатор] Диалог ${conversationId} уже обрабатывается, пропускаем.`);
@@ -1384,44 +1386,156 @@ async function triggerSummarization(req, conversationId) {
       }))
       .filter((m) => m.content);
 
-    const summarizationJob = {
-      conversation_id: conversationId,
-      user_id: userId,
-      messages: formatted,
-      start_message_id: messagesToSummarize[0].messageId,
-      end_message_id: messagesToSummarize[messagesToSummarize.length - 1].messageId,
-    };
+    const jobBatches = splitSummarizationJobs(
+      formatted,
+      messagesToSummarize,
+      conversationId,
+      userId,
+      MAX_PAYLOAD_BYTES,
+    );
 
-    const totalContentLength = formatted.reduce((acc, msg) => acc + (msg.content?.length || 0), 0);
+    for (const job of jobBatches) {
+      try {
+        await enqueueSummaryTaskWithResilience(job.payload);
+        logger.info(
+          `[Суммаризатор] Запущен SummaryWorkflow: диалог=${conversationId}, ${job.payload.start_message_id} → ${job.payload.end_message_id}, сообщений=${job.messagesCount}, размер=${job.payloadSize} байт.`,
+        );
+      } catch (err) {
+        logger.error(
+          `[Суммаризатор] Не удалось запустить SummaryWorkflow для диалога ${conversationId} (chunk ${job.chunkIndex + 1}/${job.totalChunks}): ${err?.message || err}`,
+        );
+        throw err;
+      }
 
-    try {
-      await enqueueSummaryTaskWithResilience(summarizationJob);
+      const step = Math.max(1, job.messagesCount);
+      lastSummarized += step;
+
+      await saveConvoWithResilience(
+        req,
+        { conversationId, lastSummarizedIndex: lastSummarized },
+        { context: 'triggerSummarization' },
+      );
       logger.info(
-        `[Суммаризатор] Запущен SummaryWorkflow: диалог=${conversationId}, ${summarizationJob.start_message_id} → ${summarizationJob.end_message_id}, символов=${totalContentLength}.`,
+        `[Суммаризатор] Обновлён индекс суммаризации: диалог=${conversationId}, новое значение=${lastSummarized}, шаг=${step}.`,
       );
-    } catch (err) {
-      logger.error(
-        `[Суммаризатор] Не удалось запустить SummaryWorkflow для диалога ${conversationId}: ${err?.message || err}`,
-      );
-      throw err;
     }
-
-    const step = Math.max(1, messagesToSummarize.length);
-    const newIndex = lastSummarized + step;
-
-    await saveConvoWithResilience(
-      req,
-      { conversationId, lastSummarizedIndex: newIndex },
-      { context: 'triggerSummarization' },
-    );
-    logger.info(
-      `[Суммаризатор] Обновлён индекс суммаризации: диалог=${conversationId}, новое значение=${newIndex}, шаг=${step}.`,
-    );
   } catch (error) {
     logger.error(`[Суммаризатор] Ошибка при обработке диалога ${conversationId}:`, error);
   } finally {
     releaseSummarizationLock(conversationId);
   }
+}
+
+function splitSummarizationJobs(messages, rawMessages, conversationId, userId, maxBytes) {
+  if (messages.length === 0) {
+    return [];
+  }
+
+  const jobs = [];
+  let start = 0;
+  let chunkIndex = 0;
+
+  while (start < messages.length) {
+    let end = Math.min(messages.length, start + 1);
+    let lastValidPayload = null;
+    let lastValidEnd = end;
+
+    while (end <= messages.length) {
+      const currentMessages = messages.slice(start, end);
+      const payload = buildSummarizationPayload(
+        conversationId,
+        userId,
+        currentMessages,
+        rawMessages[start],
+        rawMessages[end - 1],
+      );
+      const payloadSize = Buffer.byteLength(JSON.stringify(payload), 'utf8');
+
+      if (payloadSize > maxBytes) {
+        if (lastValidPayload) {
+          jobs.push({
+            payload: lastValidPayload,
+            messagesCount: lastValidEnd - start,
+            payloadSize: Buffer.byteLength(JSON.stringify(lastValidPayload), 'utf8'),
+            chunkIndex,
+            totalChunks: 0,
+          });
+          start = lastValidEnd;
+          chunkIndex += 1;
+          break;
+        } else {
+          // Один единственный message превышает лимит: урезаем content
+          const trimmedPayload = trimSummarizationPayload(payload, maxBytes);
+          jobs.push({
+            payload: trimmedPayload,
+            messagesCount: end - start,
+            payloadSize: Buffer.byteLength(JSON.stringify(trimmedPayload), 'utf8'),
+            chunkIndex,
+            totalChunks: 0,
+          });
+          start = end;
+          chunkIndex += 1;
+          break;
+        }
+      }
+
+      lastValidPayload = payload;
+      lastValidEnd = end;
+      end += 1;
+
+      if (end > messages.length) {
+        jobs.push({
+          payload: lastValidPayload,
+          messagesCount: lastValidEnd - start,
+          payloadSize: Buffer.byteLength(JSON.stringify(lastValidPayload), 'utf8'),
+          chunkIndex,
+          totalChunks: 0,
+        });
+        start = lastValidEnd;
+        chunkIndex += 1;
+      }
+    }
+  }
+
+  const totalChunks = jobs.length;
+  for (const job of jobs) {
+    job.totalChunks = totalChunks;
+  }
+  return jobs;
+}
+
+function buildSummarizationPayload(conversationId, userId, messages, firstRaw, lastRaw) {
+  return {
+    conversation_id: conversationId,
+    user_id: userId,
+    messages,
+    start_message_id: firstRaw?.messageId || messages[0]?.message_id,
+    end_message_id: lastRaw?.messageId || messages[messages.length - 1]?.message_id,
+  };
+}
+
+function trimSummarizationPayload(payload, maxBytes) {
+  const MAX_PER_MESSAGE = 2000;
+  const trimmedMessages = payload.messages.map((msg) => {
+    if ((msg.content || '').length <= MAX_PER_MESSAGE) {
+      return msg;
+    }
+    return {
+      ...msg,
+      content: `${msg.content.slice(0, MAX_PER_MESSAGE)}…`,
+    };
+  });
+  const trimmedPayload = { ...payload, messages: trimmedMessages };
+  const size = Buffer.byteLength(JSON.stringify(trimmedPayload), 'utf8');
+
+  if (size > maxBytes && trimmedMessages.length > 1) {
+    return trimSummarizationPayload(
+      { ...trimmedPayload, messages: trimmedMessages.slice(0, -1) },
+      maxBytes,
+    );
+  }
+
+  return trimmedPayload;
 }
 
 module.exports = AgentController;
