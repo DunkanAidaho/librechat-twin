@@ -289,23 +289,64 @@ async function runMultiStepRag({
     }
   }
 
+  const maxGraphLines = Math.max(1, config.graph?.maxLines ?? 8);
+  const maxVectorChunks = Math.max(0, config.vector?.maxChunks ?? 4);
+  const maxGraphSummaryLines = Math.max(1, config.graph?.summaryLineLimit ?? Math.min(8, maxGraphLines));
+
+  const enrichedEntities = entityStates.map((entity) => {
+    const graphContext = entity.graphLines.slice(0, maxGraphLines);
+    const vectorContext = entity.vectorChunks.slice(0, maxVectorChunks);
+    const graphSummary = graphContext.slice(0, maxGraphSummaryLines).join('\n');
+    const vectorSummary = vectorContext.join('\n\n');
+    return {
+      ...entity,
+      graphLines: graphContext,
+      vectorChunks: vectorContext,
+      graphSummary,
+      vectorSummary,
+    };
+  });
+
+  const multiStepSummary = enrichedEntities
+    .filter((entity) => entity.graphSummary || entity.vectorSummary)
+    .map((entity) => {
+      const parts = [`### ${entity.name}`];
+      if (entity.graphSummary) {
+        parts.push(`Graph:\n${entity.graphSummary}`);
+      }
+      if (entity.vectorSummary) {
+        parts.push(`Vector:\n${entity.vectorSummary}`);
+      }
+      return parts.join('\n\n');
+    })
+    .join('\n\n');
+
+  const globalContextSummary = multiStepSummary
+    ? `#### Multi-step context\n${multiStepSummary}`
+    : '';
+
+  const aggregatedContext = [globalContextSummary, baseContext]
+    .filter((section) => typeof section === 'string' && section.trim().length)
+    .join('\n\n');
+
   logger.info('[rag.context.multiStep]', {
     conversationId,
-    entities: entityStates.map((entity) => ({
+    entities: enrichedEntities.map((entity) => ({
       name: entity.name,
       passes: entity.passes,
       tokens: entity.tokens,
       graphLines: entity.graphLines.length,
       vectorChunks: entity.vectorChunks.length,
     })),
-    globalTokens: baseContext?.length || 0,
+    globalTokens: aggregatedContext.length,
     queueStatus,
     passesUsed,
   });
 
   return {
-    globalContext: baseContext,
-    entities: entityStates,
+    globalContext: aggregatedContext,
+    globalContextSummary,
+    entities: enrichedEntities,
     passesUsed,
     queueStatus,
   };

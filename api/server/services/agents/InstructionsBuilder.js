@@ -154,9 +154,7 @@ class InstructionsBuilder {
     const sections = [];
 
     if (typeof ragContext?.global === 'string' && ragContext.global.trim().length) {
-      sections.push(`### ${globalTitle}
-${ragContext.global.trim()}
-`);
+      sections.push(`### ${globalTitle}\n${ragContext.global.trim()}\n`);
     }
 
     const entities = Array.isArray(ragContext?.entities) ? ragContext.entities : [];
@@ -169,32 +167,26 @@ ${ragContext.global.trim()}
       const entityParts = [`### Entity: ${entity.name}`];
 
       const graphBlock = Array.isArray(entity.graphContext) && entity.graphContext.length
-        ? entity.graphContext.join('
-').trim()
+        ? entity.graphContext.join('\n').trim()
         : typeof entity.graphSummary === 'string'
           ? entity.graphSummary.trim()
           : '';
 
       if (graphBlock) {
-        entityParts.push(`#### ${graphTitle}
-${graphBlock}`);
+        entityParts.push(`#### ${graphTitle}\n${graphBlock}`);
       }
 
       const vectorBlock = Array.isArray(entity.vectorContext) && entity.vectorContext.length
-        ? entity.vectorContext.join('
-
-').trim()
+        ? entity.vectorContext.join('\n\n').trim()
         : typeof entity.vectorSummary === 'string'
           ? entity.vectorSummary.trim()
           : '';
 
       if (vectorBlock) {
-        entityParts.push(`#### ${vectorTitle}
-${vectorBlock}`);
+        entityParts.push(`#### ${vectorTitle}\n${vectorBlock}`);
       }
 
-      const entitySection = entityParts.join('
-').trim();
+      const entitySection = entityParts.join('\n').trim();
       if (!entitySection || entitySection === `### Entity: ${entity.name}`) {
         continue;
       }
@@ -206,17 +198,33 @@ ${vectorBlock}`);
           sections.push(summary || entitySection);
           continue;
         } catch (error) {
-          logger.warn(`${logPrefix} Failed to compress entity section`, { name: entity.name, message: error?.message });
+          logger.warn(`${logPrefix} Failed to compress entity section`, {
+            name: entity.name,
+            message: error?.message,
+          });
         }
       }
 
       sections.push(entitySection);
     }
 
-    return sections.filter(Boolean).join('
+    const finalSections = sections.filter(Boolean).join('\n\n').trim();
 
-').trim();
+    if (!finalSections) {
+      logger.info(`${logPrefix} No RAG sections built`);
+      return '';
+    }
+
+    const totalTokens = this.computeTokens(finalSections, encoding, logPrefix);
+    logger.info(`${logPrefix} Built RAG sections`, {
+      entities: entities.length,
+      sectionsTokens: totalTokens,
+      length: finalSections.length,
+    });
+
+    return finalSections;
   }
+
 
 
   /**
