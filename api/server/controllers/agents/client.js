@@ -1449,6 +1449,8 @@ Graph hints: ${graphQueryHint}`;
       );
     } else {
       const summarizationCfg = runtimeCfg.summarization || {};
+      const condenseCfg = runtimeCfg.condense || {};
+      const condenseEnabled = condenseCfg.enabled !== false;
       const defaults = { 
         budgetChars: 12000, 
         chunkChars: 20000,
@@ -1466,7 +1468,7 @@ Graph hints: ${graphQueryHint}`;
       let vectorText = vectorChunks.join('\n\n');
       const rawVectorTextLength = vectorText.length;
       const shouldSummarize =
-        summarizationCfg.enabled !== false && vectorText.length > budgetChars;
+        summarizationCfg.enabled !== false && condenseEnabled && vectorText.length > budgetChars;
 
       if (shouldSummarize) {
         logger.debug(

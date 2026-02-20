@@ -353,6 +353,8 @@ class RagContextBuilder {
       logger.info(`[rag.context.cache.miss] conversation=${conversationId} cacheKey=${cacheKey}`);
     }
 
+    const condenseCfg = runtimeCfg?.condense || {};
+    const condenseEnabled = condenseCfg.enabled !== false;
     const toolsGatewayUrl = runtimeCfg?.toolsGateway?.url || '';
     const toolsGatewayTimeout = runtimeCfg?.toolsGateway?.timeoutMs || 20000;
     const graphLimits = runtimeCfg.graphContext || {};
@@ -464,6 +466,7 @@ class RagContextBuilder {
 
     if (hasGraph || vectorChunks.length > 0) {
       const summarizationCfg = runtimeCfg.summarization || {};
+      const summarizationEnabled = summarizationCfg.enabled !== false;
       const budgetChars = Number.isFinite(summarizationCfg?.budgetChars)
         ? summarizationCfg.budgetChars
         : 12000;

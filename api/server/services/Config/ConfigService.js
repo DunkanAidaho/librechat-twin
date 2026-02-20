@@ -227,6 +227,7 @@ class ConfigService {
         includeGraphInSummary: z.boolean(),
       }),
       condense: z.object({
+        enabled: z.boolean().default(true),
         timeoutMs: z.number().int().positive(),
         concurrency: z.number().int().positive(),
         cacheTtlSeconds: z.number().int().nonnegative(),
