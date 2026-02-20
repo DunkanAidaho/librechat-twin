@@ -116,6 +116,8 @@ class MessageHistoryManager {
     const totalMessages = orderedMessages.length;
     const dontShrinkStartIndex = Math.max(totalMessages - dontShrinkLastN, 0);
 
+    const layeredCompressionActive = Boolean(trimmer && typeof trimmer.selectWithinBudget === 'function');
+
     for (let idx = 0; idx < orderedMessages.length; idx++) {
       const m = orderedMessages[idx];
       try {
@@ -144,6 +146,8 @@ class MessageHistoryManager {
         const shouldShrinkUser = m?.isCreatedByUser && (len > histLongUserToRag || looksHTML);
         const shouldShrinkAssistant =
           !m?.isCreatedByUser && (len > assistLongToRag || looksHTML || hasThink);
+
+        const canShrinkLegacy = !layeredCompressionActive;
 
         if (
           (shouldShrinkUser || shouldShrinkAssistant) &&
@@ -184,19 +188,25 @@ class MessageHistoryManager {
           const keepFullText = isLatestMessage || skipShrinkForRecent;
 
           if (!keepFullText) {
-            const snippetLen = m?.isCreatedByUser ? 2000 : assistSnippetChars;
-            const snippet = normalizedText.slice(0, snippetLen);
-            m.text = `[[moved_to_memory:RAG,len=${len},role=${roleTag}]]\n\n${snippet}`;
-            if (Array.isArray(m?.content)) {
-              m.content = [{ type: 'text', text: m.text }];
-            }
+            if (canShrinkLegacy) {
+              const snippetLen = m?.isCreatedByUser ? 2000 : assistSnippetChars;
+              const snippet = normalizedText.slice(0, snippetLen);
+              m.text = `[[moved_to_memory:RAG,len=${len},role=${roleTag}]]\n\n${snippet}`;
+              if (Array.isArray(m?.content)) {
+                m.content = [{ type: 'text', text: m.text }];
+              }
 
-            const limitLabel = m?.isCreatedByUser ? 'HIST_LONG_USER_TO_RAG' : 'ASSIST_LONG_TO_RAG';
-            const limitValue = m?.isCreatedByUser ? histLongUserToRag : assistLongToRag;
-            const shrinkReason = looksHTML ? 'html' : hasThink ? 'reasoning' : 'length';
-            logger.info(
-              `[prompt][shrink] idx=${idx} role=${roleTag} reason=${shrinkReason} limit=${limitLabel} limitValue=${limitValue} snippetLen=${snippet.length}`,
-            );
+              const limitLabel = m?.isCreatedByUser ? 'HIST_LONG_USER_TO_RAG' : 'ASSIST_LONG_TO_RAG';
+              const limitValue = m?.isCreatedByUser ? histLongUserToRag : assistLongToRag;
+              const shrinkReason = looksHTML ? 'html' : hasThink ? 'reasoning' : 'length';
+              logger.info(
+                `[prompt][shrink] idx=${idx} role=${roleTag} reason=${shrinkReason} limit=${limitLabel} limitValue=${limitValue} snippetLen=${snippet.length}`,
+              );
+            } else {
+              logger.info(
+                `[prompt][shrink.skip] idx=${idx} role=${roleTag} reason=layered_compression_active len=${len}`,
+              );
+            }
           } else {
             logger.info(
               `[prompt][shrink] idx=${idx} role=${roleTag} len=${len} action=keep-full keepReason=memory.history.dontShrinkLastN value=${dontShrinkLastN}`,
