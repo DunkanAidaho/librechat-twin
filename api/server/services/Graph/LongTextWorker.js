@@ -315,6 +315,11 @@ class LongTextGraphWorker {
       messageId,
       chunkCount: chunks.length,
     });
+    logger.info('[rag.graph.followup]', {
+      conversationId,
+      entity: undefined,
+      chunkCount: chunks.length,
+    });
 
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];

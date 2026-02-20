@@ -183,11 +183,23 @@ async function enqueueBatch(client, batch, meta) {
           reason: meta.reason || 'unknown',
           conversationId: meta.conversationId,
           userId: meta.userId,
+          entity: meta.entity,
+          passIndex: meta.passIndex,
         },
       };
 
       await client.enqueueMemoryTask(context);
       enqueued++;
+
+      logger.info('[memoryQueue.enqueue]', {
+        reason: context._metadata.reason,
+        entity: context._metadata.entity,
+        passIndex: context._metadata.passIndex,
+        conversationId: context._metadata.conversationId,
+        userId: context._metadata.userId,
+        taskType,
+      });
+
     } catch (error) {
       errors.push(error);
         logger.warn(

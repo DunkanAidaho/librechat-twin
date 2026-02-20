@@ -55,7 +55,9 @@ const { getMCPManager } = require('~/config');
 const runtimeMemoryConfig = require('~/utils/memoryConfig');
 const MessageHistoryManager = require('~/server/services/agents/MessageHistoryManager');
 const { HistoryTrimmer } = require('~/server/services/agents/historyTrimmer');
-const { MessageCompressorBridge } = require('~/server/services/agents/ContextCompressor');
+const { ContextCompressor, MessageCompressorBridge } = require('~/server/services/agents/ContextCompressor');
+const { analyzeIntent } = require('~/server/services/RAG/intentAnalyzer');
+const { runMultiStepRag } = require('~/server/services/RAG/multiStepOrchestrator');
 const { sanitizeInput } = require('~/utils/security');
 const {
   observeSegmentTokens,
@@ -278,7 +280,7 @@ function resolvePricingRates(modelName, overrideConfig) {
 /**
  * Fetches graph context from tools-gateway for RAG enhancement in agent conversations.
  */
-async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAPH_RELATIONS_LIMIT, timeoutMs = GRAPH_REQUEST_TIMEOUT_MS }) {
+async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAPH_RELATIONS_LIMIT, timeoutMs = GRAPH_REQUEST_TIMEOUT_MS, entity = null, relationHints = [], passIndex = null, signal = null }) {
   if (!USE_GRAPH_CONTEXT || !conversationId) {
     logger.debug('[rag.graph] Graph context skipped', {
       useGraphContext: USE_GRAPH_CONTEXT,
@@ -288,7 +290,27 @@ async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAP
   }
 
   const url = `${toolsGatewayUrl}/neo4j/graph_context`;
-  const requestPayload = { conversation_id: conversationId, limit };
+  const requestPayload = {
+    conversation_id: conversationId,
+    limit,
+    entity: entity?.name || entity || null,
+    relation_hints: Array.isArray(relationHints) ? relationHints : undefined,
+    pass_index: passIndex,
+  };
+  if (requestPayload.relation_hints == null) {
+    delete requestPayload.relation_hints;
+  }
+  if (requestPayload.pass_index == null) {
+    delete requestPayload.pass_index;
+  }
+
+  if (entity?.type) {
+    requestPayload.entity_type = entity.type;
+  }
+
+  if (typeof requestPayload.entity === 'string' && requestPayload.entity.trim().length === 0) {
+    requestPayload.entity = null;
+  }
 
   logger.debug('[rag.graph] Fetching graph context', {
     conversationId,
@@ -1777,6 +1799,18 @@ Graph hints: ${graphQueryHint}`;
       logger.error('[history->RAG] failed', error);
     }
 
+    const intentAnalysis = runtimeCfg?.multiStepRag?.enabled
+      ? await analyzeIntent({
+          message: orderedMessages[orderedMessages.length - 1],
+          context: orderedMessages.slice(-5),
+          signal: this.options?.req?.abortController?.signal,
+          timeoutMs: runtimeCfg.multiStepRag?.intentTimeoutMs || 2000,
+        })
+      : { entities: [], needsFollowUps: false };
+    if (this.options?.req) {
+      this.options.req.intentAnalysis = intentAnalysis;
+    }
+
     let ragContextLength = 0;
     let ragCacheStatus = 'skipped';
     const req = this.options?.req;
@@ -1832,6 +1866,94 @@ Graph hints: ${graphQueryHint}`;
           graphTokens: ragResult?.metrics?.graphTokens ?? 0,
           vectorTokens: ragResult?.metrics?.vectorTokens ?? 0,
         });
+      }
+
+      const toolsGatewayUrl = runtimeCfg?.toolsGateway?.url || this.options?.req?.config?.queues?.toolsGatewayUrl;
+
+      const fetchGraphLinesForEntity = async ({ entity, relationHints, limit, signal, passIndex }) => {
+        const entityName = typeof entity === 'string' ? entity : entity?.name;
+        if (!toolsGatewayUrl || !entityName) {
+          return { lines: [], status: 'skipped' };
+        }
+
+        const hints = Array.isArray(relationHints)
+          ? relationHints.filter(Boolean)
+          : Array.isArray(entity?.hints)
+            ? entity.hints.filter(Boolean)
+            : [];
+
+        try {
+          const graphContext = await fetchGraphContext({
+            conversationId: this.conversationId,
+            toolsGatewayUrl,
+            limit: limit ?? runtimeCfg?.graphContext?.maxLines ?? GRAPH_RELATIONS_LIMIT,
+            timeoutMs: runtimeCfg?.graphContext?.requestTimeoutMs ?? GRAPH_REQUEST_TIMEOUT_MS,
+            entity: typeof entity === 'string' ? { name: entity } : entity,
+            relationHints: hints,
+            passIndex,
+            signal,
+          });
+
+          if (!graphContext?.lines?.length) {
+            return { lines: [], status: 'empty' };
+          }
+
+          return { lines: graphContext.lines, status: 'ok' };
+        } catch (error) {
+          logger.error('[rag.followup.graph.fetch.error]', {
+            conversationId: this.conversationId,
+            entity: entityName,
+            message: error?.message,
+          });
+          return { lines: [], status: 'failed' };
+        }
+      };
+
+      const multiStepResult = runtimeCfg?.multiStepRag?.enabled
+        ? await runMultiStepRag({
+            intentAnalysis,
+            runtimeCfg,
+            baseContext: systemContent,
+            fetchGraphContext: fetchGraphLinesForEntity,
+            enqueueMemoryTasks,
+            conversationId: this.conversationId,
+            userId: requestUserId,
+            endpoint: this.options?.endpoint,
+            model: this.model,
+            signal: this.options?.req?.abortController?.signal,
+          })
+        : { globalContext: systemContent, entities: [], passesUsed: 0, queueStatus: {} };
+
+      systemContent = multiStepResult.globalContext || systemContent;
+      const ragContextObject = {
+        global: multiStepResult.globalContextSummary || multiStepResult.globalContext || '',
+        entities: multiStepResult.entities?.map((entity) => ({
+          name: entity.name,
+          graphContext: entity.graphLines,
+          vectorContext: entity.vectorChunks,
+          graphSummary: entity.graphSummary,
+          vectorSummary: entity.vectorSummary,
+          tokens: entity.tokens,
+          passes: entity.passes,
+        })) || [],
+      };
+
+      if (req) {
+        req.ragMultiStep = {
+          enabled: Boolean(runtimeCfg?.multiStepRag?.enabled),
+          passesUsed: multiStepResult.passesUsed,
+          entities: multiStepResult.entities?.map((entity) => ({
+            name: entity.name,
+            passes: entity.passes,
+            tokens: entity.tokens,
+            graphLines: entity.graphLines.length,
+            vectorChunks: entity.vectorChunks.length,
+          })),
+          queueStatus: multiStepResult.queueStatus,
+          ragContext: ragContextObject,
+        };
+      } else if (this.options?.req) {
+        this.options.req.ragMultiStep = { ragContext: ragContextObject };
       }
     } catch (ragError) {
       logger.error('[rag.context.error]', {
@@ -1932,8 +2054,19 @@ Graph hints: ${graphQueryHint}`;
       systemContent = this.augmentedPrompt + systemContent;
     }
 
+    const ragSections = this.options?.req?.ragMultiStep?.ragContext
+      ? await this.instructionsBuilder?.buildRagSections(this.options.req.ragMultiStep.ragContext, {
+          getEncoding: () => this.getEncoding(),
+          compressor: new MessageCompressorBridge({ reduction: historyCompressionCfg?.layer2Ratio ?? 0.25 }),
+        })
+      : '';
+
+    const combinedSystemContent = [ragSections, systemContent]
+      .filter((section) => typeof section === 'string' && section.trim().length)
+      .join('\n\n');
+
     instructions = normalizeInstructionsPayload(
-      systemContent,
+      combinedSystemContent,
       () => this.getEncoding(),
       '[DIAG-PROMPT]',
     );

@@ -139,6 +139,86 @@ class InstructionsBuilder {
     return instructionsForLangChain;
   }
 
+  async buildRagSections(ragContext = {}, options = {}) {
+    const {
+      globalTitle = 'RAG Context (Global)',
+      graphTitle = 'Graph (Neo4j)',
+      vectorTitle = 'Vector',
+      maxSectionTokens = 2000,
+      getEncoding,
+      logPrefix = '[InstructionsBuilder:RAG]',
+      compressor = null,
+    } = options;
+
+    const encoding = this.resolveEncoding(getEncoding, logPrefix);
+    const sections = [];
+
+    if (typeof ragContext?.global === 'string' && ragContext.global.trim().length) {
+      sections.push(`### ${globalTitle}
+${ragContext.global.trim()}
+`);
+    }
+
+    const entities = Array.isArray(ragContext?.entities) ? ragContext.entities : [];
+
+    for (const entity of entities) {
+      if (!entity || !entity.name) {
+        continue;
+      }
+
+      const entityParts = [`### Entity: ${entity.name}`];
+
+      const graphBlock = Array.isArray(entity.graphContext) && entity.graphContext.length
+        ? entity.graphContext.join('
+').trim()
+        : typeof entity.graphSummary === 'string'
+          ? entity.graphSummary.trim()
+          : '';
+
+      if (graphBlock) {
+        entityParts.push(`#### ${graphTitle}
+${graphBlock}`);
+      }
+
+      const vectorBlock = Array.isArray(entity.vectorContext) && entity.vectorContext.length
+        ? entity.vectorContext.join('
+
+').trim()
+        : typeof entity.vectorSummary === 'string'
+          ? entity.vectorSummary.trim()
+          : '';
+
+      if (vectorBlock) {
+        entityParts.push(`#### ${vectorTitle}
+${vectorBlock}`);
+      }
+
+      const entitySection = entityParts.join('
+').trim();
+      if (!entitySection || entitySection === `### Entity: ${entity.name}`) {
+        continue;
+      }
+
+      const currentTokens = this.computeTokens(entitySection, encoding, logPrefix);
+      if (maxSectionTokens && currentTokens > maxSectionTokens && compressor?.compress) {
+        try {
+          const summary = await compressor.compress({ text: entitySection, name: entity.name });
+          sections.push(summary || entitySection);
+          continue;
+        } catch (error) {
+          logger.warn(`${logPrefix} Failed to compress entity section`, { name: entity.name, message: error?.message });
+        }
+      }
+
+      sections.push(entitySection);
+    }
+
+    return sections.filter(Boolean).join('
+
+').trim();
+  }
+
+
   /**
    * Applies fallback prompt if needed
    * @param {string} systemContent
