@@ -192,17 +192,18 @@ async function enqueueBatch(client, batch, meta) {
       enqueued++;
 
       logger.info('[memoryQueue.enqueue]', {
-        reason: context._metadata.reason,
-        entity: context._metadata.entity,
-        passIndex: context._metadata.passIndex,
-        conversationId: context._metadata.conversationId,
-        userId: context._metadata.userId,
-        taskType,
+        reason: context._metadata.reason ?? null,
+        conversationId: context._metadata.conversationId ?? null,
+        userId: context._metadata.userId ?? null,
+        entity: context._metadata.entity ?? null,
+        passIndex: context._metadata.passIndex ?? null,
+        taskType: taskType ?? null,
+        messageId: context.message_id ?? null,
       });
 
     } catch (error) {
       errors.push(error);
-        logger.warn(
+        logger.debug(
           `[memoryQueue] Ошибка enqueue отдельной задачи (conversation=${payload.conversation_id}, message=${payload.message_id}): ${error?.message}`,
         );
     }
@@ -247,8 +248,16 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
   if (isDropped && meta.fireAndForget) {
     // Start async processing without waiting
     setImmediate(async () => {
+      const asyncStart = Date.now();
       try {
         await enqueueMemoryTasksSync(client, tasks, meta, batchSize);
+        logger.info('[memoryQueue.async]', {
+          status: 'queued_async',
+          reason: meta.reason,
+          conversationId: meta.conversationId ?? null,
+          taskCount: tasks.length,
+          durationMs: Date.now() - asyncStart,
+        });
       } catch (error) {
         logger.error('[memoryQueue] Асинхронная постановка в очередь не удалась', {
           reason: meta.reason,
@@ -259,9 +268,11 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
       }
     });
 
-    logger.info(
-      `[memoryQueue] Запущена асинхронная постановка в очередь (reason=${meta.reason}, tasks=${tasks.length}, conversation=${meta.conversationId || 'n/a'})`,
-    );
+    logger.info('[memoryQueue.async.start]', {
+      reason: meta.reason,
+      conversationId: meta.conversationId ?? null,
+      taskCount: tasks.length,
+    });
     return { status: 'queued_async', via: 'temporal', count: tasks.length };
   }
 
@@ -345,9 +356,14 @@ async function enqueueMemoryTasksSync(
     progress.enqueued = 0;
   }
 
-  logger.info(
-    `[memoryQueue] Обработка ${tasks.length} задач в ${batches.length} батчах (batchSize=${batchSize}, reason=${meta.reason || 'unknown'})`,
-  );
+  const operationStart = Date.now();
+  logger.info('[memoryQueue.start]', {
+    taskCount: tasks.length,
+    batches: batches.length,
+    batchSize,
+    reason: meta.reason || 'unknown',
+    conversationId: meta.conversationId ?? null,
+  });
 
   try {
     for (let bi = 0; bi < batches.length; bi++) {
@@ -369,6 +385,7 @@ async function enqueueMemoryTasksSync(
       const batch = batches[bi];
 
       try {
+        const batchStart = Date.now();
         const { enqueued, errors } = await enqueueBatch(client, batch, meta);
         enqueuedTotal += enqueued;
         allErrors.push(...errors);
@@ -377,9 +394,20 @@ async function enqueueMemoryTasksSync(
           progress.enqueued = enqueuedTotal;
         }
 
-        logger.info(
-          `[memoryQueue] Батч ${bi + 1}/${batches.length} enqueued=${enqueued}/${batch.length} total=${enqueuedTotal} reason=${meta.reason || 'unknown'}`,
-        );
+        logger.info('[memoryQueue.batch]', {
+          index: bi + 1,
+          totalBatches: batches.length,
+          enqueued,
+          batchSize: batch.length,
+          totalEnqueued: enqueuedTotal,
+          reason: meta.reason || 'unknown',
+          conversationId: meta.conversationId ?? null,
+          errorCount: errors.length,
+          errorTaskTypes: errors
+            .map((err, idx) => batch[idx]?.type || batch[idx]?.payload?.type || null)
+            .filter(Boolean),
+          durationMs: Date.now() - batchStart,
+        });
       } catch (batchError) {
         logger.error(
           `[memoryQueue] Батч ${bi + 1}/${batches.length} полностью провалился: ${batchError?.message}`,
@@ -415,9 +443,16 @@ async function enqueueMemoryTasksSync(
     progress.enqueued = enqueuedTotal;
   }
 
-  logger.info(
-    `[memoryQueue] Поставлено ${enqueuedTotal} задач через Temporal (reason=${meta.reason || 'unknown'}, conversation=${meta.conversationId || 'n/a'})`,
-  );
+  logger.info('[memoryQueue.summary]', {
+    status: 'queued',
+    totalTasks: tasks.length,
+    enqueued: enqueuedTotal,
+    skipped: tasks.length - enqueuedTotal,
+    errors: allErrors.length,
+    reason: meta.reason || 'unknown',
+    conversationId: meta.conversationId ?? null,
+    durationMs: Date.now() - operationStart,
+  });
 
   return { status: 'queued', via: 'temporal', count: enqueuedTotal };
 }
