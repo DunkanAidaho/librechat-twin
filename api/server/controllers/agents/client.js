@@ -1799,10 +1799,20 @@ Graph hints: ${graphQueryHint}`;
       logger.error('[history->RAG] failed', error);
     }
 
+    const recentMessages = orderedMessages.slice(-5);
+    runtimeCfg?.multiStepRag?.enabled && logger.debug('[rag.intent.input]', {
+      conversationId: this.conversationId,
+      lastUserMessage: orderedMessages[orderedMessages.length - 1]?.text || null,
+      recentMessages: recentMessages.map((msg) => ({
+        role: msg.role,
+        text: msg.text?.slice(0, 200) || null,
+      })),
+    });
+
     const intentAnalysis = runtimeCfg?.multiStepRag?.enabled
       ? await analyzeIntent({
           message: orderedMessages[orderedMessages.length - 1],
-          context: orderedMessages.slice(-5),
+          context: recentMessages,
           signal: this.options?.req?.abortController?.signal,
           timeoutMs: runtimeCfg.multiStepRag?.intentTimeoutMs || 2000,
         })
