@@ -177,28 +177,30 @@ async function enqueueBatch(client, batch, meta) {
     }
 
     try {
+      const metadata = {
+        reason: meta.reason || payload?.reason || 'unknown',
+        conversationId: meta.conversationId || payload?.conversation_id || null,
+        userId: meta.userId || payload?.user_id || null,
+        entity: meta.entity || payload?.entity || null,
+        passIndex: meta.passIndex ?? payload?.pass_index ?? null,
+      };
+
       const context = {
         ...payload,
-        _metadata: {
-          reason: meta.reason || 'unknown',
-          conversationId: meta.conversationId,
-          userId: meta.userId,
-          entity: meta.entity,
-          passIndex: meta.passIndex,
-        },
+        _metadata: metadata,
       };
 
       await client.enqueueMemoryTask(context);
       enqueued++;
 
       logger.info('[memoryQueue.enqueue]', {
-        reason: context._metadata.reason ?? null,
-        conversationId: context._metadata.conversationId ?? null,
-        userId: context._metadata.userId ?? null,
-        entity: context._metadata.entity ?? null,
-        passIndex: context._metadata.passIndex ?? null,
-        taskType: taskType ?? null,
-        messageId: context.message_id ?? null,
+        reason: metadata.reason ?? null,
+        conversationId: metadata.conversationId ?? null,
+        userId: metadata.userId ?? null,
+        entity: metadata.entity ?? null,
+        passIndex: metadata.passIndex ?? null,
+        taskType: taskType ?? payload?.type ?? null,
+        messageId: context.message_id ?? payload?.message_id ?? null,
       });
 
     } catch (error) {
