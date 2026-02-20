@@ -4,8 +4,8 @@ const { logger } = require('@librechat/data-schemas');
 const { withTimeout, createAbortError } = require('~/utils/async');
 
 const DEFAULT_TIMEOUT_MS = 2000;
-const MIN_CONFIDENCE = 0.35;
-const ENTITY_REGEX = /\b([A-ZА-ЯЁ][a-zа-яё]+(?:\s+[A-ZА-ЯЁ][a-zа-яё]+)*)\b/g;
+const MIN_CONFIDENCE = 0.3;
+const ENTITY_REGEX = /\b([\p{Lu}][\p{L}\p{M}\p{N}\-']*(?:\s+[\p{Lu}][\p{L}\p{M}\p{N}\-']*)*)\b/giu;
 const RELATION_HINT_REGEX = /(между|связ(ь|и)|отношени[яе]|контакт[ы]?)/i;
 const TIMELINE_HINT_REGEX = /timeline|period|\bгод\b|дата|when|когда/i;
 const DETAILS_HINT_REGEX = /детал|подроб|explain|расскажи/i;
@@ -31,14 +31,30 @@ function extractEntities(text = '') {
     matches.set(key, { count: prev.count + 1, name: candidate });
   }
 
-  return Array.from(matches.values()).map(({ count, name }) => ({
+  const entities = Array.from(matches.values()).map(({ count, name }) => ({
     name,
     type: /(inc|corp|llc|gmbh|АО|ООО|ЗАО|ИП|банк)/i.test(name)
       ? 'organization'
       : 'person',
-    confidence: Math.min(0.9, MIN_CONFIDENCE + count * 0.1),
+    confidence: Math.min(0.95, MIN_CONFIDENCE + count * 0.12),
     hints: [],
   }));
+
+  if (entities.length === 0) {
+    const fallback = text
+      .split(/[^\p{L}\p{M}\p{N}'-]+/u)
+      .filter((token) => token && token.length >= 3)
+      .slice(-3)
+      .map((token) => ({
+        name: token,
+        type: 'keyword',
+        confidence: MIN_CONFIDENCE,
+        hints: [],
+      }));
+    return fallback;
+  }
+
+  return entities;
 }
 
 function buildHints(messageText = '', contextText = '') {
@@ -98,16 +114,17 @@ async function analyzeIntent({
     const duration = Date.now() - startedAt;
 
     if (result.entities.length === 0) {
+      const contextPreview = Array.isArray(context)
+        ? context.map((m) => ({ role: m?.role, text: m?.text || null })).slice(-3)
+        : context
+          ? [{ role: 'context', text: typeof context === 'string' ? context : String(context) }]
+          : [];
+
       logger.info('[rag.intent.skip]', {
         duration,
         reason: 'no_entities',
         lastUserMessage: message?.text || null,
-        contextSample:
-          Array.isArray(context)
-            ? context.map((m) => m?.text || '').join('\n').slice(0, 200) || null
-            : typeof context === 'string'
-              ? context.slice(0, 200)
-              : null,
+        contextSample: contextPreview,
       });
     } else {
       logger.info('[rag.intent.result]', {

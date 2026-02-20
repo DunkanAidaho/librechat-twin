@@ -192,6 +192,17 @@ async function runMultiStepRag({
     };
   }
 
+  logger.info('[rag.context.multiStep.start]', {
+    conversationId,
+    entities: entities.map((entity) => ({
+      name: entity.name,
+      confidence: entity.confidence,
+      hints: entity.hints,
+    })),
+    maxPasses: config.maxPasses,
+    graphFollowUps: config.graph?.followUp !== false,
+  });
+
   const entityStates = entities.map(createEntityState);
   const queueStatus = { memory: 'skipped', graph: 'skipped' };
   let passesUsed = 0;
@@ -201,7 +212,7 @@ async function runMultiStepRag({
       throw createAbortError(signal);
     }
 
-    passesUsed = passIndex;
+    passesUsed = passIndex + 1;
     logger.info('[rag.followup.pass]', {
       conversationId,
       passIndex,
@@ -264,12 +275,16 @@ async function runMultiStepRag({
       queueStatus.memory = memoryResult.status;
     }
 
-    const shouldStop = entityStates.every((entity) => {
-      const maxLines = config.graph?.maxLines ?? 0;
-      return entity.graphLines.length >= maxLines;
-    });
+    const maxLines = Math.max(1, config.graph?.maxLines ?? 0);
+    const shouldStop = entityStates.every((entity) => entity.graphLines.length >= maxLines);
 
     if (shouldStop) {
+      logger.info('[rag.followup.stop]', {
+        conversationId,
+        passIndex,
+        reason: 'graph_lines_satisfied',
+        maxLines,
+      });
       break;
     }
   }

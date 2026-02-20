@@ -1800,7 +1800,7 @@ Graph hints: ${graphQueryHint}`;
     }
 
     const recentMessages = orderedMessages.slice(-5);
-    runtimeCfg?.multiStepRag?.enabled && logger.debug('[rag.intent.input]', {
+    runtimeCfg?.multiStepRag?.enabled && logger.info('[rag.intent.input]', {
       conversationId: this.conversationId,
       lastUserMessage: orderedMessages[orderedMessages.length - 1]?.text || null,
       recentMessages: recentMessages.map((msg) => ({
