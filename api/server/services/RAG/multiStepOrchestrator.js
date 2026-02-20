@@ -281,7 +281,9 @@ async function runMultiStepRag({
         graphLines: graphResult.lines?.length || 0,
         graphStatus: graphResult.status,
         vectorStatus: memoryResult.status,
+        vectorChunks: memoryResult.vectorChunks?.length || 0,
         totalGraphLines: entityState.graphLines.length,
+        totalVectorChunks: entityState.vectorChunks.length,
       });
     }
 
@@ -292,14 +294,16 @@ async function runMultiStepRag({
       stopReasons.push('graph_lines_satisfied');
     }
 
-    if (config.vector?.requireChunks) {
-      const vectorSatisfied = entityStates.every((entity) => entity.vectorChunks.length >= (config.vector?.maxChunks ?? 1));
+    const vectorTarget = Math.max(1, config.vector?.minChunksBeforeStop ?? 0);
+    if (vectorTarget > 0) {
+      const vectorSatisfied = entityStates.every((entity) => entity.vectorChunks.length >= vectorTarget);
       if (vectorSatisfied) {
         stopReasons.push('vector_chunks_satisfied');
       }
     }
 
-    const shouldStop = stopReasons.length > 0;
+    const minPassesBeforeStop = Math.max(1, config.minPassesBeforeStop || 1);
+    const shouldStop = stopReasons.length > 0 && passIndex + 1 >= minPassesBeforeStop;
 
     if (shouldStop) {
       logger.info('[rag.followup.stop]', {
@@ -307,6 +311,7 @@ async function runMultiStepRag({
         passIndex,
         reasons: stopReasons,
         maxLines,
+        minPassesBeforeStop,
       });
       break;
     }
