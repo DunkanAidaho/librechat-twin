@@ -10,6 +10,8 @@ function buildMemoryConfig() {
   const logging = configService.getSection('logging');
   const pricing = configService.get('pricing', {});
   const limits = configService.getSection('limits');
+  const historyCompression = configService.getSection('historyCompression');
+  const multiStepRag = configService.getSection('multiStepRag');
 
   return Object.freeze({
     useConversationMemory: memory.useConversationMemory,
@@ -25,6 +27,12 @@ function buildMemoryConfig() {
     history: Object.freeze({
       dontShrinkLastN: limits.dontShrinkLastN ?? 4,
       tokenBudget: memory.history?.tokenBudget ?? 8000,
+    }),
+    historyCompression: Object.freeze({
+      enabled: historyCompression.enabled,
+      layer1Ratio: historyCompression.layer1Ratio,
+      layer2Ratio: historyCompression.layer2Ratio,
+      contextHeadroom: historyCompression.contextHeadroom,
     }),
     toolsGateway: Object.freeze({
       url: rag.gateway?.url ?? 'http://127.0.0.1:8000',
@@ -59,6 +67,13 @@ function buildMemoryConfig() {
       url: pricing.url ?? '',
       refreshIntervalSec: pricing.refreshIntervalSec ?? 86400,
       cachePath: pricing.cachePath ?? './api/cache/openrouter_pricing.json',
+    }),
+    multiStepRag: Object.freeze({
+      enabled: multiStepRag.enabled,
+      maxEntities: multiStepRag.maxEntities,
+      maxPasses: multiStepRag.maxPasses,
+      graphRetryLimit: multiStepRag.graphRetryLimit,
+      followUpTimeoutMs: multiStepRag.followUpTimeoutMs,
     }),
   });
 }

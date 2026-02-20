@@ -334,6 +334,21 @@ class ConfigService {
       dontShrinkLastN: z.number().int().nonnegative().optional(),
     });
 
+    const historyCompressionSchema = z.object({
+      enabled: z.boolean(),
+      layer1Ratio: z.number().min(0).max(1),
+      layer2Ratio: z.number().min(0).max(1),
+      contextHeadroom: z.number().int().nonnegative(),
+    });
+
+    const multiStepRagSchema = z.object({
+      enabled: z.boolean(),
+      maxEntities: z.number().int().positive(),
+      maxPasses: z.number().int().positive(),
+      graphRetryLimit: z.number().int().nonnegative(),
+      followUpTimeoutMs: z.number().int().positive(),
+    });
+
     const memorySchema = z.object({
       temporalEnabled: z.boolean(),
       graphWorkflowEnabled: z.boolean(),
@@ -766,6 +781,30 @@ class ConfigService {
           googleChainBuffer:
             (sanitizeOptionalString(this.env.GOOGLE_CHAIN_BUFFER) || 'off').toLowerCase(),
           geminiChainWindow: parseOptionalInt(this.env.GEMINI_CHAIN_WINDOW) ?? 5,
+        }),
+      },
+      historyCompression: {
+        schema: historyCompressionSchema,
+        loader: () => ({
+          enabled:
+            parseOptionalBool(this.env.CONTEXT_GRADUAL_COMPRESSION) ??
+            parseOptionalBool(this.env.CONTEXT_HISTORY_COMPRESSION_ENABLED) ??
+            false,
+          layer1Ratio: parseOptionalFloat(this.env.CONTEXT_LAYER1_RATIO) ?? 0.35,
+          layer2Ratio: parseOptionalFloat(this.env.CONTEXT_LAYER2_RATIO) ?? 0.25,
+          contextHeadroom: parseOptionalInt(this.env.CONTEXT_HEADROOM_TOKENS) ?? 1024,
+        }),
+      },
+      multiStepRag: {
+        schema: multiStepRagSchema,
+        loader: () => ({
+          enabled: parseOptionalBool(this.env.MULTISTEP_RAG_ENABLED) ?? false,
+          maxEntities: parseOptionalInt(this.env.MULTISTEP_RAG_MAX_ENTITIES) ?? 3,
+          maxPasses: parseOptionalInt(this.env.MULTISTEP_RAG_MAX_PASSES) ?? 2,
+          graphRetryLimit:
+            parseOptionalInt(this.env.MULTISTEP_RAG_GRAPH_RETRY_LIMIT) ?? 2,
+          followUpTimeoutMs:
+            parseOptionalInt(this.env.MULTISTEP_RAG_FOLLOWUP_TIMEOUT_MS) ?? 20000,
         }),
       },
       memory: {

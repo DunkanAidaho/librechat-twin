@@ -53,6 +53,9 @@ const { getRoleByName } = require('~/models/Role');
 const { loadAgent } = require('~/models/Agent');
 const { getMCPManager } = require('~/config');
 const runtimeMemoryConfig = require('~/utils/memoryConfig');
+const MessageHistoryManager = require('~/server/services/agents/MessageHistoryManager');
+const { HistoryTrimmer } = require('~/server/services/agents/historyTrimmer');
+const { MessageCompressorBridge } = require('~/server/services/agents/ContextCompressor');
 const { sanitizeInput } = require('~/utils/security');
 const {
   observeSegmentTokens,
@@ -925,6 +928,12 @@ class AgentClient extends BaseClient {
     this.usage;
     this.indexTokenCountMap = {};
     this.processMemory;
+    this.historyManager = new MessageHistoryManager({
+      ingestedHistory: IngestedHistory,
+      config: runtimeMemoryConfig.getMemoryConfig(),
+      memoryTaskTimeout: MEMORY_TASK_TIMEOUT_MS,
+    });
+
     const TRACE_PIPELINE = configService.getBoolean('logging.tracePipeline', false);
     this.trace = (label, data = {}) => {
       try {
@@ -1605,15 +1614,22 @@ Graph hints: ${graphQueryHint}`;
     { instructions = null, additional_instructions = null },
     opts,
   ) {
+    const runtimeCfg = runtimeMemoryConfig.getMemoryConfig();
     let orderedMessages = this.constructor.getMessagesForConversation({
       messages,
       parentMessageId,
       summary: this.shouldSummarize,
     });
-    
-    
-    const MAX_MESSAGES_TO_PROCESS = 25;
-    
+
+    const historyCompressionCfg = runtimeCfg?.historyCompression ?? {};
+    const historyCfg = runtimeCfg?.history ?? {};
+    const dontShrinkLastN = Number.isFinite(historyCfg?.dontShrinkLastN)
+      ? Math.max(historyCfg.dontShrinkLastN, 0)
+      : 0;
+    const MAX_MESSAGES_TO_PROCESS = historyCompressionCfg?.enabled ? Infinity : 25;
+    const conversationId = this.conversationId || this.options?.req?.body?.conversationId;
+    const requestUserId = this.options?.req?.user?.id || null;
+
     let systemMessage = orderedMessages.find(m => m.role === 'system');
     let otherMessages = orderedMessages.filter(m => m.role !== 'system');
     let droppedMessages = [];
@@ -1621,91 +1637,21 @@ Graph hints: ${graphQueryHint}`;
     if (otherMessages.length > MAX_MESSAGES_TO_PROCESS) {
       const keptMessages = otherMessages.slice(-MAX_MESSAGES_TO_PROCESS);
       droppedMessages = otherMessages.slice(0, otherMessages.length - MAX_MESSAGES_TO_PROCESS);
-      
+
       orderedMessages = systemMessage ? [systemMessage, ...keptMessages] : keptMessages;
-      
+
       logger.warn(`[PROMPT-LIMIT] Принудительно усекаем историю с ${otherMessages.length} до ${MAX_MESSAGES_TO_PROCESS} сообщений. Dropped: ${droppedMessages.length}`);
       
-      const convId = this.conversationId || this.options?.req?.body?.conversationId;
-      const userId = this.options?.req?.user?.id;
-
-      if (convId && userId && droppedMessages.length) {
-        setImmediate(async () => {
-          const droppedTasks = [];
-          const droppedMessageIds = [];
-
-          for (const m of droppedMessages) {
-            if (m.isMemoryStored === true) {
-              logger.debug('[history->RAG][dropped] Пропуск уже векторизованного сообщения', {
-                conversationId: convId,
-                messageId: m.messageId,
-              });
-              continue;
-            }
-
-            const rawText = extractMessageText(m, '[history->RAG][dropped]');
-            const normalizedText = normalizeMemoryText(rawText, '[history->RAG][dropped]');
-
-            if (!normalizedText || normalizedText.length < 20) continue;
-
-            const dedupeKey = makeIngestKey(convId, m.messageId, normalizedText);
-            if (IngestedHistory.has(dedupeKey)) continue;
-
-            IngestedHistory.add(dedupeKey);
-
-            const stableId = m.messageId || `dropped-${hashPayload(normalizedText).slice(0, 12)}`;
-            droppedTasks.push({
-              type: 'add_turn',
-              payload: {
-                conversation_id: convId,
-                message_id: stableId,
-                role: m?.isCreatedByUser ? 'user' : 'assistant',
-                content: normalizedText,
-                user_id: userId,
-              },
-            });
-            
-            if (m.messageId) {
-              droppedMessageIds.push(m.messageId);
-            }
-          }
-
-          if (droppedTasks.length) {
-            try {
-              const result = await enqueueMemoryTasks(droppedTasks, {
-                reason: 'history_window_drop',
-                conversationId: convId,
-                userId,
-                messageCount: droppedTasks.length,
-                fireAndForget: true,
-              });
-              
-              // ДОБАВЛЕНО: Проставляем флаг после успешной постановки в очередь
-              if (result?.status === 'queued' || result?.status === 'queued_async') {
-                if (droppedMessageIds.length > 0 && this.options?.req) {
-                  await markMessagesAsStored(this.options.req, droppedMessageIds);
-                }
-              }
-              
-              logger.debug(`[history->RAG][dropped] queued ${droppedTasks.length} dropped messages (skipped ${droppedMessages.length - droppedTasks.length} already vectorized)`, {
-                conversationId: convId,
-              });
-            } catch (queueError) {
-              safeError('[history->RAG][dropped] Failed to enqueue dropped messages', {
-                conversationId: convId,
-                messageCount: droppedTasks.length,
-                message: queueError?.message,
-              });
-            }
-          } else {
-            logger.debug(`[history->RAG][dropped] Все ${droppedMessages.length} dropped messages уже векторизованы`, {
-              conversationId: convId,
-            });
-          }
-        });
+      if (conversationId && requestUserId && droppedMessages.length) {
+        setImmediate(() =>
+          this.historyManager.processDroppedMessages({
+            droppedMessages,
+            conversationId,
+            userId: requestUserId,
+          }),
+        );
       }
     }
-    const runtimeCfg = runtimeMemoryConfig.getMemoryConfig();
     logger.debug({
       msg: '[config.history]',
       conversationId: this.conversationId,
@@ -1713,6 +1659,7 @@ Graph hints: ${graphQueryHint}`;
       historyTokenBudget: runtimeCfg?.history?.tokenBudget ?? configService.getNumber('memory.history.tokenBudget', 0),
     });
     ragCacheTtlMs = Math.max(Number(runtimeCfg?.ragCacheTtl) * 1000, 0);
+    const shouldCompressHistory = Boolean(historyCompressionCfg?.enabled);
     const endpointOption = this.options?.req?.body?.endpointOption ?? this.options?.endpointOption ?? {};
     logger.debug({
       msg: '[AgentClient.buildMessages] start',
@@ -1724,198 +1671,111 @@ Graph hints: ${graphQueryHint}`;
       lastIds: orderedMessages.slice(-3).map(m => m && m.messageId).join(',')
     }); } catch {}
 
-    try {
-      const convId = this.conversationId || this.options?.req?.body?.conversationId;
-      const requestUserId = this.options?.req?.user?.id || null;
-      const toIngest = [];
-      const messageIdsToMark = [];
-      const totalMessages = orderedMessages.length;
-      const dontShrinkConfigured = runtimeCfg?.history?.dontShrinkLastN;
-      const effectiveDontShrink = Number.isFinite(dontShrinkConfigured)
-        ? Math.max(dontShrinkConfigured, 0)
-        : 0;
-      const dontShrinkStartIndex = Math.max(totalMessages - effectiveDontShrink, 0);
-
-      for (let idx = 0; idx < orderedMessages.length; idx++) {
-        const m = orderedMessages[idx];
-        try {
-          if (m.isMemoryStored === true) {
-            logger.debug('[history->RAG] Пропуск уже векторизованного сообщения', {
-              conversationId: convId,
-              messageId: m.messageId,
-              index: idx,
-            });
-            continue;
-          }
-
-          const rawText = extractMessageText(m, '[history->RAG]');
-          const normalizedText = normalizeMemoryText(rawText);
-          const len = normalizedText.length;
-
-          const looksHTML =
-            /</i.test(normalizedText) &&
-            /<html|<body|<div|<p|<span/i.test(normalizedText);
-
-          let hasThink = false;
-          if (Array.isArray(m?.content)) {
-            hasThink = m.content.some(
-              (part) =>
-                part?.type === 'think' &&
-                typeof part.think === 'string' &&
-                part.think.trim().length > 0,
-            );
-          }
-          if (!hasThink) {
-            const t = normalizedText;
-            hasThink = /(^|\n)\s*(Мысли|Рассуждения|Thoughts|Chain of Thought)\s*:/i.test(t);
-          }
-
-          const shouldShrinkUser = m?.isCreatedByUser && (len > HIST_LONG_USER_TO_RAG || looksHTML);
-          const shouldShrinkAssistant =
-            !m?.isCreatedByUser && (len > ASSIST_LONG_TO_RAG || looksHTML || hasThink);
-
-          const messageUserId =
-            requestUserId ||
-            m?.user ||
-            m?.metadata?.user ||
-            m?.metadata?.user_id ||
-            this?.user ||
-            null;
-
-          if ((shouldShrinkUser || shouldShrinkAssistant) && convId && normalizedText && normalizedText.length >= 20 && messageUserId) {
-            const dedupeKey = makeIngestKey(convId, m.messageId, normalizedText);
-
-            if (IngestedHistory.has(dedupeKey)) {
-              logger.debug('[history->RAG][dedup] skip message already enqueued', {
-                conversationId: convId,
-                messageId: m?.messageId,
-              });
-            } else {
-              const stableId = m.messageId || `hist-${idx}-${hashPayload(normalizedText).slice(0, 12)}`;
-              const taskPayload = {
-                message_id: stableId,
-                content: normalizedText,
-                role: m?.isCreatedByUser ? 'user' : 'assistant',
-                user_id: messageUserId,
-              };
-              IngestedHistory.add(dedupeKey);
-              toIngest.push(taskPayload);
-              
-              if (m.messageId) {
-                messageIdsToMark.push(m.messageId);
-              }
-              
-              logger.debug('[history->RAG] prepared memory task', {
-                conversationId: convId,
-                messageId: taskPayload.message_id,
-                role: taskPayload.role,
-                textLength: len,
-              });
-            }
-
-            const roleTag = m?.isCreatedByUser ? 'user' : 'assistant';
-            const isLatestMessage = idx === orderedMessages.length - 1;
-            const skipShrinkForRecent = idx >= dontShrinkStartIndex;
-            const keepFullText = isLatestMessage || skipShrinkForRecent;
-
-            if (!keepFullText) {
-              const snippetLen = m?.isCreatedByUser ? 2000 : ASSIST_SNIPPET_CHARS;
-              const snippet = normalizedText.slice(0, snippetLen);
-              m.text = `[[moved_to_memory:RAG,len=${len},role=${roleTag}]]\n\n${snippet}`;
-              if (Array.isArray(m?.content)) {
-                m.content = [{ type: 'text', text: m.text }];
-              }
-
-              const limitLabel = m?.isCreatedByUser ? 'HIST_LONG_USER_TO_RAG' : 'ASSIST_LONG_TO_RAG';
-              const limitValue = m?.isCreatedByUser ? HIST_LONG_USER_TO_RAG : ASSIST_LONG_TO_RAG;
-              const shrinkReason = looksHTML ? 'html' : hasThink ? 'reasoning' : 'length';
-              logger.debug(
-                `[prompt][shrink] idx=${idx} role=${roleTag} reason=${shrinkReason} limit=${limitLabel} limitValue=${limitValue} snippetLen=${snippet.length}`
-              );
-            } else {
-              logger.debug(
-                `[prompt][shrink] idx=${idx} role=${roleTag} len=${len} action=keep-full keepReason=memory.history.dontShrinkLastN value=${effectiveDontShrink}`
-              );
-            }
-          }
-        } catch (error) {
-          logger.warn('[history->RAG] error while scanning message', {
-            conversationId: convId,
-            messageId: m?.messageId,
-            error: error?.message,
-            stack: error?.stack,
-          });
-        }
+    const computeImportanceScore = (message = {}) => {
+      if (message.isCreatedByUser || message.role === 'user') {
+        return 2;
       }
-
-      if (toIngest.length && convId) {
-        const tasks = toIngest
-          .map((t) => ({
-            type: 'add_turn',
-            payload: {
-              conversation_id: convId,
-              message_id: t.message_id,
-              role: t.role,
-              content: t.content,
-              user_id: t.user_id,
-            },
-          }))
-          .filter((task) => task.payload.user_id);
-
-        if (tasks.length) {
-          const totalLength = tasks.reduce(
-            (acc, task) => acc + (task.payload.content?.length ?? 0),
-            0,
-          );
-          
-          setImmediate(async () => {
-            try {
-              const result = await enqueueMemoryTasks(
-                tasks,
-                {
-                  reason: 'history_sync',
-                  conversationId: convId,
-                  userId: requestUserId,
-                  textLength: totalLength,
-                },
-              );
-              
-              // ДОБАВЛЕНО: Проставляем флаг после успешной постановки в очередь
-              if (result?.status === 'queued' && messageIdsToMark.length > 0 && this.options?.req) {
-                await markMessagesAsStored(this.options.req, messageIdsToMark);
-              }
-              
-              logger.debug(
-                `[history->RAG] queued ${tasks.length} turn(s) через JetStream ` +
-                `(conversation=${convId}, totalChars=${totalLength}).`,
-              );
-            } catch (queueError) {
-              safeError('[history->RAG] Failed to enqueue history tasks', {
-                conversationId: convId,
-                messageCount: tasks.length,
-                message: queueError?.message,
-              });
-            }
-          });
-        } else {
-          logger.debug('[history->RAG] nothing enqueued (missing user_id).');
-        }
+      if (message.role === 'assistant') {
+        return 1;
       }
-    } catch (e) {
-      logger.error('[history->RAG] failed', e);
-    }
+      return 0;
+    };
 
+    const tokenize = (text = '') => {
+      try {
+        return Tokenizer.getTokenCount(text, this.getEncoding());
+      } catch (err) {
+        logger.warn('[history->budget] failed to count tokens, fallback to length', {
+          message: err?.message,
+        });
+        return text.length;
+      }
+    };
 
     let systemContent = [instructions ?? '', additional_instructions ?? '']
       .filter(Boolean)
       .join('\n')
       .trim();
-    
+
     if (orderedMessages.length === 0 && systemContent.length === 0) {
         systemContent = DEFAULT_SYSTEM_PROMPT;
         logger.debug('[AgentClient] Applied default system prompt for new chat');
     }
     logger.debug(`[AgentClient] Initial systemContent: ${systemContent.length} chars`);
+
+    let historyTrimmer = null;
+    let historyTokenBudget = 0;
+    const headroom = Number(historyCompressionCfg?.contextHeadroom) || 0;
+    const ragTokens = Number(this.options?.req?.ragContextTokens) || 0;
+    const instructionsTokensEstimate = tokenize(systemContent);
+    const maxContextTokens =
+      this.maxContextTokens ||
+      Number(historyCfg?.tokenBudget) ||
+      Number(runtimeCfg?.tokenLimits?.maxMessageTokens) ||
+      0;
+
+    if (historyCompressionCfg?.enabled) {
+      historyTokenBudget =
+        maxContextTokens - ragTokens - instructionsTokensEstimate;
+
+      const availableBudget = historyTokenBudget - headroom;
+
+      if (availableBudget > 0) {
+        historyTrimmer = new HistoryTrimmer({
+          tokenizerEncoding: this.getEncoding(),
+          keepLastN: dontShrinkLastN || 6,
+          layer1Ratio: historyCompressionCfg.layer1Ratio,
+          layer2Ratio: historyCompressionCfg.layer2Ratio,
+          contextHeadroom: headroom,
+          importanceScorer: computeImportanceScore,
+          compressor: new MessageCompressorBridge({ reduction: historyCompressionCfg.layer2Ratio ?? 0.25 }),
+        });
+        logger.info('[contextCompression.enabled]', {
+          conversationId: this.conversationId,
+          budgetTokens: availableBudget,
+          headroom,
+        });
+      } else {
+        logger.warn('[contextCompression.disabled.budget]', {
+          conversationId: this.conversationId,
+          budgetTokens: availableBudget,
+          ragTokens,
+          instructionsTokens: instructionsTokensEstimate,
+          headroom,
+          maxContextTokens,
+        });
+      }
+    }
+
+    try {
+      const { toIngest = [], modifiedMessages } = await this.historyManager.processMessageHistory({
+        orderedMessages,
+        conversationId,
+        userId: requestUserId,
+        histLongUserToRag: HIST_LONG_USER_TO_RAG,
+        assistLongToRag: ASSIST_LONG_TO_RAG,
+        assistSnippetChars: ASSIST_SNIPPET_CHARS,
+        dontShrinkLastN,
+        trimmer: historyTrimmer,
+        tokenBudget: historyTokenBudget,
+        contextHeadroom: headroom,
+      });
+
+      orderedMessages = modifiedMessages;
+
+      if (toIngest.length && conversationId) {
+        setImmediate(() =>
+          this.historyManager.enqueueMemoryTasks({
+            toIngest,
+            conversationId,
+            userId: requestUserId,
+            reason: 'history_sync',
+          }),
+        );
+      }
+    } catch (error) {
+      logger.error('[history->RAG] failed', error);
+    }
 
     let ragContextLength = 0;
     let ragCacheStatus = 'skipped';

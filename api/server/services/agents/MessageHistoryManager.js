@@ -108,6 +108,9 @@ class MessageHistoryManager {
     assistLongToRag = 15000,
     assistSnippetChars = 1500,
     dontShrinkLastN = 0,
+    trimmer,
+    tokenBudget,
+    contextHeadroom = 0,
   }) {
     const toIngest = [];
     const totalMessages = orderedMessages.length;
@@ -210,7 +213,42 @@ class MessageHistoryManager {
       }
     }
 
-    return { toIngest, modifiedMessages: orderedMessages };
+    let trimmedMessages = orderedMessages;
+    if (trimmer && typeof trimmer.selectWithinBudget === 'function') {
+      try {
+        const effectiveBudget = Math.max(0, Number(tokenBudget) || 0);
+        const headroom = Math.max(0, Number(contextHeadroom) || 0);
+        const budget = effectiveBudget - headroom;
+        if (budget > 0) {
+          const layers = trimmer.buildLayers(orderedMessages);
+          const compressedLayers = await trimmer.compressLayers(layers);
+          const { keptMessages, stats, remainingTokens } = trimmer.selectWithinBudget(
+            compressedLayers,
+            budget,
+          );
+
+          trimmedMessages = keptMessages;
+          logger.info('[contextCompression.layers]', {
+            conversationId,
+            budget,
+            contextHeadroom: headroom,
+            remainingTokens,
+            layers: stats.map((stat) => ({
+              layer: stat.layer,
+              messageCount: stat.messageCount,
+              tokens: stat.tokens,
+            })),
+          });
+        }
+      } catch (error) {
+        logger.error('[contextCompression.error]', {
+          conversationId,
+          message: error?.message,
+        });
+      }
+    }
+
+    return { toIngest, modifiedMessages: trimmedMessages };
   }
 
   /**

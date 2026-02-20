@@ -161,7 +161,30 @@ class ContextCompressor {
   }
 }
 
+class MessageCompressorBridge {
+  constructor(options = {}) {
+    this.reduction = options.reduction ?? 0.5;
+    this.strategy = options.strategy ?? null;
+  }
+
+  async compress(message) {
+    if (!message || typeof message.text !== 'string' || message.text.length === 0) {
+      return null;
+    }
+
+    const text = message.text;
+    const shouldTruncate = text.length > 2048;
+    if (!shouldTruncate) {
+      return text;
+    }
+
+    const targetLength = Math.max(512, Math.floor(text.length * (1 - this.reduction)));
+    return `${text.slice(0, targetLength)}\n[...compressed...]`;
+  }
+}
+
 module.exports = {
   ContextCompressor,
   CompressionStrategy,
+  MessageCompressorBridge,
 };
