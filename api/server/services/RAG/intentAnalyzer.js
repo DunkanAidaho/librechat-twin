@@ -31,9 +31,7 @@ function extractEntities(text = '') {
 
   return Array.from(matches.values()).map(({ count, name }) => ({
     name,
-    type: /
-      (inc|corp|llc|gmbh|АО|ООО|ЗАО|ИП|банк)
-    /i.test(name)
+    type: /(inc|corp|llc|gmbh|АО|ООО|ЗАО|ИП|банк)/i.test(name)
       ? 'organization'
       : 'person',
     confidence: Math.min(0.9, MIN_CONFIDENCE + count * 0.1),
