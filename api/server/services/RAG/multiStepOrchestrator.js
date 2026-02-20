@@ -207,6 +207,7 @@ async function runMultiStepRag({
   const queueStatus = { memory: 'skipped', graph: 'skipped' };
   let passesUsed = 0;
 
+  const passSummaries = [];
   for (let passIndex = 0; passIndex < config.maxPasses; passIndex++) {
     if (signal?.aborted) {
       throw createAbortError(signal);
@@ -273,16 +274,38 @@ async function runMultiStepRag({
       });
 
       queueStatus.memory = memoryResult.status;
+
+      passSummaries.push({
+        passIndex,
+        entity: entityState.name,
+        graphLines: graphResult.lines?.length || 0,
+        graphStatus: graphResult.status,
+        vectorStatus: memoryResult.status,
+        totalGraphLines: entityState.graphLines.length,
+      });
     }
 
     const maxLines = Math.max(1, config.graph?.maxLines ?? 0);
-    const shouldStop = entityStates.every((entity) => entity.graphLines.length >= maxLines);
+    const stopReasons = [];
+    const graphSatisfied = entityStates.every((entity) => entity.graphLines.length >= maxLines);
+    if (graphSatisfied) {
+      stopReasons.push('graph_lines_satisfied');
+    }
+
+    if (config.vector?.requireChunks) {
+      const vectorSatisfied = entityStates.every((entity) => entity.vectorChunks.length >= (config.vector?.maxChunks ?? 1));
+      if (vectorSatisfied) {
+        stopReasons.push('vector_chunks_satisfied');
+      }
+    }
+
+    const shouldStop = stopReasons.length > 0;
 
     if (shouldStop) {
       logger.info('[rag.followup.stop]', {
         conversationId,
         passIndex,
-        reason: 'graph_lines_satisfied',
+        reasons: stopReasons,
         maxLines,
       });
       break;
@@ -341,6 +364,7 @@ async function runMultiStepRag({
     globalTokens: aggregatedContext.length,
     queueStatus,
     passesUsed,
+    passes: passSummaries,
   });
 
   return {
