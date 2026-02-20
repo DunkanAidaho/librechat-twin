@@ -98,7 +98,7 @@ async function fetchGraph({ fetchGraphContext, entity, passIndex, config, signal
   try {
     const graphContext = await withTimeout(
       fetchGraphContext({
-        entity: entity.name,
+        entity,
         relationHints: entity.hints,
         limit: config?.maxLines,
         timeoutMs: config?.timeoutMs || DEFAULT_TIMEOUT_MS,
@@ -206,6 +206,7 @@ async function runMultiStepRag({
       conversationId,
       passIndex,
       entities: entityStates.map((e) => e.name),
+      queueStatus,
     });
 
     if (passIndex === 0) {
@@ -263,9 +264,10 @@ async function runMultiStepRag({
       queueStatus.memory = memoryResult.status;
     }
 
-    const shouldStop = entityStates.every(
-      (entity) => entity.graphLines.length >= (config.graph?.maxLines ?? 0),
-    );
+    const shouldStop = entityStates.every((entity) => {
+      const maxLines = config.graph?.maxLines ?? 0;
+      return entity.graphLines.length >= maxLines;
+    });
 
     if (shouldStop) {
       break;

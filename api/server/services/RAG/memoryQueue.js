@@ -193,8 +193,7 @@ async function enqueueBatch(client, batch, meta) {
       await client.enqueueMemoryTask(context);
       enqueued++;
 
-      logger.debug({
-        msg: '[memoryQueue.enqueue]',
+      logger.debug('[memoryQueue.enqueue]', {
         reason: metadata.reason ?? null,
         conversationId: metadata.conversationId ?? null,
         userId: metadata.userId ?? null,

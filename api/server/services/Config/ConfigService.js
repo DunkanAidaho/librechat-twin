@@ -342,11 +342,11 @@ class ConfigService {
     });
 
     const multiStepRagSchema = z.object({
-      enabled: z.boolean(),
-      maxEntities: z.number().int().positive(),
-      maxPasses: z.number().int().positive(),
-      graphRetryLimit: z.number().int().nonnegative(),
-      followUpTimeoutMs: z.number().int().positive(),
+      enabled: z.boolean().default(false),
+      maxEntities: z.number().int().positive().default(3),
+      maxPasses: z.number().int().positive().default(2),
+      graphRetryLimit: z.number().int().nonnegative().default(2),
+      followUpTimeoutMs: z.number().int().positive().default(20000),
     });
 
     const memorySchema = z.object({

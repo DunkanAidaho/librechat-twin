@@ -7,6 +7,8 @@ const DEFAULT_TIMEOUT_MS = 2000;
 const MIN_CONFIDENCE = 0.35;
 const ENTITY_REGEX = /\b([A-ZА-ЯЁ][a-zа-яё]+(?:\s+[A-ZА-ЯЁ][a-zа-яё]+)*)\b/g;
 const RELATION_HINT_REGEX = /(между|связ(ь|и)|отношени[яе]|контакт[ы]?)/i;
+const TIMELINE_HINT_REGEX = /timeline|period|\bгод\b|дата|when|когда/i;
+const DETAILS_HINT_REGEX = /детал|подроб|explain|расскажи/i;
 
 /**
  * Простая эвристика извлечения сущностей из текста
@@ -41,13 +43,14 @@ function extractEntities(text = '') {
 
 function buildHints(messageText = '', contextText = '') {
   const hints = new Set();
-  if (RELATION_HINT_REGEX.test(messageText) || RELATION_HINT_REGEX.test(contextText)) {
+  const combined = `${messageText}\n${contextText}`;
+  if (RELATION_HINT_REGEX.test(combined)) {
     hints.add('relations');
   }
-  if (/timeline|period|\bгод\b|дата|when|когда/i.test(messageText)) {
+  if (TIMELINE_HINT_REGEX.test(combined)) {
     hints.add('timeline');
   }
-  if (/детал/i.test(messageText)) {
+  if (DETAILS_HINT_REGEX.test(combined)) {
     hints.add('details');
   }
   return Array.from(hints);
@@ -65,15 +68,17 @@ async function runAnalysis({ message, context, signal }) {
       ? context
       : '';
 
-  const entities = extractEntities(text).map((entity) => ({
-    ...entity,
-    hints: buildHints(text, contextText),
-  }));
+  const intents = extractEntities(text)
+    .slice(0, 3)
+    .map((entity) => ({
+      ...entity,
+      hints: buildHints(text, contextText),
+    }));
 
-  const needsFollowUps = entities.some((entity) => entity.confidence >= 0.5);
+  const needsFollowUps = intents.some((entity) => entity.confidence >= 0.5);
 
   return {
-    entities,
+    entities: intents,
     needsFollowUps,
   };
 }
@@ -92,16 +97,23 @@ async function analyzeIntent({
     const result = await withTimeout(operation, timeoutMs, 'Intent analysis timed out', signal);
     const duration = Date.now() - startedAt;
 
-    logger.info(`${logPrefix}`, {
-      duration,
-      entities: result.entities.map((entity) => ({
-        name: entity.name,
-        confidence: entity.confidence,
-        type: entity.type,
-        hints: entity.hints,
-      })),
-      needsFollowUps: result.needsFollowUps,
-    });
+    if (result.entities.length === 0) {
+      logger.info('[rag.intent.skip]', {
+        duration,
+        reason: 'no_entities',
+      });
+    } else {
+      logger.info('[rag.intent.result]', {
+        duration,
+        entities: result.entities.map((entity) => ({
+          name: entity.name,
+          confidence: entity.confidence,
+          type: entity.type,
+          hints: entity.hints,
+        })),
+        needsFollowUps: result.needsFollowUps,
+      });
+    }
 
     return {
       ...result,
