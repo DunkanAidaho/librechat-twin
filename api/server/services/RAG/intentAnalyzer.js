@@ -101,6 +101,13 @@ async function analyzeIntent({
       logger.info('[rag.intent.skip]', {
         duration,
         reason: 'no_entities',
+        lastUserMessage: message?.text || null,
+        contextSample:
+          Array.isArray(context)
+            ? context.map((m) => m?.text || '').join('\n').slice(0, 200) || null
+            : typeof context === 'string'
+              ? context.slice(0, 200)
+              : null,
       });
     } else {
       logger.info('[rag.intent.result]', {
