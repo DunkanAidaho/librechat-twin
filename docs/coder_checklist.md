@@ -17,6 +17,7 @@
 
 ## 3. Логирование и наблюдаемость
 - **Transparent logging initiative**: только scoped логгер (`utils/logger`) или `ragLogger` для RAG. Никаких `debug`, `console.log`, `warn` напрямую.
+- **Гигиена репозитория:** при переносе/переименовании логгеров удаляем старые файлы (`logger.js`, `.bak`, временные копии) и проверяем `git status`. Перед сборкой контейнера запускаем `docker build --no-cache` (или аналогичный шаг CI), чтобы исключить подтягивание устаревших артефактов.
 - **Request context**: контроллеры обязаны создавать `requestId` и передавать его дальше (в SSE, RAG, очереди). Логи без `requestId` считаются долгом.
 - **Единый формат событий**: `scope`, `phase`, `conversationId`, `userId`, `agentId`, `latency`, `model`, `attempt`, `signalAborted` и т.п. — по списку из `docs/1_Trasparent_logging.md`.
 - **Структурные meta-поля**: `context` и другие объекты проходят через `sanitizePlainObject` (с лимитами глубины/размера и защитой от циклов). Нельзя применять `JSON.stringify` в hot-path или превращать объекты в строки — передаём лёгкую, но структурированную версию.
