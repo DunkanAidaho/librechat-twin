@@ -3,10 +3,6 @@ FROM librechat/librechat:v0.8.1-rc1
 
 WORKDIR /app
 
-# Сначала копируем исходники api
-RUN rm -rf /app/api && mkdir -p /app/api   
-COPY api/ /app/api/
-
 RUN set -eux; \
     npm cache clean --force; \
     npm ci --omit=dev; \
@@ -25,5 +21,8 @@ RUN set -eux; \
 ENV HEADLESS_STREAM=false
 ENV DEBUG_SSE=false
 
+COPY api/ /app/api/
+
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD curl -fsS http://127.0.0.1:3080/api/status || exit 1
+
