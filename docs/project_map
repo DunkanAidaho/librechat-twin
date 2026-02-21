@@ -14,6 +14,7 @@ Functions:
 - executeRequest: status=сирота; callers: —; Purpose: local helper to execute request
 - processTokens: status=используется; callers: app/clients/AnthropicClient.js; Purpose: triggered from app/clients/AnthropicClient.js to process tokens
 - titleChatCompletion: status=используется | опасность, дублируется в: app/clients/AnthropicClient.js, app/clients/OpenAIClient.js; callers: app/clients/AnthropicClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js; Purpose: triggered from app/clients/AnthropicClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js to title chat completion
+Logging status: ❌ нет scoped-логирования; требуется внедрить `logger.scope('clients.anthropic')` для событий `request:start|token|retry|error`.
 Outgoing Calls:
 - require: count=11; defined_in=external/unknown; Purpose: invokes require
 - test: count=9; defined_in=external/unknown; Purpose: invokes test
@@ -106,6 +107,7 @@ Functions:
 - processMessage: status=используется; callers: app/clients/BaseClient.js; Purpose: triggered from app/clients/BaseClient.js to process message
 - processValue: status=используется; callers: app/clients/BaseClient.js; Purpose: triggered from app/clients/BaseClient.js to process value
 - resolveEncoding: status=используется | опасность, дублируется в: app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js; callers: app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js; Purpose: triggered from app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js to resolve encoding
+Logging status: ❌ использует mix `debug/warn`; нужно перейти на scoped logger (см. Transparent logging initiative).
 Outgoing Calls:
 - debug: count=16; defined_in=external/unknown; Purpose: invokes debug
 - push: count=12; defined_in=external/unknown; Purpose: invokes push
@@ -213,6 +215,7 @@ Inbound Links: none detected
 Exports: None
 Functions:
 - buildPromptBody: status=используется | опасность, дублируется в: app/clients/AnthropicClient.js, app/clients/GoogleClient.js; callers: app/clients/AnthropicClient.js, app/clients/GoogleClient.js; Purpose: triggered from app/clients/AnthropicClient.js, app/clients/GoogleClient.js to build prompt body
+Logging status: ❌ требуется унифицированный логгер для Google Vertex/Gemini (события отправки/stream/ошибок).
 Outgoing Calls:
 - require: count=16; defined_in=external/unknown; Purpose: invokes require
 - push: count=8; defined_in=external/unknown; Purpose: invokes push
@@ -299,6 +302,7 @@ Exports: None
 Functions:
 - errorCallback: status=сирота; callers: —; Purpose: local helper to error callback
 - titleChatCompletion: status=используется | опасность, дублируется в: app/clients/AnthropicClient.js, app/clients/OpenAIClient.js; callers: app/clients/AnthropicClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js; Purpose: triggered from app/clients/AnthropicClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js to title chat completion
+Logging status: ❌ legacy `debug`/`warn`; внедрить scoped logger и trace для Azure/OpenAI потоков.
 Outgoing Calls:
 - debug: count=17; defined_in=external/unknown; Purpose: invokes debug
 - require: count=16; defined_in=external/unknown; Purpose: invokes require
@@ -399,6 +403,7 @@ Functions:
 - computeTokens: status=используется | опасность, дублируется в: app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js; callers: app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js; Purpose: triggered from app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js to compute tokens
 - normalizeInstructionsPayload: status=используется | опасность, дублируется в: app/clients/utils/instructions.js, server/controllers/agents/client.js; callers: app/clients/AnthropicClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js, server/controllers/agents/client.js; Purpose: triggered from app/clients/AnthropicClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js, server/controllers/agents/client.js to normalize instructions payload
 - resolveEncoding: status=используется | опасность, дублируется в: app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js; callers: app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js; Purpose: triggered from app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js to resolve encoding
+Logging status: ⚠️ частично (warn/info). Нужен scoped logger `clients.instructions` и единый формат warning'ов.
 Outgoing Calls:
 - warn: count=4; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes warn
 - require: count=3; defined_in=external/unknown; Purpose: invokes require
@@ -677,6 +682,7 @@ Functions:
 - tokenize: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to tokenize
 - warn: status=используется | опасность, дублируется в: server/controllers/agents/client.js, server/utils/messageUtils.js; callers: app/clients/AnthropicClient.js, app/clients/BaseClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js, app/clients/utils/instructions.js, db/indexSync.js, manage_summaries.js, models/Conversation.js, models/Message.js, server/controllers/agents/client.js, server/controllers/agents/request.js, server/middleware/requestValidators.js, server/routes/convos.js, server/services/Config/ConfigService.js, server/services/Deduplication/clearDedupeKey.js, server/services/Deduplication/ingestDeduplicator.js, server/services/Endpoints/agents/title.js, server/services/Endpoints/google/title.js, server/services/Graph/LongTextWorker.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/condense.js, server/services/RAG/intentAnalyzer.js, server/services/RAG/memoryQueue.js, server/services/RAG/multiStepOrchestrator.js, server/services/agents/MessageHistoryManager.js, server/services/agents/RetryStrategy.js, server/services/agents/historyTrimmer.js, server/services/tokens/TokenCounter.js, server/utils/messageUtils.js, utils/metrics.js, utils/natsClient.js, utils/temporalClient.js; Purpose: triggered from app/clients/AnthropicClient.js, app/clients/BaseClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js, app/clients/utils/instructions.js, db/indexSync.js, manage_summaries.js, models/Conversation.js, models/Message.js, server/controllers/agents/client.js, server/controllers/agents/request.js, server/middleware/requestValidators.js, server/routes/convos.js, server/services/Config/ConfigService.js, server/services/Deduplication/clearDedupeKey.js, server/services/Deduplication/ingestDeduplicator.js, server/services/Endpoints/agents/title.js, server/services/Endpoints/google/title.js, server/services/Graph/LongTextWorker.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/condense.js, server/services/RAG/intentAnalyzer.js, server/services/RAG/memoryQueue.js, server/services/RAG/multiStepOrchestrator.js, server/services/agents/MessageHistoryManager.js, server/services/agents/RetryStrategy.js, server/services/agents/historyTrimmer.js, server/services/tokens/TokenCounter.js, server/utils/messageUtils.js, utils/metrics.js, utils/natsClient.js, utils/temporalClient.js to warn
 - withTimeout: status=используется | опасность, дублируется в: server/controllers/agents/client.js, utils/async.js; callers: app/clients/BaseClient.js, server/controllers/agents/client.js, server/services/RAG/intentAnalyzer.js, server/services/RAG/multiStepOrchestrator.js, server/utils/resilience.js; Purpose: triggered from app/clients/BaseClient.js, server/controllers/agents/client.js, server/services/RAG/intentAnalyzer.js, server/services/RAG/multiStepOrchestrator.js, server/utils/resilience.js to with timeout
+Logging status: ⚠️ есть `createSafeLogger`, но общая система не унифицирована; требуется миграция на новый модуль + requestId context.
 Outgoing Calls:
 - debug: count=41; defined_in=external/unknown; Purpose: invokes debug
 - require: count=35; defined_in=external/unknown; Purpose: invokes require
@@ -879,6 +885,7 @@ Functions:
 - splitSummarizationJobs: status=используется; callers: server/controllers/agents/request.js; Purpose: triggered from server/controllers/agents/request.js to split summarization jobs
 - triggerSummarization: status=используется; callers: server/controllers/agents/request.js; Purpose: triggered from server/controllers/agents/request.js to trigger summarization
 - trimSummarizationPayload: status=используется; callers: server/controllers/agents/request.js; Purpose: triggered from server/controllers/agents/request.js to trim summarization payload
+Logging status: ⚠️ множественные `debug/info/warn`; необходимо перейти на scoped logger `agents.request` с фазами пайплайна.
 Outgoing Calls:
 - error: count=23; defined_in=external/unknown; Purpose: invokes error
 - require: count=17; defined_in=external/unknown; Purpose: invokes require
@@ -1006,6 +1013,7 @@ Functions:
 - validateAgentRequest: status=сирота; callers: —; Purpose: local helper to validate agent request
 - validateEndpointOption: status=используется; callers: server/middleware/requestValidators.js; Purpose: triggered from server/middleware/requestValidators.js to validate endpoint option
 - validateIdentifiers: status=используется; callers: server/middleware/requestValidators.js; Purpose: triggered from server/middleware/requestValidators.js to validate identifiers
+Logging status: ❌ (штучные warn/info). Добавить scoped logger `middleware.requestValidators` + requestId.
 Outgoing Calls:
 - appendIssue: count=11; defined_in=server/middleware/requestValidators.js; Purpose: invokes append issue
 - isNaN: count=4; defined_in=external/unknown; Purpose: invokes is na n
@@ -1037,6 +1045,7 @@ Inbound Links: none detected
 Exports: None
 Functions:
 - controller: status=сирота; callers: —; Purpose: local helper to controller
+Logging status: ❌ отсутствует requestId middleware и unified logger.
 Outgoing Calls:
 - require: count=12; defined_in=external/unknown; Purpose: invokes require
 - use: count=7; defined_in=external/unknown; Purpose: invokes use
@@ -1069,6 +1078,7 @@ Functions:
 - sendDeleteTaskToRedis: status=используется; callers: server/routes/convos.js; Purpose: triggered from server/routes/convos.js to send delete task to redis
 - stripQuotes: status=используется; callers: server/routes/convos.js; Purpose: triggered from server/routes/convos.js to strip quotes
 - tighten: status=используется; callers: server/routes/convos.js; Purpose: triggered from server/routes/convos.js to tighten
+Logging status: ❌ (console/debug/warn). Внедрить scoped logger `routes.convos` и request context.
 Outgoing Calls:
 - require: count=21; defined_in=external/unknown; Purpose: invokes require
 - status: count=21; defined_in=external/unknown; Purpose: invokes status
@@ -1177,6 +1187,7 @@ Inbound Links: none detected
 Exports: ContextCompressor, CompressionStrategy, MessageCompressorBridge
 Functions:
 - getContentLength: status=используется; callers: server/services/agents/ContextCompressor.js; Purpose: triggered from server/services/agents/ContextCompressor.js to get content length
+Logging status: ❌ нет логов — добавить trace для сжатия/эвикций.
 Outgoing Calls:
 - includes: count=5; defined_in=external/unknown; Purpose: invokes includes
 - floor: count=5; defined_in=external/unknown; Purpose: invokes floor
@@ -1205,6 +1216,7 @@ Functions:
 - ensureTokenCount: status=используется; callers: server/services/agents/historyTrimmer.js; Purpose: triggered from server/services/agents/historyTrimmer.js to ensure token count
 - sortByOriginalIndex: status=используется; callers: server/services/agents/historyTrimmer.js; Purpose: triggered from server/services/agents/historyTrimmer.js to sort by original index
 - stableSortByImportance: status=используется; callers: server/services/agents/historyTrimmer.js; Purpose: triggered from server/services/agents/historyTrimmer.js to stable sort by importance
+Logging status: ❌ отсутствует. Добавить scoped logger `agents.historyTrimmer` и эмитить события truncation.
 Outgoing Calls:
 - push: count=10; defined_in=external/unknown; Purpose: invokes push
 - map: count=7; defined_in=external/unknown; Purpose: invokes map
@@ -1231,12 +1243,14 @@ Outgoing Calls:
 ## server/services/agents/InstructionsBuilder.js
 Purpose: Agent orchestration helpers
 Parse status: failed (needs manual review).
+Logging status: ❌ неизвестно, требуется аудит файла.
 
 ## server/services/agents/MessageHistoryManager.js
 Purpose: Agent orchestration helpers
 Inbound Links: none detected
 Exports: None
 Functions: none detected
+Logging status: ⚠️ info/warn присутствуют, но нужна унификация формата и привязка requestId/conversationId.
 Outgoing Calls:
 - info: count=6; defined_in=external/unknown; Purpose: invokes info
 - slice: count=5; defined_in=external/unknown; Purpose: invokes slice
@@ -1276,6 +1290,7 @@ Purpose: Agent orchestration helpers
 Inbound Links: none detected
 Exports: None
 Functions: none detected
+Logging status: ❌ нет явных логов. Добавить debug-level события retry/backoff.
 Outgoing Calls:
 - includes: count=5; defined_in=external/unknown; Purpose: invokes includes
 - require: count=1; defined_in=external/unknown; Purpose: invokes require
@@ -1302,6 +1317,7 @@ Functions:
 - sanitizeOptionalString: status=используется; callers: server/services/Config/ConfigService.js; Purpose: triggered from server/services/Config/ConfigService.js to sanitize optional string
 - sanitizeUrl: status=используется; callers: server/services/Config/ConfigService.js; Purpose: triggered from server/services/Config/ConfigService.js to sanitize url
 - splitStringList: status=используется; callers: server/services/Config/ConfigService.js; Purpose: triggered from server/services/Config/ConfigService.js to split string list
+Logging status: ⚠️ использует общий logger; после расширения logging-секции обновить уровни.
 Outgoing Calls:
 - parseOptionalInt: count=108; defined_in=server/services/Config/ConfigService.js; Purpose: invokes parse optional int
 - number: count=99; defined_in=external/unknown; Purpose: invokes number
@@ -1377,6 +1393,7 @@ Functions:
 - canPublish: status=используется; callers: server/services/Deduplication/clearDedupeKey.js; Purpose: triggered from server/services/Deduplication/clearDedupeKey.js to can publish
 - clearDedupeKey: status=используется; callers: server/controllers/agents/request.js; Purpose: triggered from server/controllers/agents/request.js to clear dedupe key
 - publishClearRequest: status=используется; callers: server/services/Deduplication/clearDedupeKey.js; Purpose: triggered from server/services/Deduplication/clearDedupeKey.js to publish clear request
+Logging status: ⚠️ debug/warn есть, но без requestId. Перейти на scoped logger `dedupe.clearKey`.
 Outgoing Calls:
 - require: count=3; defined_in=external/unknown; Purpose: invokes require
 - Boolean: count=2; defined_in=external/unknown; Purpose: invokes boolean
@@ -1407,6 +1424,7 @@ Functions:
 - shutdown: status=используется; callers: server/routes/agents/chat.js, server/services/Deduplication/ingestDeduplicator.js; Purpose: triggered from server/routes/agents/chat.js, server/services/Deduplication/ingestDeduplicator.js to shutdown
 - startWatcher: status=используется; callers: server/services/Deduplication/ingestDeduplicator.js; Purpose: triggered from server/services/Deduplication/ingestDeduplicator.js to start watcher
 - stopWatcher: status=используется; callers: server/services/Deduplication/ingestDeduplicator.js; Purpose: triggered from server/services/Deduplication/ingestDeduplicator.js to stop watcher
+Logging status: ⚠️ warn/info присутствуют, требуется unified формат + метрики.
 Outgoing Calls:
 - warn: count=9; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes warn
 - markMiss: count=7; defined_in=server/services/Deduplication/ingestDeduplicator.js; Purpose: invokes mark miss
@@ -1456,6 +1474,7 @@ Inbound Links: none detected
 Exports: None
 Functions:
 - addTitle: status=используется | опасность, дублируется в: server/services/Endpoints/agents/title.js, server/services/Endpoints/google/title.js; callers: server/controllers/agents/request.js; Purpose: triggered from server/controllers/agents/request.js to add title
+Logging status: ❌ разношёрстные warn/debug. Нужен scoped logger `endpoints.agents.title`.
 Outgoing Calls:
 - require: count=8; defined_in=external/unknown; Purpose: invokes require
 - slice: count=6; defined_in=external/unknown; Purpose: invokes slice
@@ -1489,6 +1508,7 @@ Inbound Links: none detected
 Exports: None
 Functions:
 - addTitle: status=используется | опасность, дублируется в: server/services/Endpoints/agents/title.js, server/services/Endpoints/google/title.js; callers: server/controllers/agents/request.js; Purpose: triggered from server/controllers/agents/request.js to add title
+Logging status: ❌ аналогично агентскому; добавить scoped logger `endpoints.google.title`.
 Outgoing Calls:
 - require: count=7; defined_in=external/unknown; Purpose: invokes require
 - debug: count=3; defined_in=external/unknown; Purpose: invokes debug
@@ -1514,6 +1534,7 @@ Functions:
 - flush: status=используется | опасность, дублируется в: server/services/Graph/LongTextWorker.js, server/services/RAG/condense.js; callers: server/services/Graph/LongTextWorker.js, server/services/RAG/condense.js; Purpose: triggered from server/services/Graph/LongTextWorker.js, server/services/RAG/condense.js to flush
 - sanitizeKeyPart: status=используется; callers: server/services/Graph/LongTextWorker.js; Purpose: triggered from server/services/Graph/LongTextWorker.js to sanitize key part
 - sha1: status=используется | опасность, дублируется в: server/services/Graph/LongTextWorker.js, server/services/RAG/condense.js; callers: server/services/Graph/LongTextWorker.js, server/services/RAG/condense.js; Purpose: triggered from server/services/Graph/LongTextWorker.js, server/services/RAG/condense.js to sha1
+Logging status: ⚠️ присутствуют warn/info, но без requestId/taskId; требуется унификация и trace для chunking.
 Outgoing Calls:
 - require: count=10; defined_in=external/unknown; Purpose: invokes require
 - trim: count=7; defined_in=external/unknown; Purpose: invokes trim
@@ -1572,6 +1593,7 @@ Purpose: Server services
 Inbound Links: none detected
 Exports: None
 Functions: none detected
+Logging status: ❌ нет логов, добавить info/debug для загрузки тарифов.
 Outgoing Calls:
 - parseUsdRate: count=10; defined_in=server/controllers/agents/client.js; Purpose: invokes parse usd rate
 - add: count=10; defined_in=external/unknown; Purpose: invokes add
@@ -1612,6 +1634,7 @@ Functions:
 - splitIntoChunks: status=используется; callers: server/services/RAG/condense.js; Purpose: triggered from server/services/RAG/condense.js to split into chunks
 - summarizeWithChain: status=используется; callers: server/services/RAG/condense.js; Purpose: triggered from server/services/RAG/condense.js to summarize with chain
 - summarizeWithDescriptor: status=используется; callers: server/services/RAG/condense.js; Purpose: triggered from server/services/RAG/condense.js to summarize with descriptor
+Logging status: ⚠️ ragLogger частично есть; нужно перевести на новый слой + статус по каждому провайдеру.
 Outgoing Calls:
 - info: count=18; defined_in=external/unknown; Purpose: invokes info
 - push: count=17; defined_in=external/unknown; Purpose: invokes push
@@ -1677,6 +1700,7 @@ Functions:
 - buildHints: status=используется; callers: server/services/RAG/intentAnalyzer.js; Purpose: triggered from server/services/RAG/intentAnalyzer.js to build hints
 - extractEntities: status=используется; callers: server/services/RAG/intentAnalyzer.js; Purpose: triggered from server/services/RAG/intentAnalyzer.js to extract entities
 - runAnalysis: status=используется; callers: server/services/RAG/intentAnalyzer.js; Purpose: triggered from server/services/RAG/intentAnalyzer.js to run analysis
+Logging status: ❌ (кроме warn). Требуется scoped logger `rag.intentAnalyzer`.
 Outgoing Calls:
 - test: count=5; defined_in=external/unknown; Purpose: invokes test
 - map: count=4; defined_in=external/unknown; Purpose: invokes map
@@ -1717,6 +1741,7 @@ Functions:
 - getToolsGatewayConfig: status=используется; callers: server/services/RAG/memoryQueue.js; Purpose: triggered from server/services/RAG/memoryQueue.js to get tools gateway config
 - initTemporalClient: status=используется; callers: server/services/RAG/memoryQueue.js; Purpose: triggered from server/services/RAG/memoryQueue.js to init temporal client
 - isTransientError: status=используется; callers: server/services/RAG/memoryQueue.js; Purpose: triggered from server/services/RAG/memoryQueue.js to is transient error
+Logging status: ⚠️ info/warn есть, но нет requestId/conversationId. Добавить scoped logger `rag.memoryQueue`.
 Outgoing Calls:
 - error: count=7; defined_in=external/unknown; Purpose: invokes error
 - incMemoryQueueSkipped: count=7; defined_in=utils/metrics.js; Purpose: invokes inc memory queue skipped
@@ -1769,6 +1794,7 @@ Functions:
 - fetchGraph: status=используется; callers: server/services/RAG/multiStepOrchestrator.js; Purpose: triggered from server/services/RAG/multiStepOrchestrator.js to fetch graph
 - normalizeEntities: status=используется; callers: server/services/RAG/multiStepOrchestrator.js; Purpose: triggered from server/services/RAG/multiStepOrchestrator.js to normalize entities
 - runMultiStepRag: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to run multi step rag
+Logging status: ⚠️ ограниченные info/warn; нужна детализация шагов multi-step.
 Outgoing Calls:
 - info: count=7; defined_in=external/unknown; Purpose: invokes info
 - map: count=4; defined_in=external/unknown; Purpose: invokes map
@@ -1800,6 +1826,7 @@ Purpose: RAG pipeline utilities
 Inbound Links: none detected
 Exports: None
 Functions: none detected
+Logging status: ❌ отсутствует. Добавить debug для cache hits/evictions (size-aware план).
 Outgoing Calls:
 - delete: count=7; defined_in=external/unknown; Purpose: invokes delete
 - now: count=5; defined_in=external/unknown; Purpose: invokes now
@@ -1822,6 +1849,7 @@ Purpose: RAG pipeline utilities
 Inbound Links: none detected
 Exports: None
 Functions: none detected
+Logging status: ⚠️ есть info/error, но без структуры. Требуется scoped logger `rag.contextBuilder`.
 Outgoing Calls:
 - slice: count=10; defined_in=external/unknown; Purpose: invokes slice
 - Number: count=8; defined_in=external/unknown; Purpose: invokes number
@@ -1878,6 +1906,7 @@ Inbound Links: none detected
 Exports: None
 Functions:
 - countTokens: status=используется | опасность, дублируется в: server/controllers/agents/client.js, server/services/tokens/TokenCounter.js, server/utils/tokenBreakdown.js; callers: server/utils/tokenBreakdown.js; Purpose: triggered from server/utils/tokenBreakdown.js to count tokens
+Logging status: ❌ нет. Добавить debug-level счётчики tokenization.
 Outgoing Calls:
 - require: count=2; defined_in=external/unknown; Purpose: invokes require
 - getTokenCount: count=2; defined_in=external/unknown; Purpose: invokes get token count
@@ -1912,6 +1941,7 @@ Functions:
 - makeIngestKey: status=используется | опасность, дублируется в: server/controllers/agents/client.js, server/utils/messageUtils.js; callers: server/controllers/agents/client.js, server/services/agents/MessageHistoryManager.js; Purpose: triggered from server/controllers/agents/client.js, server/services/agents/MessageHistoryManager.js to make ingest key
 - normalizeMemoryText: status=используется | опасность, дублируется в: server/controllers/agents/client.js, server/utils/messageUtils.js; callers: server/services/agents/MessageHistoryManager.js; Purpose: triggered from server/services/agents/MessageHistoryManager.js to normalize memory text
 - warn: status=используется | опасность, дублируется в: server/controllers/agents/client.js, server/utils/messageUtils.js; callers: app/clients/AnthropicClient.js, app/clients/BaseClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js, app/clients/utils/instructions.js, db/indexSync.js, manage_summaries.js, models/Conversation.js, models/Message.js, server/controllers/agents/client.js, server/controllers/agents/request.js, server/middleware/requestValidators.js, server/routes/convos.js, server/services/Config/ConfigService.js, server/services/Deduplication/clearDedupeKey.js, server/services/Deduplication/ingestDeduplicator.js, server/services/Endpoints/agents/title.js, server/services/Endpoints/google/title.js, server/services/Graph/LongTextWorker.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/condense.js, server/services/RAG/intentAnalyzer.js, server/services/RAG/memoryQueue.js, server/services/RAG/multiStepOrchestrator.js, server/services/agents/MessageHistoryManager.js, server/services/agents/RetryStrategy.js, server/services/agents/historyTrimmer.js, server/services/tokens/TokenCounter.js, server/utils/messageUtils.js, utils/metrics.js, utils/natsClient.js, utils/temporalClient.js; Purpose: triggered from app/clients/AnthropicClient.js, app/clients/BaseClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js, app/clients/utils/instructions.js, db/indexSync.js, manage_summaries.js, models/Conversation.js, models/Message.js, server/controllers/agents/client.js, server/controllers/agents/request.js, server/middleware/requestValidators.js, server/routes/convos.js, server/services/Config/ConfigService.js, server/services/Deduplication/clearDedupeKey.js, server/services/Deduplication/ingestDeduplicator.js, server/services/Endpoints/agents/title.js, server/services/Endpoints/google/title.js, server/services/Graph/LongTextWorker.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/condense.js, server/services/RAG/intentAnalyzer.js, server/services/RAG/memoryQueue.js, server/services/RAG/multiStepOrchestrator.js, server/services/agents/MessageHistoryManager.js, server/services/agents/RetryStrategy.js, server/services/agents/historyTrimmer.js, server/services/tokens/TokenCounter.js, server/utils/messageUtils.js, utils/metrics.js, utils/natsClient.js, utils/temporalClient.js to warn
+Logging status: ⚠️ warn существует, но нужен scoped logger `utils.message` и структурные поля для ingest key/condense.
 Outgoing Calls:
 - trim: count=6; defined_in=external/unknown; Purpose: invokes trim
 - warn: count=5; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes warn
@@ -1942,6 +1972,7 @@ Functions:
 - attemptExecutor: status=используется; callers: server/utils/resilience.js; Purpose: triggered from server/utils/resilience.js to attempt executor
 - normalizeLabelValue: status=используется; callers: server/controllers/agents/request.js; Purpose: triggered from server/controllers/agents/request.js to normalize label value
 - runWithResilience: status=используется; callers: server/controllers/agents/request.js, server/services/Endpoints/agents/title.js, server/services/Graph/LongTextWorker.js; Purpose: triggered from server/controllers/agents/request.js, server/services/Endpoints/agents/title.js, server/services/Graph/LongTextWorker.js to run with resilience
+Logging status: ❌ нет scoped логов; добавить при попытках/ретраях.
 Outgoing Calls:
 - max: count=5; defined_in=external/unknown; Purpose: invokes max
 - isFinite: count=4; defined_in=external/unknown; Purpose: invokes is finite
@@ -1970,6 +2001,7 @@ Functions:
 - makeDetachableRes: status=используется; callers: server/controllers/agents/request.js; Purpose: triggered from server/controllers/agents/request.js to make detachable res
 - safeEndResponse: status=сирота; callers: —; Purpose: local helper to safe end response
 - safeWrite: status=сирота; callers: —; Purpose: local helper to safe write
+Logging status: ❌ отсутствует. Добавить debug/trace для detachable responses.
 Outgoing Calls:
 - canWrite: count=4; defined_in=server/utils/responseUtils.js; Purpose: invokes can write
 - Boolean: count=2; defined_in=external/unknown; Purpose: invokes boolean
@@ -1995,6 +2027,7 @@ Functions:
 - normalizeMessages: status=используется; callers: server/utils/tokenBreakdown.js; Purpose: triggered from server/utils/tokenBreakdown.js to normalize messages
 - toNumber: status=используется; callers: server/utils/tokenBreakdown.js; Purpose: triggered from server/utils/tokenBreakdown.js to to number
 - toText: status=используется; callers: server/utils/tokenBreakdown.js; Purpose: triggered from server/utils/tokenBreakdown.js to to text
+Logging status: ❌ нет. Нужен scoped logger `utils.tokenBreakdown` для отчётов.
 Outgoing Calls:
 - toNumber: count=12; defined_in=server/utils/tokenBreakdown.js; Purpose: invokes to number
 - isArray: count=4; defined_in=external/unknown; Purpose: invokes is array
@@ -2029,6 +2062,7 @@ Functions:
 - detectContextFlags: status=используется; callers: sync_history.js; Purpose: triggered from sync_history.js to detect context flags
 - extractFullText: status=используется; callers: sync_history.js; Purpose: triggered from sync_history.js to extract full text
 - main: status=используется; callers: sync_history.js; Purpose: triggered from sync_history.js to main
+Logging status: ❌ использует raw `console.log`. Внедрить scoped logger `scripts.syncHistory`.
 Outgoing Calls:
 - log: count=13; defined_in=external/unknown; Purpose: invokes log
 - includes: count=7; defined_in=external/unknown; Purpose: invokes includes
@@ -2067,6 +2101,7 @@ Functions:
 - retryAsync: status=используется; callers: app/clients/BaseClient.js, server/utils/resilience.js, utils/natsClient.js; Purpose: triggered from app/clients/BaseClient.js, server/utils/resilience.js, utils/natsClient.js to retry async
 - sleep: status=используется; callers: app/clients/AnthropicClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js, utils/async.js; Purpose: triggered from app/clients/AnthropicClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js, utils/async.js to sleep
 - withTimeout: status=используется | опасность, дублируется в: server/controllers/agents/client.js, utils/async.js; callers: app/clients/BaseClient.js, server/controllers/agents/client.js, server/services/RAG/intentAnalyzer.js, server/services/RAG/multiStepOrchestrator.js, server/utils/resilience.js; Purpose: triggered from app/clients/BaseClient.js, server/controllers/agents/client.js, server/services/RAG/intentAnalyzer.js, server/services/RAG/multiStepOrchestrator.js, server/utils/resilience.js to with timeout
+Logging status: ❌ нет. Добавить trace для retryAsync/withTimeout (по флагу).
 Outgoing Calls:
 - reject: count=4; defined_in=external/unknown; Purpose: invokes reject
 - createAbortError: count=4; defined_in=utils/async.js; Purpose: invokes create abort error
@@ -2093,6 +2128,7 @@ Purpose: Utility helpers
 Inbound Links: none detected
 Exports: None
 Functions: none detected
+Logging status: ⚠️ отдельный Winston инстанс; нужно влить в общий логгер.
 Outgoing Calls:
 - require: count=2; defined_in=external/unknown; Purpose: invokes require
 - combine: count=2; defined_in=external/unknown; Purpose: invokes combine
@@ -2110,6 +2146,7 @@ Functions:
 - buildMemoryConfig: status=используется; callers: utils/memoryConfig.js; Purpose: triggered from utils/memoryConfig.js to build memory config
 - getMemoryConfig: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to get memory config
 - refreshMemoryConfig: status=сирота; callers: —; Purpose: local helper to refresh memory config
+Logging status: ❌ нет. Добавить info/debug при reload.
 Outgoing Calls:
 - freeze: count=12; defined_in=external/unknown; Purpose: invokes freeze
 - getSection: count=6; defined_in=external/unknown; Purpose: invokes get section
@@ -2142,6 +2179,7 @@ Functions:
 - renderMetrics: status=используется; callers: server/routes/agents/chat.js; Purpose: triggered from server/routes/agents/chat.js to render metrics
 - safeLabels: status=используется; callers: utils/metrics.js; Purpose: triggered from utils/metrics.js to safe labels
 - setTemporalStatus: status=используется; callers: server/controllers/agents/request.js, server/services/RAG/memoryQueue.js; Purpose: triggered from server/controllers/agents/request.js, server/services/RAG/memoryQueue.js to set temporal status
+Logging status: ⚠️ только warn. Нужен scoped logger `utils.metrics` для регистраций и ошибок.
 Outgoing Calls:
 - safeLabels: count=14; defined_in=utils/metrics.js; Purpose: invokes safe labels
 - inc: count=12; defined_in=external/unknown; Purpose: invokes inc
