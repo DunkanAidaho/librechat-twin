@@ -405,6 +405,15 @@ class ConfigService {
     });
 
     const loggingSchema = z.object({
+      globalLevel: z.string().min(1),
+      format: z.enum(['text', 'json']),
+      console: z.object({
+        colorize: z.boolean(),
+      }),
+      file: z.object({
+        enabled: z.boolean(),
+        path: z.string().min(1).optional(),
+      }),
       branch: z.object({
         enabled: z.boolean(),
         level: z.string().min(1),
@@ -412,6 +421,10 @@ class ConfigService {
       debugSse: z.boolean(),
       tracePipeline: z.boolean(),
       tokenUsageReportMode: z.enum(TOKEN_USAGE_REPORT_MODES),
+      tokenBreakdown: z.object({
+        enabled: z.boolean(),
+        level: z.string().min(1),
+      }),
     });
 
     const providersSchema = z.object({
@@ -908,7 +921,32 @@ class ConfigService {
               ? normalizedMode
               : 'json';
 
+          const rawFormat = (sanitizeOptionalString(this.env.LOGGING_FORMAT) || 'text').toLowerCase();
+          const format = rawFormat === 'json' ? 'json' : 'text';
+          const consoleColorize =
+            parseOptionalBool(this.env.LOGGING_CONSOLE_COLORIZE) ??
+            (this.env.NODE_ENV !== 'production');
+          const fileEnabled = parseOptionalBool(this.env.LOGGING_FILE_ENABLED) ?? false;
+          const filePath = sanitizeOptionalString(this.env.LOGGING_FILE_PATH) || './logs/librechat.log';
+
+          const tokenBreakdownEnabled =
+            parseOptionalBool(this.env.LOGGING_TOKEN_BREAKDOWN_ENABLED) ?? true;
+          const tokenBreakdownLevel =
+            sanitizeOptionalString(this.env.LOGGING_TOKEN_BREAKDOWN_LEVEL) || 'info';
+
           return {
+            globalLevel:
+              sanitizeOptionalString(this.env.LOGGING_LEVEL) ||
+              sanitizeOptionalString(this.env.LOG_LEVEL) ||
+              'info',
+            format,
+            console: {
+              colorize: Boolean(consoleColorize),
+            },
+            file: {
+              enabled: fileEnabled,
+              path: fileEnabled ? filePath : undefined,
+            },
             branch: {
               enabled: parseOptionalBool(this.env.ENABLE_BRANCH_LOGGING) ?? false,
               level: sanitizeOptionalString(this.env.BRANCH_LOG_LEVEL) || 'info',
@@ -916,6 +954,10 @@ class ConfigService {
             debugSse: parseOptionalBool(this.env.DEBUG_SSE) ?? false,
             tracePipeline: parseOptionalBool(this.env.TRACE_PIPELINE) ?? false,
             tokenUsageReportMode: resolvedMode,
+            tokenBreakdown: {
+              enabled: tokenBreakdownEnabled,
+              level: tokenBreakdownLevel,
+            },
           };
         },
       },

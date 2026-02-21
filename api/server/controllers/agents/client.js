@@ -1,6 +1,6 @@
 // /opt/open-webui/client.js - Финальная версия с исправленной логикой индексации и RAG через tools-gateway
 require('events').EventEmitter.defaultMaxListeners = 100;
-const { logger } = require('@librechat/data-schemas');
+const { getLogger } = require('~/utils/logger');
 const configService = require('~/server/services/Config/ConfigService');
 const axios = require('axios');
 const { condenseContext: ragCondenseContext, getCondenseProvidersPreview } = require('~/server/services/RAG/condense');
@@ -528,20 +528,16 @@ const MEMORY_TASK_TIMEOUT_MS = configService.getNumber('memory.queue.taskTimeout
 const DEFAULT_ENCODING = getString('agents.encoding.defaultTokenizerEncoding', 'o200k_base');
 const DEFAULT_SYSTEM_PROMPT = 'Ты самый полезный ИИ-помощник. Всегда в приоритете используй русский язык для ответов.';
 
+const logger = getLogger('agents.client');
+
 /**
  * Provides safe logger methods with environment-aware fallbacks.
  */
-const createSafeLogger = () => {
-  const noop = () => {};
-  if (typeof logger !== 'object' || logger === null) {
-    return { info: noop, warn: noop, error: noop };
-  }
-  return {
-    info: typeof logger.info === 'function' ? logger.info.bind(logger) : noop,
-    warn: typeof logger.warn === 'function' ? logger.warn.bind(logger) : noop,
-    error: typeof logger.error === 'function' ? logger.error.bind(logger) : noop,
-  };
-};
+const createSafeLogger = () => ({
+  info: (...args) => logger.info(...args),
+  warn: (...args) => logger.warn(...args),
+  error: (...args) => logger.error(...args),
+});
 
 const { info: safeInfo, warn: safeWarn, error: safeError } = createSafeLogger();
 
@@ -982,7 +978,7 @@ class AgentClient extends BaseClient {
         for (const [k, v] of Object.entries(data || {})) {
           cleaned[k] = safe(v);
         }
-        logger.info(`[trace] ${JSON.stringify(Object.assign(meta, cleaned))}`);
+        logger.info('[trace]', { ...meta, ...cleaned });
       } catch (error) {
         logger.warn(
           `[trace] failed to emit trace log: ${error?.message || error}`,
@@ -2582,9 +2578,12 @@ Graph hints: ${graphQueryHint}`;
         };
         const diag = initialMessages.map(summarizeMsg);
         const top = [...diag].map((d, i) => ({ i, ...d })).sort((a, b) => b.len - a.len).slice(0, 5);
-        logger.debug(`[diag][fmt] messages=${diag.length}, top=${top.map((t) => `#${t.i}:${t.role}:${t.len}`).join(', ')}`);
+    logger.debug('[diag][fmt] payload stats', {
+      messageCount: diag.length,
+      topEntries: top.map((t) => `#${t.i}:${t.role}:${t.len}`),
+    });
       } catch (e) {
-        logger.error('[diag][fmt] log error', e);
+    logger.error('[diag][fmt] log error', { message: e?.message, stack: e?.stack });
       }
 
       const runAgent = async (agent, _messages, i = 0, contentData = [], _currentIndexCountMap) => {
@@ -2714,7 +2713,15 @@ Graph hints: ${graphQueryHint}`;
           baseURL: agent.model_parameters?.configuration?.baseURL,
           messagesPreview: messages.slice(0, 2).map(m => ({
             role: typeof m._getType === 'function' ? m._getType() : m.role,
-            contentLength: typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content).length,
+            contentLength: typeof m.content === 'string'
+              ? m.content.length
+              : (() => {
+                  try {
+                    return JSON.stringify(m.content).length;
+                  } catch {
+                    return 0;
+                  }
+                })(),
           })),
         });
 
@@ -3004,7 +3011,8 @@ Graph hints: ${graphQueryHint}`;
       };
       
       logger.error(
-        `[api/server/controllers/agents/client.js #sendCompletion] Unhandled error ${err?.response?.status || err?.code || 'unknown'} ${err?.message || 'Provider returned error'}\n${JSON.stringify(errorDetails, null, 2)}`
+        '[api/server/controllers/agents/client.js #sendCompletion] Unhandled error',
+        errorDetails,
       );
       
       this.contentParts = this.contentParts || [];
@@ -3046,7 +3054,9 @@ Graph hints: ${graphQueryHint}`;
                     return parsed_data.title;
                 }
             }
-            logger.warn(`[title] Ollama title generation failed or returned empty. Falling back. Response: ${JSON.stringify(response.data)}`);
+            logger.warn('[title] Ollama title generation failed or returned empty. Falling back.', {
+              response: response.data,
+            });
         } catch (e) {
             logger.error(`[title] Ollama title generation error: ${e.message}. Falling back.`, e);
         }

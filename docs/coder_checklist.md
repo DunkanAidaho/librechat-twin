@@ -19,6 +19,7 @@
 - **Transparent logging initiative**: только scoped логгер (`utils/logger`) или `ragLogger` для RAG. Никаких `debug`, `console.log`, `warn` напрямую.
 - **Request context**: контроллеры обязаны создавать `requestId` и передавать его дальше (в SSE, RAG, очереди). Логи без `requestId` считаются долгом.
 - **Единый формат событий**: `scope`, `phase`, `conversationId`, `userId`, `agentId`, `latency`, `model`, `attempt`, `signalAborted` и т.п. — по списку из `docs/1_Trasparent_logging.md`.
+- **Структурные meta-поля**: `context` и другие объекты проходят через `sanitizePlainObject` (с лимитами глубины/размера и защитой от циклов). Нельзя применять `JSON.stringify` в hot-path или превращать объекты в строки — передаём лёгкую, но структурированную версию.
 - **Метрики Prometheus**: новые сервисы/очереди регистрируют метрики через `utils/metrics.js`/`utils/ragMetrics.js` (гейджи ragCache, счётчики эвикций, latency).
 - **Отладочные флаги**: verbose-трейсы (token usage, SSE, RAG) завязываем на ENV (`TRACE_PIPELINE`, `DEBUG_SSE`, `tokenUsageReportMode`).
 

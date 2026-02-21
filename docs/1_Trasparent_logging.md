@@ -42,13 +42,13 @@
 5. **Единые уровни и контекст**
    - Ввести соглашения по тегам/поля (например, `context: { conversationId, userId, requestId }`).
    - Добавить middleware (в `routes/agents/chat.js`) для присвоения `requestId` и передачи в scoped логгеры.
-   - Для user-generated полей использовать helper `safeMeta()` с fast-path sanitize и короткой обрезкой строк.
+   - Для user-generated полей использовать helper `safeMeta()`/`sanitizePlainObject` с fast-path sanitize, короткой обрезкой строк и поддержкой структур (без повторных JSON.stringify).
 6. **Документация и примеры**
    - Создать `docs/logging.md` или обновить `project_map.md` разделом «Logging» с инструкциями по включению уровней, примером ENV и best practices.
 7. **Проверка**
    - Прогнать существующие тесты/линтер.
    - Локально проверить разные уровни (info, debug, trace) через ENV.
    - Убедиться, что при отключённом `tracePipeline` шум минимален, а при включении появляется детальная трассировка.
-   - Чек-лист: «Перед логированием user-generated полей используется fast-path sanitizeInput; `JSON.stringify` в hot-path отсутствует».
+   - Чек-лист: «Перед логированием user-generated полей используется fast-path sanitizeInput или `sanitizePlainObject`; `JSON.stringify` в hot-path отсутствует».
 
 

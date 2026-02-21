@@ -61,7 +61,7 @@
      - Расширить `logging` секцию `ConfigService`: глобальный уровень, формат (json/text), опции консольных цветов, файловый транспорт, feature-флаги (`tracePipeline`, `debugSse`, `tokenUsageReportMode`).
      - Обновить `.env` примеры и README с новыми переменными.
   2. **Библиотека логирования**
-     - Создать `api/utils/logger` с единым инстансом (Winston/pino) и helper’ами `createScopedLogger(scope, contextDefaults)`.
+     - ✅ Реализован `api/utils/logger` (Winston + `createScopedLogger`, `sanitizePlainObject`).
      - Инкапсулировать существующий `branchLogger`, чтобы ветвевой транспорт просто подключал scoped logger.
   3. **Request context & middleware**
      - В `server/routes/agents/chat.js` и других входных точках генерировать `requestId`, пробрасывать в `req.context`.
