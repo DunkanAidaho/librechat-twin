@@ -1,2 +1,2 @@
-// Proxy to ensure require('~/utils/logger') loads the new module directory.
-module.exports = require('./logger');
+// Proxy to ensure require('~/utils/logger') resolves to the directory implementation.                                                                                                              
+module.exports = require('./logger/index.js');    
