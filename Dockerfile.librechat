@@ -31,6 +31,7 @@ COPY api/server/services/Config/   /app/api/server/services/Config/
 COPY api/models/                   /app/api/models/
 COPY api/utils/                    /app/api/utils/
 COPY api/server/services/agents/   /app/api/server/services/agents/
+COPY api/server/services/Graph/    /app/api/server/services/Graph/
 COPY api/manage_summaries.js       /app/api/manage_summaries.js
 COPY api/sync_history.js           /app/api/sync_history.js
 COPY api/server/utils/ /app/api/server/utils/
