@@ -1,13 +1,16 @@
 'use strict';
 
 const axios = require('axios');
-const { logger } = require('@librechat/data-schemas');
 const {
   setTemporalStatus,
   incMemoryQueueSkipped,
   incMemoryQueueToolsGatewayFailure,
 } = require('~/utils/metrics');
 const config = require('~/server/services/Config/ConfigService');
+const { getLogger } = require('~/utils/logger');
+const { buildContext } = require('~/utils/logContext');
+
+const logger = getLogger('rag.memoryQueue');
 
 const REQUIRED_FIELDS = new Set([
   'conversation_id',
@@ -64,7 +67,7 @@ function getToolsGatewayConfig() {
   return { url, timeoutMs };
 }
 
-function initTemporalClient() {
+function initTemporalClient(context = {}) {
   if (!temporalEnabled) {
     return null;
   }
@@ -79,26 +82,27 @@ function initTemporalClient() {
   } catch (error) {
     temporalClient = null;
     temporalEnabled = false;
-    logger.error('[memoryQueue] Не удалось загрузить temporalClient, Temporal отключён.', error);
+    logger.error('memoryQueue.temporal_load_failed', buildContext(context, { err: error }));
     setTemporalStatus(TEMPORAL_STATUS_REASON, false);
   }
 
   return temporalClient;
 }
 
-function disableTemporal(reason) {
+function disableTemporal(reason, context = {}) {
   if (temporalEnabled) {
     temporalEnabled = false;
-    logger.error(`[memoryQueue] Temporal отключён из-за ошибки: ${reason}`);
+    logger.error('memoryQueue.temporal_disabled', buildContext(context, { reason }));
     setTemporalStatus(TEMPORAL_STATUS_REASON, false);
   }
 }
 
-async function callToolsGatewayDelete(conversationId, userId) {
+async function callToolsGatewayDelete(conversationId, userId, context = {}) {
   const { url, timeoutMs } = getToolsGatewayConfig();
   if (!url) {
     logger.warn(
-      `[memoryQueue] Пропуск очистки через tools-gateway: toolsGatewayUrl не настроен (conversation=${conversationId})`,
+      'memoryQueue.tools_gateway_missing',
+      buildContext(context, { conversationId }),
     );
     incMemoryQueueSkipped('tools_gateway_missing');
     return;
@@ -114,13 +118,14 @@ async function callToolsGatewayDelete(conversationId, userId) {
       { timeout: timeoutMs },
     );
     logger.info(
-      `[memoryQueue] Вызвана очистка через tools-gateway (/neo4j/delete_conversation, conversation=${conversationId}).`,
+      'memoryQueue.tools_gateway_delete',
+      buildContext(context, { conversationId }),
     );
   } catch (error) {
     incMemoryQueueToolsGatewayFailure();
     logger.error(
-      '[memoryQueue] Ошибка вызова очистки tools-gateway:',
-      error?.response?.data || error?.message || error,
+      'memoryQueue.tools_gateway_error',
+      buildContext(context, { conversationId, err: error?.response?.data || error?.message || error }),
     );
   }
 }
@@ -141,14 +146,22 @@ async function enqueueBatch(client, batch, meta) {
       if (!payload.message_id) {
         payload.message_id = dedupeKey || `text-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
         logger.debug(
-          `[memoryQueue] Автогенерация message_id для index_text (conversation=${payload?.conversation_id}, message_id=${payload.message_id})`,
+          'memoryQueue.index_text.auto_message_id',
+          buildContext(meta, {
+            conversationId: payload?.conversation_id,
+            messageId: payload.message_id,
+          }),
         );
       }
 
       if (!payload.role) {
         payload.role = 'user';
         logger.debug(
-          `[memoryQueue] Автоподстановка role=user для index_text (conversation=${payload?.conversation_id}, message_id=${payload.message_id})`,
+          'memoryQueue.index_text.set_role_user',
+          buildContext(meta, {
+            conversationId: payload?.conversation_id,
+            messageId: payload.message_id,
+          }),
         );
       }
 
@@ -156,7 +169,11 @@ async function enqueueBatch(client, batch, meta) {
       if (missingText.length) {
         incMemoryQueueSkipped('missing_text_fields');
         logger.warn(
-          `[memoryQueue] Пропуск index_text (conversation=${payload?.conversation_id}) — отсутствуют поля: ${missingText.join(', ')}`,
+          'memoryQueue.index_text_missing_fields',
+          buildContext(meta, {
+            conversationId: payload?.conversation_id,
+            missingFields: missingText,
+          }),
         );
         continue;
       }
@@ -170,7 +187,12 @@ async function enqueueBatch(client, batch, meta) {
       if (missing.length) {
         incMemoryQueueSkipped('missing_fields');
         logger.warn(
-          `[memoryQueue] Пропуск задачи для Temporal (conversation=${payload.conversation_id}, message=${payload.message_id}) — отсутствуют поля: ${missing.join(', ')}`,
+          'memoryQueue.task_missing_fields',
+          buildContext(meta, {
+            conversationId: payload.conversation_id,
+            messageId: payload.message_id,
+            missingFields: missing,
+          }),
         );
         continue;
       }
@@ -193,21 +215,23 @@ async function enqueueBatch(client, batch, meta) {
       await client.enqueueMemoryTask(context);
       enqueued++;
 
-      logger.debug({
-        msg: '[memoryQueue.enqueue]',
-        reason: metadata.reason ?? null,
-        conversationId: metadata.conversationId ?? null,
-        userId: metadata.userId ?? null,
-        entity: metadata.entity ?? null,
-        passIndex: metadata.passIndex ?? null,
-        taskType: taskType ?? payload?.type ?? null,
-        messageId: context.message_id ?? payload?.message_id ?? null,
-      });
+      logger.debug(
+        'memoryQueue.task_enqueued',
+        buildContext(metadata, {
+          taskType: taskType ?? payload?.type ?? null,
+          messageId: context.message_id ?? payload?.message_id ?? null,
+        }),
+      );
 
     } catch (error) {
       errors.push(error);
-        logger.debug(
-          `[memoryQueue] Ошибка enqueue отдельной задачи (conversation=${payload.conversation_id}, message=${payload.message_id}): ${error?.message}`,
+        logger.error(
+          'memoryQueue.enqueue_error',
+          buildContext(meta, {
+            conversationId: payload.conversation_id,
+            messageId: payload.message_id,
+            err: error,
+          }),
         );
     }
   }
@@ -224,19 +248,19 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
   // Ensure meta.reason is always set
   if (!meta.reason) {
     meta.reason = 'unknown';
-    logger.debug('[memoryQueue] meta.reason was undefined, defaulting to "unknown"');
+    logger.debug('memoryQueue.meta_reason_missing', buildContext(meta));
   }
 
   if (!temporalEnabled) {
     incMemoryQueueSkipped('temporal_disabled');
-    logger.warn('[memoryQueue] Temporal выключен, задачи пропущены', meta);
+    logger.warn('memoryQueue.temporal_disabled_skip', buildContext(meta, { taskCount: tasks.length }));
     return { status: 'skipped', reason: 'temporal_disabled', count: tasks.length };
   }
 
-  const client = initTemporalClient();
+  const client = initTemporalClient(meta);
   if (!client) {
-    logger.error('[memoryQueue] temporalClient не инициализирован, не удалось поставить задачи.');
-    disableTemporal('temporal_client_init_failed');
+    logger.error('memoryQueue.temporal_init_failed', buildContext(meta));
+    disableTemporal('temporal_client_init_failed', meta);
     return { status: 'failed', reason: 'temporal_client_init_failed', count: 0 };
   }
 
@@ -254,28 +278,26 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
       const asyncStart = Date.now();
       try {
         await enqueueMemoryTasksSync(client, tasks, meta, batchSize);
-        logger.info('[memoryQueue.async]', {
-          status: 'queued_async',
-          reason: meta.reason,
-          conversationId: meta.conversationId ?? null,
-          taskCount: tasks.length,
-          durationMs: Date.now() - asyncStart,
-        });
+        logger.info(
+          'memoryQueue.async_completed',
+          buildContext(meta, {
+            status: 'queued_async',
+            taskCount: tasks.length,
+            durationMs: Date.now() - asyncStart,
+          }),
+        );
       } catch (error) {
-        logger.error('[memoryQueue] Асинхронная постановка в очередь не удалась', {
-          reason: meta.reason,
-          conversationId: meta.conversationId,
-          taskCount: tasks.length,
-          error: error?.message,
-        });
+        logger.error(
+          'memoryQueue.async_failed',
+          buildContext(meta, { taskCount: tasks.length, err: error }),
+        );
       }
     });
 
-    logger.info('[memoryQueue.async.start]', {
-      reason: meta.reason,
-      conversationId: meta.conversationId ?? null,
-      taskCount: tasks.length,
-    });
+    logger.info(
+      'memoryQueue.async_start',
+      buildContext(meta, { taskCount: tasks.length }),
+    );
     return { status: 'queued_async', via: 'temporal', count: tasks.length };
   }
 
@@ -310,19 +332,20 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
     const partialCount =
       typeof error?.partialCount === 'number' ? error.partialCount : progress?.enqueued ?? 0;
 
-    logger.error('[memoryQueue] Ошибка отправки задач в Temporal', {
-      error: error?.message,
-      isTransient,
-      isTimeout,
-      partialCount,
-      reason: meta.reason,
-      conversationId: meta.conversationId,
-      taskCount: tasks.length,
-    });
+    logger.error(
+      'memoryQueue.enqueue_failed',
+      buildContext(meta, {
+        err: error,
+        isTransient,
+        isTimeout,
+        partialCount,
+        taskCount: tasks.length,
+      }),
+    );
 
     // Only disable Temporal for permanent errors
     if (!isTransient || !failOpen) {
-      disableTemporal(error?.message || 'temporal_enqueue_failed');
+      disableTemporal(error?.message || 'temporal_enqueue_failed', meta);
       return { status: 'failed', reason: error?.message || 'temporal_enqueue_failed', count: partialCount };
     }
 
@@ -360,13 +383,14 @@ async function enqueueMemoryTasksSync(
   }
 
   const operationStart = Date.now();
-  logger.info('[memoryQueue.start]', {
-    taskCount: tasks.length,
-    batches: batches.length,
-    batchSize,
-    reason: meta.reason || 'unknown',
-    conversationId: meta.conversationId ?? null,
-  });
+  logger.info(
+    'memoryQueue.start',
+    buildContext(meta, {
+      taskCount: tasks.length,
+      batches: batches.length,
+      batchSize,
+    }),
+  );
 
   try {
     for (let bi = 0; bi < batches.length; bi++) {
@@ -397,24 +421,25 @@ async function enqueueMemoryTasksSync(
           progress.enqueued = enqueuedTotal;
         }
 
-        logger.info('[memoryQueue.batch]', {
-          index: bi + 1,
-          totalBatches: batches.length,
-          enqueued,
-          batchSize: batch.length,
-          totalEnqueued: enqueuedTotal,
-          reason: meta.reason || 'unknown',
-          conversationId: meta.conversationId ?? null,
-          errorCount: errors.length,
-          errorTaskTypes: errors
-            .map((err, idx) => batch[idx]?.type || batch[idx]?.payload?.type || null)
-            .filter(Boolean),
-          durationMs: Date.now() - batchStart,
-        });
+        logger.info(
+          'memoryQueue.batch',
+          buildContext(meta, {
+            batchIndex: bi + 1,
+            totalBatches: batches.length,
+            enqueued,
+            batchSize: batch.length,
+            totalEnqueued: enqueuedTotal,
+            errorCount: errors.length,
+            durationMs: Date.now() - batchStart,
+            errorTaskTypes: errors
+              .map((err, idx) => batch[idx]?.type || batch[idx]?.payload?.type || null)
+              .filter(Boolean),
+          }),
+        );
       } catch (batchError) {
         logger.error(
-          `[memoryQueue] Батч ${bi + 1}/${batches.length} полностью провалился: ${batchError?.message}`,
-          { reason: meta.reason, conversationId: meta.conversationId },
+          'memoryQueue.batch_failed',
+          buildContext(meta, { batchIndex: bi + 1, totalBatches: batches.length, err: batchError }),
         );
         allErrors.push(batchError);
       }
@@ -439,23 +464,27 @@ async function enqueueMemoryTasksSync(
   }
 
   if (allErrors.length > 0) {
-    logger.warn(`[memoryQueue] Завершено с ${allErrors.length} ошибками, ${enqueuedTotal} успешных постановок в очередь`);
+    logger.warn(
+      'memoryQueue.completed_with_errors',
+      buildContext(meta, { errorCount: allErrors.length, enqueued: enqueuedTotal }),
+    );
   }
 
   if (progress) {
     progress.enqueued = enqueuedTotal;
   }
 
-  logger.info('[memoryQueue.summary]', {
-    status: 'queued',
-    totalTasks: tasks.length,
-    enqueued: enqueuedTotal,
-    skipped: tasks.length - enqueuedTotal,
-    errors: allErrors.length,
-    reason: meta.reason || 'unknown',
-    conversationId: meta.conversationId ?? null,
-    durationMs: Date.now() - operationStart,
-  });
+  logger.info(
+    'memoryQueue.summary',
+    buildContext(meta, {
+      status: 'queued',
+      totalTasks: tasks.length,
+      enqueued: enqueuedTotal,
+      skipped: tasks.length - enqueuedTotal,
+      errors: allErrors.length,
+      durationMs: Date.now() - operationStart,
+    }),
+  );
 
   return { status: 'queued', via: 'temporal', count: enqueuedTotal };
 }

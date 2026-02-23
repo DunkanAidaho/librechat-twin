@@ -1,9 +1,12 @@
 'use strict';
 
 const fetch = require('node-fetch');
-const { logger } = require('@librechat/data-schemas');
 const config = require('~/server/services/Config/ConfigService');
 const { publish } = require('./natsClient');
+const { getLogger } = require('~/utils/logger');
+const { buildContext } = require('~/utils/logContext');
+
+const logger = getLogger('utils.temporalClient');
 
 function getQueueConfig() {
   return config.getSection('queues');
@@ -15,23 +18,25 @@ function isNatsEnabled() {
 
 function resolveSubject(queueConfig, subjectKey) {
   if (!queueConfig || typeof queueConfig !== 'object') {
-    logger.warn('[TemporalClient] queueConfig отсутствует, пропускаем публикацию в NATS', {
-      subjectKey,
-    });
+    logger.warn(
+      'temporalClient.queue_config_missing',
+      buildContext({}, { subjectKey }),
+    );
     return null;
   }
 
   const subjects = queueConfig.subjects;
   if (!subjects || typeof subjects !== 'object') {
-    logger.warn('[TemporalClient] queueConfig.subjects отсутствует, пропускаем NATS', {
-      subjectKey,
-    });
+    logger.warn(
+      'temporalClient.subjects_missing',
+      buildContext({}, { subjectKey }),
+    );
     return null;
   }
 
   const subject = subjects[subjectKey];
   if (!subject || typeof subject !== 'string') {
-    logger.warn('[TemporalClient] subject не найден', { subjectKey });
+    logger.warn('temporalClient.subject_not_found', buildContext({}, { subjectKey }));
     return null;
   }
 
@@ -48,7 +53,8 @@ async function publishWithFallback(subjectKey, payload, fallbackPath, workflowLa
       return { status: 'queued', via: 'nats' };
     } catch (error) {
       logger.error(
-        `[TemporalClient] Ошибка публикации в NATS (${workflowLabel}): ${error?.message || error}`,
+        'temporalClient.nats_publish_failed',
+        buildContext({}, { workflowLabel, err: error }),
       );
     }
   }
@@ -89,18 +95,21 @@ async function enqueueGraphTask(payload) {
   const via = natsActive ? 'nats' : 'http-fallback';
 
   logger.info(
-    '[TemporalClient] enqueueGraphTask start',
-    {
+    'temporalClient.enqueue_graph_start',
+    buildContext(payload, {
       conversationId,
       messageId,
       via,
       fallbackUrl: via === 'http-fallback' ? fallbackUrl : undefined,
-    },
+    }),
   );
 
   const result = await publishWithFallback('graph', payload, '/temporal/graph/run', 'GraphWorkflow');
 
-  logger.info('[TemporalClient] enqueueGraphTask success', { conversationId, messageId, via });
+  logger.info(
+    'temporalClient.enqueue_graph_success',
+    buildContext(payload, { conversationId, messageId, via }),
+  );
 
   return result;
 }
