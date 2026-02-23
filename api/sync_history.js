@@ -7,12 +7,15 @@
 require('module-alias/register');
 
 const mongoose = require('mongoose');
+const { getLogger } = require('~/utils/logger');
 const configService = require('~/server/services/Config/ConfigService');
 const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
 
+const logger = getLogger('scripts.syncHistory');
+
 const mongoUri = configService.get('mongo.uri');
 if (!mongoUri) {
-  console.error('[SYNC_HISTORY] mongo.uri не настроен. Завершаем работу.');
+  logger.error('syncHistory.mongo_uri_missing');
   process.exit(1);
 }
 
@@ -75,14 +78,14 @@ function detectContextFlags(text) {
 }
 
 async function main() {
-  console.log('[SYNC_HISTORY] Запуск версии 3.1…');
+  logger.info('syncHistory.start', { version: '3.1' });
   const targetConversationId = process.argv[2];
 
   try {
     await mongoose.connect(mongoUri);
-    console.log('[SYNC_HISTORY] MongoDB подключён.');
+    logger.info('syncHistory.mongo_connected');
   } catch (err) {
-    console.error('[SYNC_HISTORY] Ошибка подключения к MongoDB:', err);
+    logger.error('syncHistory.mongo_connect_failed', { err });
     process.exit(1);
   }
 
@@ -92,18 +95,18 @@ async function main() {
   try {
     const convFilter = targetConversationId ? { conversationId: targetConversationId } : {};
     if (targetConversationId) {
-      console.log(`[SYNC_HISTORY] Обрабатываем одну беседу: ${targetConversationId}`);
+      logger.info('syncHistory.target_conversation', { conversationId: targetConversationId });
     } else {
-      console.log('[SYNC_HISTORY] Обрабатываем все доступные беседы.');
+      logger.info('syncHistory.target_all');
     }
 
     const conversations = await Conversation.find(convFilter).lean();
-    console.log(`[SYNC_HISTORY] Найдено бесед: ${conversations.length}`);
+    logger.info('syncHistory.conversations_found', { count: conversations.length });
 
     for (const convo of conversations) {
       const { conversationId, user } = convo;
       if (!user) {
-        console.log(`[SYNC_HISTORY] Пропуск ${conversationId} — нет user.`);
+        logger.warn('syncHistory.skip_no_user', { conversationId });
         continue;
       }
 
@@ -121,7 +124,7 @@ async function main() {
       for (const msg of messages) {
         const fullText = extractFullText(msg);
         if (!fullText) {
-          console.log(`[SYNC_HISTORY] → Пропуск message ${msg.messageId}: нет текста.`);
+          logger.debug('syncHistory.skip_no_text', { conversationId, messageId: msg.messageId });
           skippedLocal++;
           continue;
         }
@@ -163,24 +166,24 @@ async function main() {
         await Message.updateMany({ _id: { $in: idsToUpdate } }, { $set: { isMemoryStored: true } });
       }
 
-      console.log(
-        `[SYNC_HISTORY] ${conversationId}: найдено ${messages.length}, отправлено ${idsToUpdate.length}, пропущено ${skippedLocal}`,
-      );
+      logger.info('syncHistory.conversation_summary', {
+        conversationId,
+        found: messages.length,
+        sent: idsToUpdate.length,
+        skipped: skippedLocal,
+      });
       totalSynced += idsToUpdate.length;
       totalSkipped += skippedLocal;
     }
   } catch (error) {
-    console.error('[SYNC_HISTORY] Ошибка в процессе синка:', error);
+    logger.error('syncHistory.error', { err: error });
   } finally {
-    console.log('---');
-    console.log('[SYNC_HISTORY] Завершено.');
-    console.log(`[SYNC_HISTORY] Всего отправлено: ${totalSynced}`);
-    console.log(`[SYNC_HISTORY] Всего пропущено: ${totalSkipped}`);
+    logger.info('syncHistory.finished', { totalSynced, totalSkipped });
     try {
       await mongoose.disconnect();
-      console.log('[SYNC_HISTORY] Соединение MongoDB закрыто.');
+      logger.info('syncHistory.mongo_disconnected');
     } catch (disconnectErr) {
-      console.error('[SYNC_HISTORY] Ошибка при закрытии MongoDB:', disconnectErr);
+      logger.warn('syncHistory.mongo_disconnect_failed', { err: disconnectErr });
     }
   }
 }

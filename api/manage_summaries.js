@@ -7,13 +7,15 @@
 require('module-alias/register');
 
 const mongoose = require('mongoose');
-const { logger } = require('@librechat/data-schemas');
+const { getLogger } = require('~/utils/logger');
 const configService = require('~/server/services/Config/ConfigService');
 const { enqueueSummaryTask } = require('~/utils/temporalClient');
 
+const logger = getLogger('scripts.manageSummaries');
+
 const mongoUri = configService.get('mongo.uri');
 if (!mongoUri) {
-  logger.error('[MANAGE_SUMMARIES] mongo.uri не настроен. Завершаем работу.');
+  logger.error('manageSummaries.mongo_uri_missing');
   process.exit(1);
 }
 
@@ -69,6 +71,7 @@ const extractText = (msg) => {
 
 async function handleReset(filter) {
   const targetDescription = filter.conversationId ? `conversation ${filter.conversationId}` : 'all conversations';
+  logger.info('manageSummaries.reset.start', { targetDescription });
   console.log(`[RESET_SUMMARIES] Preparing to reset summarization index for ${targetDescription}...`);
   const res = await Conversation.updateMany(filter, { $set: { lastSummarizedIndex: 0 } });
   console.log('[RESET_SUMMARIES] --- Reset Summary ---');
@@ -81,13 +84,14 @@ async function publishSummary(payload) {
     await enqueueSummaryTask(payload);
     return 1;
   } catch (err) {
-    logger.error('[MANAGE_SUMMARIES] Ошибка отправки задачи в Temporal:', err);
+    logger.error('manageSummaries.enqueue_failed', { err });
     return 0;
   }
 }
 
 async function handleResummarize(filter) {
   const targetDescription = filter.conversationId ? `conversation ${filter.conversationId}` : 'all conversations';
+  logger.info('manageSummaries.resummarize.start', { targetDescription });
   console.log(`[RESUMMARIZE] Starting process for ${targetDescription}...`);
 
   const conversations = await Conversation.find(filter).lean();
@@ -181,6 +185,7 @@ async function handleResummarize(filter) {
     await mongoose.connect(mongoUri);
     console.log('[MANAGE_SUMMARIES] Connected to MongoDB.');
   } catch (err) {
+    logger.error('manageSummaries.mongo_connect_failed', { err });
     console.error('[MANAGE_SUMMARIES] MongoDB connect failed:', err);
     process.exit(1);
   }
@@ -195,12 +200,13 @@ async function handleResummarize(filter) {
       await handleResummarize(filter);
     }
   } catch (err) {
+    logger.error('manageSummaries.workflow_failed', { err });
     console.error('[MANAGE_SUMMARIES] Error:', err);
   } finally {
     try {
       await mongoose.disconnect();
     } catch (disconnectErr) {
-      logger.warn('[MANAGE_SUMMARIES] Ошибка при отключении от MongoDB:', disconnectErr);
+      logger.warn('manageSummaries.mongo_disconnect_failed', { err: disconnectErr });
     }
     console.log('[MANAGE_SUMMARIES] Done.');
   }

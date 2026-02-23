@@ -1,4 +1,5 @@
 const express = require('express');
+const { randomUUID } = require('crypto');
 const { generateCheckAccess, skipAgentCheck } = require('@librechat/api');
 const { PermissionTypes, Permissions, PermissionBits } = require('librechat-data-provider');
 const {
@@ -14,13 +15,22 @@ const addTitle = require('~/server/services/Endpoints/agents/title');
 const AgentController = require('~/server/controllers/agents/request');
 const { getRoleByName } = require('~/models/Role');
 const { renderMetrics } = require('~/utils/metrics');
-const { logger } = require('@librechat/data-schemas');
+const { getLogger } = require('~/utils/logger');
 const ingestDeduplicator = require('~/server/services/Deduplication/ingestDeduplicator');
 const { validateAgentRequest } = require('~/server/middleware/requestValidators');
 
 const router = express.Router();
+const logger = getLogger('routes.agents.chat');
 
 router.use(moderateText);
+
+router.use((req, _res, next) => {
+  req.context = req.context || {};
+  if (!req.context.requestId) {
+    req.context.requestId = randomUUID();
+  }
+  next();
+});
 
 const checkAgentAccess = generateCheckAccess({
   permissionType: PermissionTypes.AGENTS,
@@ -71,7 +81,10 @@ router.get('/metrics', (req, res) => {
     res.setHeader('Content-Type', 'text/plain');
     res.send(metrics);
   } catch (err) {
-    logger.error(`[Metrics] Error fetching metrics: ${err?.message || err}`);
+    logger.error('metrics.fetch_failed', {
+      err,
+      requestId: req.context?.requestId,
+    });
     res.status(500).send('Error');
   }
 });
@@ -96,12 +109,20 @@ router.get('/diagnostics/ingest-dedupe', checkAgentAccess, async (req, res) => {
       };
     res.json(diagnostics);
   } catch (err) {
-    logger.error(`[Diagnostics] Error fetching dedupe diagnostics: ${err?.message || err}`);
+    logger.error('diagnostics.fetch_failed', {
+      err,
+      requestId: req.context?.requestId,
+    });
     res.status(500).json({ error: 'Failed to fetch diagnostics' });
   } finally {
     await ingestDeduplicator
       .shutdown()
-      .catch((err) => logger.error(`[Diagnostics] Shutdown error: ${err?.message || err}`));
+      .catch((shutdownErr) =>
+        logger.error('diagnostics.shutdown_failed', {
+          err: shutdownErr,
+          requestId: req.context?.requestId,
+        }),
+      );
   }
 });
 module.exports = router;

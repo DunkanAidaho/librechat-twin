@@ -2,10 +2,11 @@
 
 const multer = require('multer');
 const express = require('express');
+const { randomUUID } = require('crypto');
 const { sleep } = require('@librechat/agents');
 const { isEnabled } = require('@librechat/api');
-const { logger } = require('@librechat/data-schemas');
 const configService = require('~/server/services/Config/ConfigService');
+const { getLogger } = require('~/utils/logger');
 const { CacheKeys, EModelEndpoint } = require('librechat-data-provider');
 const {
   createImportLimiters,
@@ -39,6 +40,7 @@ const assistantClients = {
 };
 
 const router = express.Router();
+const logger = getLogger('routes.convos');
 router.use(requireJwtAuth);
 
 // ——— helpers для тайтла ———
@@ -74,6 +76,27 @@ function extractText(msg) {
   return '';
 }
 // ————————————————
+
+function buildLogContext(source, extra = {}) {
+  if (!source) {
+    return { ...extra };
+  }
+
+  // Express request case
+  if ('context' in source || 'user' in source) {
+    return {
+      requestId: source.context?.requestId,
+      userId: source.user?.id,
+      ...extra,
+    };
+  }
+
+  return {
+    requestId: source.requestId,
+    userId: source.userId,
+    ...extra,
+  };
+}
 
 router.get('/', async (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 25;
@@ -122,7 +145,10 @@ router.get('/', async (req, res) => {
 
     res.status(200).json(result);
   } catch (error) {
-    logger.error('Error fetching conversations', error);
+    logger.error('convos.list_failed', {
+      ...buildLogContext(req),
+      err: error,
+    });
     // th1nk: Добавил проверку на наличие branchLog, чтобы не было ошибок, если он не инициализирован
     if (branchLoggingEnabled) {
       branchLog.error(`[CustomConvos] Error fetching conversations: ${error?.message || error}`);
@@ -184,17 +210,21 @@ router.post('/gen_title', async (req, res) => {
       }
       await saveConvo(req, { conversationId, title: finalTitle }, { context: 'gen_title_auto' });
     } catch (e) {
-      logger.warn('[gen_title] saveConvo title failed (non-critical):', e.message || e);
+    logger.warn('convos.gen_title.save_failed',
+      buildLogContext(req, { conversationId, err: e }),
+    );
     }
 
     return res.status(200).json({ title: finalTitle });
   } catch (e) {
-    logger.error('[gen_title] post-process error:', e);
+    logger.error('convos.gen_title.post_process_failed',
+      buildLogContext(req, { conversationId, err: e }),
+    );
     return res.status(200).json({ title: tighten(String(title || ''), 40) });
   }
 });
 
-async function sendDeleteTaskToRedis(conversationId) {
+async function sendDeleteTaskToRedis(conversationId, context = {}) {
   try {
     // th1nk: Добавил проверку на наличие branchLog, чтобы не было ошибок, если он не инициализирован
     if (branchLoggingEnabled) {
@@ -202,19 +232,19 @@ async function sendDeleteTaskToRedis(conversationId) {
     }
     const queueName = redisMemoryQueueName;
     if (!queueName) {
-      logger.warn('[RAG] redisMemoryQueueName is not configured. Skipping delete task.');
+      logger.warn('convos.redis_queue_not_configured', buildLogContext(context, { conversationId }));
       return;
     }
     const client = getRedisClient();
     if (!client) {
-      logger.error('[RAG] Redis client is not initialized. Skipping delete task.');
+      logger.error('convos.redis_client_missing', buildLogContext(context, { conversationId }));
       return;
     }
     const task = { type: 'delete_conversation', payload: { conversation_id: conversationId } };
     await client.rpush(queueName, JSON.stringify(task));
-    logger.info(`[RAG] Sent delete task for conversation ${conversationId} to Redis.`);
+    logger.info('convos.delete_task_sent', buildLogContext(context, { conversationId }));
   } catch (error) {
-    logger.error(`[RAG] Failed to send delete task for conversation ${conversationId} to Redis.`, error);
+    logger.error('convos.delete_task_failed', buildLogContext(context, { conversationId, err: error }));
   }
 }
 
@@ -294,8 +324,9 @@ router.delete('/all', async (req, res) => {
 
     if (dbResponse.acknowledged && dbResponse.deletedCount > 0) {
       logger.info(`[RAG] Queueing delete tasks for ${convoIds.length} conversations.`);
-      for (const convoId of convoIds) {
-        await sendDeleteTaskToRedis(convoId);
+        for (const convoId of convoIds) {
+          const baseContext = buildLogContext(req, { conversationId: convoId });
+          await sendDeleteTaskToRedis(convoId, baseContext);
       }
     }
 

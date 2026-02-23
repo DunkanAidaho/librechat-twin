@@ -1,6 +1,6 @@
 'use strict';
 
-const { logger } = require('@librechat/data-schemas');
+const { getLogger } = require('~/utils/logger');
 const configService = require('~/server/services/Config/ConfigService');
 
 /**
@@ -159,6 +159,17 @@ const validateIdentifiers = (body, issues) => {
  * @param {NextFunction} next
  * @returns {void}
  */
+const logger = getLogger('middleware.requestValidators');
+
+function buildLogContext(req, extra = {}) {
+  return {
+    requestId: req.context?.requestId,
+    userId: req.user?.id,
+    conversationId: req.body?.conversationId || req.params?.conversationId,
+    ...extra,
+  };
+}
+
 function validateAgentRequest(req, res, next) {
   const issues = [];
   const body = req.body ?? {};
@@ -174,8 +185,11 @@ function validateAgentRequest(req, res, next) {
 
   if (hasText && text.length > MAX_REQUEST_TEXT_LENGTH) {
     if (text.length > HARD_LONG_TEXT_LIMIT) {
-      logger.warn(
-        `[validateAgentRequest] Текст превышает жесткий лимит (${text.length} > ${HARD_LONG_TEXT_LIMIT}).`,
+      logger.warn('validateAgentRequest.hard_text_limit_exceeded',
+        buildLogContext(req, {
+          textLength: text.length,
+          hardLimit: HARD_LONG_TEXT_LIMIT,
+        }),
       );
       return res.status(413).json({ message: 'Текст слишком большой, разбейте его на части.' });
     }
@@ -185,8 +199,11 @@ function validateAgentRequest(req, res, next) {
       text.length > SOFT_LONG_TEXT_CONFIRM &&
       !body.confirmLongText
     ) {
-      logger.info(
-        `[validateAgentRequest] Текст требует подтверждения (${text.length} > ${SOFT_LONG_TEXT_CONFIRM}).`,
+      logger.info('validateAgentRequest.long_text_requires_confirmation',
+        buildLogContext(req, {
+          textLength: text.length,
+          softLimit: SOFT_LONG_TEXT_CONFIRM,
+        }),
       );
       return res.status(409).json({
         message: 'Текст очень большой. Отправьте повторно, если уверены.',
@@ -207,7 +224,7 @@ function validateAgentRequest(req, res, next) {
       );
     }
 
-    let totalSize = 0;
+    let totalFilesSizeBytes = 0;
     files.forEach((file, index) => {
       const size = getFileSize(file, 0);
       totalFilesSizeBytes += size;
@@ -253,7 +270,7 @@ function validateAgentRequest(req, res, next) {
   validateIdentifiers(body, issues);
 
   if (issues.length > 0) {
-    logger.warn('[validateAgentRequest] Валидация отклонена:', issues);
+    logger.warn('validateAgentRequest.rejected', buildLogContext(req, { issues }));
     return res.status(400).json({
       error: 'Некорректный запрос.',
       details: issues,
