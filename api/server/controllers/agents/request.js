@@ -13,7 +13,8 @@ const {
 } = require('~/utils/metrics');
 
 const { sendEvent } = require('@librechat/api');
-const { logger } = require('@librechat/data-schemas');
+const { getLogger } = require('~/utils/logger');
+const { buildContext } = require('~/utils/logContext');
 const config = require('~/server/services/Config/ConfigService');
 const { clearDedupeKey } = require('~/server/services/Deduplication/clearDedupeKey');
 const { runWithResilience, normalizeLabelValue } = require('~/server/utils/resilience');
@@ -23,6 +24,8 @@ const {
   handleAbortError,
   createAbortController,
 } = require('~/server/middleware');
+
+const logger = getLogger('routes.agents.request');
 const { disposeClient, clientRegistry, requestDataMap } = require('~/server/cleanup');
 
 const {

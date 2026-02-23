@@ -77,12 +77,11 @@ function safeEndResponse(res, context = {}) {
     try {
       res.end();
     } catch (error) {
-      logger.debug(
-        'response.safe_end_failed',
-        buildContext(context, { err: error }),
-      );
+      logger.error('utils.response.end_error', buildContext(context, { err: error }));
     }
+    return;
   }
+  logger.warn('utils.response.write_skip', buildContext(context, { reason: 'end_not_writable' }));
 }
 
 /**
@@ -96,13 +95,11 @@ function safeWrite(res, data, context = {}) {
     try {
       return res.write(data);
     } catch (error) {
-      logger.debug(
-        'response.safe_write_failed',
-        buildContext(context, { err: error }),
-      );
+      logger.error('utils.response.write_error', buildContext(context, { err: error }));
       return false;
     }
   }
+  logger.warn('utils.response.write_skip', buildContext(context, { reason: 'not_writable' }));
   return false;
 }
 
