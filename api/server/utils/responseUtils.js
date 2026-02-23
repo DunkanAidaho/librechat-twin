@@ -1,4 +1,7 @@
-const { logger } = require('@librechat/data-schemas');
+const { getLogger } = require('~/utils/logger');
+const { buildContext } = require('~/utils/logContext');
+
+const logger = getLogger('utils.response');
 
 /**
  * Checks if response is writable
@@ -69,14 +72,15 @@ function makeDetachableRes(res) {
  * Safely ends response if not already ended
  * @param {Object} res
  */
-function safeEndResponse(res) {
+function safeEndResponse(res, context = {}) {
   if (canWrite(res)) {
     try {
       res.end();
     } catch (error) {
-      logger.debug('[ResponseUtils] Failed to end response', {
-        message: error?.message,
-      });
+      logger.debug(
+        'response.safe_end_failed',
+        buildContext(context, { err: error }),
+      );
     }
   }
 }
@@ -87,14 +91,15 @@ function safeEndResponse(res) {
  * @param {string} data
  * @returns {boolean}
  */
-function safeWrite(res, data) {
+function safeWrite(res, data, context = {}) {
   if (canWrite(res)) {
     try {
       return res.write(data);
     } catch (error) {
-      logger.debug('[ResponseUtils] Failed to write to response', {
-        message: error?.message,
-      });
+      logger.debug(
+        'response.safe_write_failed',
+        buildContext(context, { err: error }),
+      );
       return false;
     }
   }

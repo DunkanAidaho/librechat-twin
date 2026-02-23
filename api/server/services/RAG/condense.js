@@ -1,8 +1,11 @@
 'use strict';
-const { logger } = require('@librechat/data-schemas');
 const crypto = require('crypto');
 const axios = require('axios');
 const config = require('~/server/services/Config/ConfigService');
+const { getLogger } = require('~/utils/logger');
+const { buildContext } = require('~/utils/logContext');
+
+const logger = getLogger('rag.condense');
 
 let pLimitInstance;
 

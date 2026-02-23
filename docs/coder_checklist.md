@@ -15,8 +15,9 @@
 - **Secrets**: ключи LLM/NATS/Temporal — только через `.env`/секреты; никакого хардкода.
 - **Валидация**: любые числовые/булевы параметры — через `parseOptionalInt/Bool/Float` или `zod`-схемы ConfigService.
 
-## 3. Логирование и наблюдаемость
+-## 3. Логирование и наблюдаемость
 - **Transparent logging initiative**: только scoped логгер (`utils/logger`) или `ragLogger` для RAG. Никаких `debug`, `console.log`, `warn` напрямую.
+- **logContext helper**: перед любым логом вызывать `buildLogContext(reqOrMeta, extra)` из `~/utils/logContext.js`, чтобы добавить `requestId/conversationId/userId`. Изменения по логам обязательно фиксируем в документации (`docs/1_Transparent_logging.md`, `docs/TODO.md`).
 - **Гигиена репозитория:** при переносе/переименовании логгеров удаляем старые файлы (`logger.js`, `.bak`, временные копии) и проверяем `git status`. Перед сборкой контейнера запускаем `docker build --no-cache` (или аналогичный шаг CI), чтобы исключить подтягивание устаревших артефактов.
 - **Request context**: контроллеры обязаны создавать `requestId` и передавать его дальше (в SSE, RAG, очереди). Логи без `requestId` считаются долгом.
 - **Единый формат событий**: `scope`, `phase`, `conversationId`, `userId`, `agentId`, `latency`, `model`, `attempt`, `signalAborted` и т.п. — по списку из `docs/1_Trasparent_logging.md`.

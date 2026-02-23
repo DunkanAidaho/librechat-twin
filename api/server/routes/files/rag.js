@@ -1,15 +1,24 @@
 // /opt/open-webui/api/server/routes/files/rag.js
 const express = require('express');
+const { randomUUID } = require('crypto');
 const axios = require('axios');
 const FormData = require('form-data');
 const multer = require('multer'); // ВАЖНО: свой multer, не общий
 const { requireJwtAuth } = require('~/server/middleware');
-const { logger } = require('~/config');
 const configService = require('~/server/services/Config/ConfigService');
+const { getLogger } = require('~/utils/logger');
+const { buildContext } = require('~/utils/logContext');
 
 // ИЗМЕНЕНО: Теперь RAG_API_URL указывает на tools-gateway
+const logger = getLogger('routes.files.rag');
 const TOOLS_GATEWAY_URL = configService.get('rag.gateway.url');
 const INTERNAL_KEY = configService.get('security.ragInternalKey', '');
+
+function attachRequestId(req, _res, next) {
+  req.context = req.context || {};
+  req.context.requestId = req.context.requestId || randomUUID();
+  next();
+}
 
 function internalOrJwtAuth() {
   return (req, res, next) => {
@@ -18,13 +27,13 @@ function internalOrJwtAuth() {
       if (INTERNAL_KEY && key && key === INTERNAL_KEY) {
         req.user = req.user || { id: 'internal', role: 'admin' };
         req.isInternalBypass = true;
-        logger.info('[/files/rag] Internal bypass OK');
+        logger.info('routes.files.rag.internal_bypass', buildContext(req));
         return next();
       }
-      logger.info('[/files/rag] Using JWT auth for request');
+      logger.info('routes.files.rag.jwt_auth', buildContext(req));
       return requireJwtAuth(req, res, next);
     } catch (e) {
-      logger.error('[/files/rag] Auth middleware error', e);
+      logger.error('routes.files.rag.auth_error', buildContext(req, { err: e }));
       return res.status(500).json({ error: 'Auth middleware error' });
     }
   };
@@ -33,11 +42,13 @@ function internalOrJwtAuth() {
 async function initialize() {
   const router = express.Router();
 
+  router.use(attachRequestId);
+
   // Только наша аутентификация
   router.use(internalOrJwtAuth());
 
   if (!TOOLS_GATEWAY_URL) {
-    logger.error('[/files/rag] rag.gateway.url отсутствует в конфигурации. Запрос не может быть выполнен.');
+    logger.error('routes.files.rag.gateway_missing', buildContext({}));
     router.use((_req, res) => res.status(500).json({ error: 'RAG tools gateway URL is not configured' }));
     return router;
   }
@@ -52,13 +63,12 @@ async function initialize() {
   // CSV ingest
   router.post('/ingest/csv', upload.single('file'), async (req, res) => {
     try {
-      logger.info('[/files/rag/ingest/csv] start', {
-        user: req.user?.id,
+      logger.info('routes.files.rag.ingest_csv.start', buildContext(req, {
         internal: !!req.isInternalBypass,
         hasFile: !!req.file,
         mimetype: req.file?.mimetype,
         size: req.file?.size,
-      });
+      }));
 
       // ИЗМЕНЕНО: Теперь обращаемся к tools-gateway
       if (!req.file) {
@@ -92,7 +102,7 @@ async function initialize() {
     } catch (error) {
       const status = error.response?.status || 500;
       const msg = error.response?.data || error.message || 'CSV ingest proxy error';
-      logger.error('[/files/rag/ingest/csv] error', { status, msg });
+      logger.error('routes.files.rag.ingest_csv.error', buildContext(req, { status, msg }));
       return res.status(status).json({ error: msg });
     }
   });
@@ -100,11 +110,10 @@ async function initialize() {
   // JSON ingest
   router.post('/ingest/json', express.json({ limit: '50mb' }), async (req, res) => {
     try {
-      logger.info('[/files/rag/ingest/json] start', {
-        user: req.user?.id,
+      logger.info('routes.files.rag.ingest_json.start', buildContext(req, {
         internal: !!req.isInternalBypass,
         keys: Object.keys(req.body || {}),
-      });
+      }));
 
       // TODO: Реализовать эндпоинт /ingest/json в tools-gateway
       // Пока просто возвращаем ошибку, так как tools-gateway не имеет такого эндпоинта
@@ -127,7 +136,7 @@ async function initialize() {
     } catch (error) {
       const status = error.response?.status || 500;
       const msg = error.response?.data || error.message || 'JSON ingest proxy error';
-      logger.error('[/files/rag/ingest/json] error', { status, msg });
+      logger.error('routes.files.rag.ingest_json.error', buildContext(req, { status, msg }));
       return res.status(status).json({ error: msg });
     }
   });
@@ -135,11 +144,10 @@ async function initialize() {
   // Search
   router.post('/search', express.json({ limit: '10mb' }), async (req, res) => {
     try {
-      logger.info('[/files/rag/search] start', {
-        user: req.user?.id,
+      logger.info('routes.files.rag.search.start', buildContext(req, {
         internal: !!req.isInternalBypass,
         keys: Object.keys(req.body || {}),
-      });
+      }));
 
       // ИЗМЕНЕНО: Обращаемся к tools-gateway
       const resp = await axios.post(`${TOOLS_GATEWAY_URL}/rag/search`, req.body, {
@@ -149,12 +157,15 @@ async function initialize() {
         },
       });
 
-      logger.info('[/files/rag/search] ok', { status: resp.status, results: resp.data?.results?.length });
+      logger.info(
+        'routes.files.rag.search.success',
+        buildContext(req, { status: resp.status, results: resp.data?.results?.length }),
+      );
       return res.status(resp.status).json(resp.data);
     } catch (error) {
       const status = error.response?.status || 500;
       const msg = error.response?.data || error.message || 'Search proxy error';
-      logger.error('[/files/rag/search] error', { status, msg });
+      logger.error('routes.files.rag.search.error', buildContext(req, { status, msg }));
       return res.status(status).json({ error: msg });
     }
   });

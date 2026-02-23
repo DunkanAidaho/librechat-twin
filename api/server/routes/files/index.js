@@ -1,5 +1,6 @@
 // /opt/open-webui/api/server/routes/files/index.js
 const express = require('express');
+const { randomUUID } = require('crypto');
 const {
   createFileLimiters,
   configMiddleware,
@@ -7,6 +8,8 @@ const {
   uaParser,
   checkBan,
 } = require('~/server/middleware');
+const { getLogger } = require('~/utils/logger');
+const { buildContext } = require('~/utils/logContext');
 const { avatar: asstAvatarRouter } = require('~/server/routes/assistants/v1');
 const { avatar: agentAvatarRouter } = require('~/server/routes/agents/v1');
 const { createMulterInstance } = require('./multer');
@@ -17,8 +20,18 @@ const avatar = require('./avatar');
 const speech = require('./speech');
 const rag = require('./rag'); // саброут RAG
 
+const logger = getLogger('routes.files');
+
+function attachRequestId(req, _res, next) {
+  req.context = req.context || {};
+  req.context.requestId = req.context.requestId || randomUUID();
+  next();
+}
+
 const initialize = async () => {
   const router = express.Router();
+
+  router.use(attachRequestId);
 
   // 1) RAG — до глобальной авторизации, со своей собственной аутентификацией внутри rag
   router.use('/rag', await rag.initialize());
@@ -40,6 +53,11 @@ const initialize = async () => {
   router.post('/images/avatar', upload.single('file'));
   router.post('/images/agents/:agent_id/avatar', upload.single('file'));
   router.post('/images/assistants/:assistant_id/avatar', upload.single('file'));
+
+  router.use((req, _res, next) => {
+    logger.debug('routes.files.request', buildContext(req, { path: req.path, method: req.method }));
+    next();
+  });
 
   router.use('/', files);
   router.use('/images', images);

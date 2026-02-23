@@ -53,6 +53,10 @@
 ## 🔜 Оставшиеся задачи (подробная декомпозиция)
 
 ### 1. Transparent logging initiative (сквозное API-логирование)
+- **Статус**
+  - memoryQueue + temporalClient, scripts (manage_summaries/sync_history), routes/files (+ RAG подроуты) и response utils уже переведены на scoped логгеры и `buildContext`.
+  - В работе: RAG core (`condense`, `multiStepOrchestrator`, `LongTextWorker`) и маршруты SSE.
+  - Предстоит: LLM clients (`Anthropic`, `OpenAI`, `Google`, `BaseClient`).
 - **Что нужно сделать**
   - Построить единый слой логирования для всех API-проходов (клиенты, контроллеры, сервисы, очереди, утилиты), чтобы каждая стадия запроса фиксировалась с единым форматом и requestId.
   - Использовать план из `docs/1_Trasparent_logging.md`, дополненный конкретными областями из `docs/project_map`.
@@ -67,10 +71,10 @@
      - В `server/routes/agents/chat.js` и других входных точках генерировать `requestId`, пробрасывать в `req.context`.
      - Обновить SSE/response utils (`server/utils/responseUtils.js`) для хранения `requestId`/`conversationId` в логах.
   4. **Инструментирование модулей (по project_map)**
-     - **Клиенты LLM** (`app/clients/AnthropicClient.js`, `BaseClient.js`, `GoogleClient.js`, `OpenAIClient.js`, `app/clients/utils/instructions.js`): стандартные события `request:start`, `stream:token`, `request:retry`, `request:error` с полями `endpoint`, `model`, `latency`, `retryAttempt`.
-     - **Контроллеры** (`server/controllers/agents/client.js`, `server/controllers/agents/request.js`, middleware, routes): логировать ключевые фазы пайплайна (`resolveConfig`, `buildPayload`, `sendMessage`, `enqueueMemoryTasks`, `cleanup`) с вложенным контекстом (`userId`, `conversationId`, `agentId`).
-     - **RAG / Memory сервисы** (`server/services/RAG/*`, `server/services/Graph/LongTextWorker.js`, `server/services/agents/*`, `server/services/Deduplication/*`, `server/services/Endpoints/*`, `server/services/pricing/*`): привести к единому формату с полем `component`. Вынести частые конструкции (например, `ragLogger`) в scoped-logger.
-     - **Утилиты и очереди** (`utils/metrics.js`, `utils/ragMetrics.js`, `utils/memoryConfig.js`, `utils/natsClient.js`, `utils/temporalClient.js`, `utils/async.js`, `manage_summaries.js`, `sync_history.js`, `server/routes/files/*`, `server/routes/convos.js`): заменить разрозненные `console.log/debug` на scoped logger, добавить уровни `debug/trace` для verbose-путей.
+     - **Клиенты LLM** (`app/clients/AnthropicClient.js`, `BaseClient.js`, `GoogleClient.js`, `OpenAIClient.js`, `app/clients/utils/instructions.js`): *в процессе* — стандартизовать события `request:start`, `stream:token`, `request:retry`, `request:error`.
+     - **Контроллеры** (`server/controllers/agents/client.js`, `server/controllers/agents/request.js`, middleware, routes/files/*, response utils): *частично готово* — requestId middleware в `/agents`, `/files`, response utils обновлены.
+     - **RAG / Memory сервисы** (`server/services/RAG/*`, `server/services/Graph/LongTextWorker.js`, `server/services/agents/*`, `server/services/Deduplication/*`, `server/services/Endpoints/*`, `server/services/pricing/*`): *memoryQueue + temporalClient выполнены*, оставшиеся сервисы в миграции.
+     - **Утилиты и очереди** (`utils/metrics.js`, `utils/ragMetrics.js`, `utils/memoryConfig.js`, `utils/natsClient.js`, `utils/async.js`, `manage_summaries.js`, `sync_history.js`, `server/routes/files/*`, `server/routes/convos.js`): *routes/files и core scripts обновлены*, остальные queued.
   5. **Форматы и соглашения**
      - Утвердить набор полей (`timestamp`, `level`, `scope`, `message`, `requestId`, `conversationId`, `userId`, `context`).
      - Для trace-режима писать вложенные объекты (например, токенайзер, RAG cache hits) в `meta`.
