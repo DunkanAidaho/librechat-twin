@@ -1,4 +1,5 @@
-const { logger } = require('@librechat/data-schemas');
+const { getLogger } = require('~/utils/logger');
+const { buildContext } = require('~/utils/logContext');
 const axios = require('axios');
 const { Tokenizer } = require('@librechat/api');
 const { sanitizeInput } = require('~/utils/security');
@@ -8,6 +9,7 @@ const {
   setContextLength,
 } = require('~/utils/ragMetrics');
 const crypto = require('crypto');
+const logger = getLogger('rag.context');
 
 /**
  * @typedef {Object} RagMetrics
@@ -137,11 +139,14 @@ class RagContextBuilder {
     const url = `${toolsGatewayUrl}/neo4j/graph_context`;
     const requestPayload = { conversation_id: conversationId, limit };
 
-    logger.info('[DIAG-GRAPH] Fetching graph context', {
-      conversationId,
-      toolsGatewayUrl,
-      limit,
-    });
+    const ctx = buildContext({ conversationId });
+    logger.info(
+      'rag.context.graph_fetch',
+      buildContext(ctx, {
+        toolsGatewayUrl,
+        limit,
+      }),
+    );
 
     try {
       const response = await axios.post(url, requestPayload, { timeout: timeoutMs });
@@ -149,12 +154,14 @@ class RagContextBuilder {
       const lines = Array.isArray(response?.data?.lines) ? response.data.lines : [];
       const queryHint = response?.data?.query_hint ? String(response.data.query_hint) : '';
 
-      logger.info('[DIAG-GRAPH] Graph context response', {
-        conversationId,
-        url,
-        linesCount: lines.length,
-        hasHint: Boolean(queryHint),
-      });
+      logger.info(
+        'rag.context.graph_fetch_done',
+        buildContext(ctx, {
+          url,
+          linesCount: lines.length,
+          hasHint: Boolean(queryHint),
+        }),
+      );
 
       if (!lines.length && !queryHint) {
         return null;
@@ -173,7 +180,7 @@ class RagContextBuilder {
         responseData: error?.response?.data,
       };
 
-      logger.error('[DIAG-GRAPH] Failed to fetch graph context', serializedError);
+      logger.error('rag.context.graph_fetch_error', buildContext(ctx, { err: serializedError }));
       return null;
     }
   }
@@ -211,11 +218,10 @@ class RagContextBuilder {
 
       return rawChunks;
     } catch (error) {
-      logger.error('[rag.context.vector.error]', {
-        conversationId,
-        message: error?.message,
-        stack: error?.stack,
-      });
+      logger.error(
+        'rag.context.vector_fetch_error',
+        buildContext({ conversationId }, { err: error })
+      );
       return [];
     }
   }
@@ -250,14 +256,17 @@ class RagContextBuilder {
       return rawRecent;
     } catch (e) {
       const status = e?.response?.status;
+      const ctx = buildContext({ conversationId });
       if (status === 404 || status === 501) {
-        logger.info('[rag.context.recent.unavailable]', { conversationId, status });
+        logger.info('rag.context.recent_unavailable', buildContext(ctx, { status }));
       } else {
-        logger.warn('[rag.context.recent.skip]', {
-          conversationId,
-          reason: e?.message,
-          status,
-        });
+        logger.warn(
+          'rag.context.recent_skip',
+          buildContext(ctx, {
+            reason: e?.message,
+            status,
+          }),
+        );
       }
       return [];
     }
@@ -281,11 +290,13 @@ class RagContextBuilder {
     this.cacheTtlMs = Math.max(Number(runtimeCfg.ragCacheTtl) * 1000, 0);
 
     if (!runtimeCfg.useConversationMemory || !conversationId || !userQuery) {
-      logger.info('[rag.context.skip]', {
-        conversationId,
-        reason: 'disabled_or_empty_query',
-        enableMemoryCache: runtimeCfg.enableMemoryCache,
-      });
+      logger.info(
+        'rag.context.skip',
+        buildContext({ conversationId }, {
+          reason: 'disabled_or_empty_query',
+          enableMemoryCache: runtimeCfg.enableMemoryCache,
+        }),
+      );
       return {
         patchedSystemContent: systemContent,
         contextLength: 0,
@@ -300,8 +311,12 @@ class RagContextBuilder {
     const normalizedQuery = userQuery.slice(0, queryMaxChars);
     const queryTokenCount = Tokenizer.getTokenCount(normalizedQuery, encoding);
 
-    logger.info(
-      `[rag.context.query.tokens] conversation=${conversationId} length=${normalizedQuery.length} tokens=${queryTokenCount}`,
+    logger.debug(
+      'rag.context.query_tokens',
+      buildContext({ conversationId }, {
+        length: normalizedQuery.length,
+        tokens: queryTokenCount,
+      }),
     );
 
     const queryHash = this.hashPayload(normalizedQuery);
@@ -338,7 +353,8 @@ class RagContextBuilder {
         observeCache('hit');
         const cachedMetrics = cached.metrics || {};
         logger.info(
-          `[rag.context.cache.hit] conversation=${conversationId} cacheKey=${cacheKey}`,
+          'rag.context.cache_hit',
+          buildContext({ conversationId }, { cacheKey }),
         );
         return {
           patchedSystemContent: cached.systemContent,
@@ -350,7 +366,10 @@ class RagContextBuilder {
 
       cacheStatus = 'miss';
       observeCache('miss');
-      logger.info(`[rag.context.cache.miss] conversation=${conversationId} cacheKey=${cacheKey}`);
+      logger.info(
+        'rag.context.cache_miss',
+        buildContext({ conversationId }, { cacheKey })
+      );
     }
 
     const toolsGatewayUrl = runtimeCfg?.toolsGateway?.url || '';
@@ -486,9 +505,7 @@ class RagContextBuilder {
             summarizationConfig: summarizationCfg,
           });
         } catch (error) {
-          logger.error('[rag.context.vector.summarize.error]', {
-            message: error?.message,
-          });
+        logger.error('rag.context.summarize_error', buildContext({ conversationId }, { err: error }));
         }
       }
 
@@ -502,7 +519,7 @@ class RagContextBuilder {
       try {
         sanitizedBlock = sanitizeInput(combined);
       } catch (error) {
-        logger.error('[rag.context.sanitize.error]', { message: error?.message });
+        logger.error('rag.context.sanitize_error', buildContext({ conversationId }, { err: error }));
       }
 
       finalSystemContent = sanitizedBlock + systemContent;
@@ -551,6 +568,10 @@ class RagContextBuilder {
         metrics,
         expiresAt: now + this.cacheTtlMs,
       });
+      logger.info(
+        'rag.context.cache_store',
+        buildContext({ conversationId }, { cacheKey, ttlMs: this.cacheTtlMs })
+      );
     }
 
     if (req) {

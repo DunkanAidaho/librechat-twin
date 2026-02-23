@@ -1,10 +1,12 @@
 'use strict';
 
-const { logger } = require('@librechat/data-schemas');
+const { getLogger } = require('~/utils/logger');
+const { buildContext } = require('~/utils/logContext');
 const { withTimeout, createAbortError } = require('~/utils/async');
 
 const DEFAULT_TIMEOUT_MS = 2000;
 const MIN_CONFIDENCE = 0.35;
+const logger = getLogger('rag.intentAnalyzer');
 const ENTITY_REGEX = /\b([A-ZА-ЯЁ][a-zа-яё]+(?:\s+[A-ZА-ЯЁ][a-zа-яё]+)*)\b/g;
 const RELATION_HINT_REGEX = /(между|связ(ь|и)|отношени[яе]|контакт[ы]?)/i;
 
@@ -87,21 +89,34 @@ async function analyzeIntent({
 } = {}) {
   const startedAt = Date.now();
   const operation = runAnalysis({ message, context, signal });
+  const baseContext = buildContext(
+    {
+      conversationId: message?.conversationId || context?.conversationId,
+      requestId: signal?.requestId,
+      userId: message?.userId,
+    },
+    {
+      logPrefix,
+    },
+  );
 
   try {
     const result = await withTimeout(operation, timeoutMs, 'Intent analysis timed out', signal);
     const duration = Date.now() - startedAt;
 
-    logger.info(`${logPrefix}`, {
-      duration,
-      entities: result.entities.map((entity) => ({
-        name: entity.name,
-        confidence: entity.confidence,
-        type: entity.type,
-        hints: entity.hints,
-      })),
-      needsFollowUps: result.needsFollowUps,
-    });
+    logger.info(
+      'rag.intent.analyze_success',
+      buildContext(baseContext, {
+        durationMs: duration,
+        entities: result.entities.map((entity) => ({
+          name: entity.name,
+          confidence: entity.confidence,
+          type: entity.type,
+          hints: entity.hints,
+        })),
+        needsFollowUps: result.needsFollowUps,
+      }),
+    );
 
     return {
       ...result,
@@ -110,13 +125,16 @@ async function analyzeIntent({
   } catch (error) {
     const duration = Date.now() - startedAt;
     if (error?.name === 'AbortError') {
-      logger.warn('[rag.intent.abort]', { duration });
+      logger.warn('rag.intent.analyze_abort', buildContext(baseContext, { durationMs: duration }));
       throw error;
     }
     if (error?.message?.includes('timed out')) {
-      logger.warn('[rag.intent.timeout]', { duration });
+      logger.warn('rag.intent.analyze_timeout', buildContext(baseContext, { durationMs: duration }));
     } else {
-      logger.error('[rag.intent.error]', { duration, message: error?.message });
+      logger.error(
+        'rag.intent.analyze_error',
+        buildContext(baseContext, { durationMs: duration, err: error }),
+      );
     }
     return {
       entities: [],

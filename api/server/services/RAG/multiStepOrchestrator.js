@@ -1,10 +1,12 @@
 'use strict';
 
-const { logger } = require('@librechat/data-schemas');
+const { getLogger } = require('~/utils/logger');
+const { buildContext } = require('~/utils/logContext');
 const { withTimeout, createAbortError } = require('~/utils/async');
 const { observeSegmentTokens, setContextLength } = require('~/utils/ragMetrics');
 
 const DEFAULT_TIMEOUT_MS = 20000;
+const logger = getLogger('rag.multiStep');
 
 function normalizeEntities(intentAnalysis = {}, maxEntities = 3) {
   const entities = Array.isArray(intentAnalysis?.entities)
@@ -35,7 +37,16 @@ function createEntityState(entity) {
   };
 }
 
-async function enqueueFollowUp({ entity, passIndex, enqueueMemoryTasks, signal, timeoutMs, userId, conversationId }) {
+async function enqueueFollowUp({
+  entity,
+  passIndex,
+  enqueueMemoryTasks,
+  signal,
+  timeoutMs,
+  userId,
+  conversationId,
+  context,
+}) {
   if (!enqueueMemoryTasks || !entity) {
     return { status: 'skipped' };
   }
@@ -52,6 +63,8 @@ async function enqueueFollowUp({ entity, passIndex, enqueueMemoryTasks, signal, 
   };
 
   const start = Date.now();
+  const baseContext =
+    context || buildContext({ conversationId, userId }, { entity: entity.name, passIndex });
   try {
     const promise = enqueueMemoryTasks([task], {
       reason: `rag_followup:${entity.name}`,
@@ -68,33 +81,36 @@ async function enqueueFollowUp({ entity, passIndex, enqueueMemoryTasks, signal, 
     );
 
     const status = result?.status || 'queued_async';
-    logger.info('[rag.followup.memory]', {
-      entity: entity.name,
-      passIndex,
-      duration: Date.now() - start,
-      outcome: status,
-    });
+    logger.info(
+      'rag.multiStep.memory_enqueue',
+      buildContext(baseContext, {
+        durationMs: Date.now() - start,
+        outcome: status,
+      }),
+    );
 
     return { status };
   } catch (error) {
     const duration = Date.now() - start;
     const outcome = error?.name === 'AbortError' ? 'aborted' : 'failed';
-    logger.error('[rag.followup.memory.error]', {
-      entity: entity.name,
-      passIndex,
-      duration,
-      outcome,
-      message: error?.message,
-    });
+    logger.error(
+      'rag.multiStep.memory_error',
+      buildContext(baseContext, {
+        durationMs: duration,
+        outcome,
+        err: error,
+      }),
+    );
     return { status: outcome };
   }
 }
 
-async function fetchGraph({ fetchGraphContext, entity, passIndex, config, signal }) {
+async function fetchGraph({ fetchGraphContext, entity, passIndex, config, signal, conversationId, userId }) {
   if (!fetchGraphContext || !entity) {
     return { lines: [], status: 'skipped' };
   }
 
+  const ctx = buildContext({ conversationId, userId }, { entity: entity.name, passIndex });
   try {
     const graphContext = await withTimeout(
       fetchGraphContext({
@@ -114,20 +130,22 @@ async function fetchGraph({ fetchGraphContext, entity, passIndex, config, signal
     }
 
     const lines = Array.isArray(graphContext.lines) ? graphContext.lines : [];
-    logger.info('[rag.followup.graph]', {
-      entity: entity.name,
-      passIndex,
-      lines: lines.length,
-    });
+    logger.info(
+      'rag.multiStep.graph_fetch',
+      buildContext(ctx, {
+        lines: lines.length,
+      }),
+    );
     return { lines, status: 'ok' };
   } catch (error) {
     const outcome = error?.name === 'AbortError' ? 'aborted' : 'failed';
-    logger.error('[rag.followup.graph.error]', {
-      entity: entity.name,
-      passIndex,
-      outcome,
-      message: error?.message,
-    });
+    logger.error(
+      'rag.multiStep.graph_error',
+      buildContext(ctx, {
+        outcome,
+        err: error,
+      }),
+    );
     return { lines: [], status: outcome };
   }
 }
@@ -152,7 +170,7 @@ function accumulateTokens(entityState, segment, tokens, length, endpoint, model)
       model,
     });
   } catch (error) {
-    logger.warn('[rag.followup.metrics.error]', { message: error?.message });
+    logger.warn('rag.multiStep.metrics_error', buildContext({}, { err: error }));
   }
 }
 
@@ -169,6 +187,11 @@ async function runMultiStepRag({
   signal,
 }) {
   const config = runtimeCfg?.multiStepRag || {};
+  const requestId = baseContext?.context?.requestId || baseContext?.requestId;
+  const baseLogContext = buildContext(
+    { conversationId, userId, requestId },
+    { endpoint, model },
+  );
   if (!config.enabled) {
     return {
       globalContext: baseContext,
@@ -180,10 +203,7 @@ async function runMultiStepRag({
 
   const entities = normalizeEntities(intentAnalysis, config.maxEntities);
   if (entities.length === 0) {
-    logger.info('[rag.context.multiStep.skip]', {
-      conversationId,
-      reason: 'no_entities',
-    });
+    logger.info('rag.multiStep.skip', buildContext(baseLogContext, { reason: 'no_entities' }));
     return {
       globalContext: baseContext,
       entities: [],
@@ -202,11 +222,13 @@ async function runMultiStepRag({
     }
 
     passesUsed = passIndex;
-    logger.info('[rag.followup.pass]', {
-      conversationId,
-      passIndex,
-      entities: entityStates.map((e) => e.name),
-    });
+    logger.info(
+      'rag.multiStep.pass_start',
+      buildContext(baseLogContext, {
+        passIndex,
+        entities: entityStates.map((e) => e.name),
+      }),
+    );
 
     if (passIndex === 0) {
       continue;
@@ -222,14 +244,19 @@ async function runMultiStepRag({
         passIndex,
         config: config.graph,
         signal,
+        conversationId,
+        userId,
       });
 
-      logger.info('[rag.followup.graph]', {
-        entity: entityState.name,
-        passIndex,
-        lines: graphResult.lines?.length || 0,
-        status: graphResult.status,
-      });
+      logger.info(
+        'rag.multiStep.graph_result',
+        buildContext(baseLogContext, {
+          entity: entityState.name,
+          passIndex,
+          lines: graphResult.lines?.length || 0,
+          status: graphResult.status,
+        }),
+      );
 
       if (graphResult.lines?.length) {
         entityState.graphLines.push(...graphResult.lines);
@@ -252,13 +279,17 @@ async function runMultiStepRag({
         timeoutMs: config.followUpTimeoutMs || DEFAULT_TIMEOUT_MS,
         userId,
         conversationId,
+        context: baseLogContext,
       });
 
-      logger.info('[rag.followup.vector]', {
-        entity: entityState.name,
-        passIndex,
-        status: memoryResult.status,
-      });
+      logger.info(
+        'rag.multiStep.vector_enqueue',
+        buildContext(baseLogContext, {
+          entity: entityState.name,
+          passIndex,
+          status: memoryResult.status,
+        }),
+      );
 
       queueStatus.memory = memoryResult.status;
     }
@@ -272,19 +303,21 @@ async function runMultiStepRag({
     }
   }
 
-  logger.info('[rag.context.multiStep]', {
-    conversationId,
-    entities: entityStates.map((entity) => ({
-      name: entity.name,
-      passes: entity.passes,
-      tokens: entity.tokens,
-      graphLines: entity.graphLines.length,
-      vectorChunks: entity.vectorChunks.length,
-    })),
-    globalTokens: baseContext?.length || 0,
-    queueStatus,
-    passesUsed,
-  });
+  logger.info(
+    'rag.multiStep.summary',
+    buildContext(baseLogContext, {
+      entities: entityStates.map((entity) => ({
+        name: entity.name,
+        passes: entity.passes,
+        tokens: entity.tokens,
+        graphLines: entity.graphLines.length,
+        vectorChunks: entity.vectorChunks.length,
+      })),
+      globalTokens: baseContext?.length || 0,
+      queueStatus,
+      passesUsed,
+    }),
+  );
 
   return {
     globalContext: baseContext,

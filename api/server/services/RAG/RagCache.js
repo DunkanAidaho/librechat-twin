@@ -1,4 +1,6 @@
-const { logger } = require('@librechat/data-schemas');
+const { getLogger } = require('~/utils/logger');
+const { buildContext } = require('~/utils/logContext');
+const logger = getLogger('rag.cache');
 
 /**
  * LRU Cache for RAG context with TTL support
@@ -79,7 +81,7 @@ class RagCache {
       this.accessOrder.delete(oldestKey);
       this.metrics.evictions++;
 
-      logger.debug('[RagCache] Evicted LRU entry', { key: oldestKey });
+      logger.debug('rag.cache.evict_lru', buildContext({}, { key: oldestKey }));
     }
   }
 
@@ -101,7 +103,7 @@ class RagCache {
     }
 
     if (pruned > 0) {
-      logger.debug('[RagCache] Pruned expired entries', { count: pruned });
+      logger.debug('rag.cache.prune_expired', buildContext({}, { count: pruned }));
     }
 
     return pruned;
@@ -113,7 +115,7 @@ class RagCache {
   clear() {
     this.cache.clear();
     this.accessOrder.clear();
-    logger.info('[RagCache] Cache cleared');
+    logger.info('rag.cache.cleared', buildContext({}, {}));
   }
 
   /**
@@ -157,7 +159,7 @@ class RagCache {
    */
   logMetrics() {
     const metrics = this.getMetrics();
-    logger.info('[RagCache] Metrics', metrics);
+    logger.info('rag.cache.metrics', buildContext({}, metrics));
   }
 }
 

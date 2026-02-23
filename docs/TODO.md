@@ -55,8 +55,11 @@
 ### 1. Transparent logging initiative (сквозное API-логирование)
 - **Статус**
   - memoryQueue + temporalClient, scripts (manage_summaries/sync_history), routes/files (+ RAG подроуты) и response utils уже переведены на scoped логгеры и `buildContext`.
-  - В работе: RAG core (`condense`, `multiStepOrchestrator`, `LongTextWorker`) и маршруты SSE.
+  - ✅ RAG core (`condense`, `multiStepOrchestrator`, `LongTextWorker`, `RagContextBuilder`, `RagCache`, `intentAnalyzer`) завершён.
+  - В работе: маршруты SSE.
   - Предстоит: LLM clients (`Anthropic`, `OpenAI`, `Google`, `BaseClient`).
+- [ ] RAG core: RagContextBuilder / RagCache / intentAnalyzer / multiStepOrchestrator / LongTextWorker  
+- [ ] LLM clients: BaseClient / Anthropic / OpenAI / Google
 - **Что нужно сделать**
   - Построить единый слой логирования для всех API-проходов (клиенты, контроллеры, сервисы, очереди, утилиты), чтобы каждая стадия запроса фиксировалась с единым форматом и requestId.
   - Использовать план из `docs/1_Trasparent_logging.md`, дополненный конкретными областями из `docs/project_map`.

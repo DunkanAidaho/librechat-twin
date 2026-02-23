@@ -35,10 +35,15 @@
 | Routes / middleware (`routes/agents`, `routes/files`) | ✅ Готово | requestId middleware + `buildContext` |
 | Memory queue & Temporal client      | ✅ Готово | `rag.memoryQueue`, `utils.temporalClient` на scoped логгере |
 | Response utils / SSE                | ✅ Готово | `safeWrite/safeEnd` через `buildContext` |
-| RAG core (`condense`, `multiStep`, `LongTextWorker`) | ⏳ В работе | `rag.condense` переведён, остальные в миграции |
+| RAG core (`condense`, `multiStep`, `LongTextWorker`, `RagContextBuilder`, `RagCache`, `intentAnalyzer`) | ✅ Готово | все сервисы используют scoped логгеры и `buildContext` |
 | LLM clients (`Anthropic`, `OpenAI`, `Google`, `BaseClient`) | 🔄 Не начато | Требуется унификация событий |
 | Скрипты (`manage_summaries`, `sync_history`) | ✅ Готово | scoped логгеры и контекст |
 | Документация                        | ⏳ В работе | Таблица прогресса, чеклист, TODO |
+
+| RagContextBuilder                  | ✅ Готово | `rag.context.*` события + кэш контекст |
+| RagCache                           | ✅ Готово | `rag.cache.*` события с контекстом |
+| multiStep orchestrator             | ✅ Готово | `rag.multiStep.*` события с entity/pass |
+| LongTextWorker                     | ✅ Готово | `rag.longText.*` события по chunk-ам |
 
 **3. Примеры логов**
 
@@ -50,6 +55,16 @@
 - Текстовый формат (`rag.memoryQueue`):
   ```
   2026-02-23T18:06:02.456Z [rag.memoryQueue] info: memoryQueue.summary {"context":{"requestId":"a12b","conversationId":"conv-123"},"status":"queued","totalTasks":5,"enqueued":5,"errors":0}
+  ```
+
+- JSON формат (`rag.multiStep`):
+  ```json
+  {"timestamp":"2026-02-23T18:10:00.456Z","level":"info","scope":"rag.multiStep","message":"rag.multiStep.pass_start","context":{"conversationId":"conv-42","requestId":"req-99","userId":"user-7"},"passIndex":1,"entities":["Alpha","Beta"]}
+  ```
+
+- Текстовый формат (`rag.longTextWorker`):
+  ```
+  2026-02-23T18:12:00.789Z [rag.longTextWorker] info: rag.longText.chunk_start {"context":{"conversationId":"conv-42","requestId":"dedupe-123","userId":"user-7"},"chunkCount":3,"messageId":"msg-1"}
   ```
 
 

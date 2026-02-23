@@ -2,7 +2,6 @@
 
 const crypto = require("crypto");
 const EventEmitter = require("events");
-const { logger } = require("@librechat/data-schemas");
 const { sendEvent } = require("@librechat/api");
 const configService = require("~/server/services/Config/ConfigService");
 const { enqueueMemoryTasks } = require("~/server/services/RAG/memoryQueue");
@@ -14,6 +13,8 @@ const {
   sc,
 } = require("~/utils/natsClient");
 const { enqueueGraphTask } = require("~/utils/temporalClient");
+const { getLogger } = require("~/utils/logger");
+const { buildContext } = require("~/utils/logContext");
 
 /**
  * Конфигурация воркера chunk-инжеста длинных текстов в граф.
@@ -64,6 +65,7 @@ const GRAPH_DONE_FLAG = "graphProcessedAt";
  */
 const workerEvents = new EventEmitter();
 const workerOptions = new WeakMap();
+const logger = getLogger("rag.longTextWorker");
 
 /**
  * Возвращает SHA1-хэш переданного текста.
@@ -205,7 +207,10 @@ class ChunkStore {
     try {
       return JSON.parse(sc.decode(entry.value));
     } catch (error) {
-      logger.warn("[long-text-graph][chunkStore] Ошибка JSON parse", { key, error });
+      logger.warn(
+        "rag.longText.chunk_store_error",
+        buildContext({}, { key, err: error })
+      );
       return {};
     }
   }
@@ -253,7 +258,10 @@ class LongTextGraphWorker {
       return;
     }
     if (!this.enabled) {
-      logger.warn("[long-text-graph] NATS отключен, worker не запускается");
+      logger.warn(
+        "rag.longText.start_skip",
+        buildContext({}, { reason: "nats_disabled" })
+      );
       return;
     }
     workerOptions.set(this, { sendProgressEvents: options.sendProgressEvents !== false });
@@ -261,7 +269,7 @@ class LongTextGraphWorker {
       this.enqueue(event);
     });
     this.initialized = true;
-    logger.info("[long-text-graph] Worker инициализирован.");
+    logger.info("rag.longText.start", buildContext({}, {}));
   }
 
   /**
@@ -269,57 +277,61 @@ class LongTextGraphWorker {
    */
   enqueue(event) {
     if (!this.enabled) {
-      logger.debug("[long-text-graph] Пропуск enqueue: NATS недоступен", { event });
+      logger.debug(
+        "rag.longText.enqueue_skip",
+        buildContext({}, { reason: "nats_disabled" })
+      );
       return;
     }
     if (!event || typeof event !== "object") {
-      logger.warn("[long-text-graph] Некорректное событие", { event });
+      logger.warn(
+        "rag.longText.enqueue_invalid",
+        buildContext({}, { eventType: typeof event })
+      );
       return;
     }
     this.queue = this.queue.finally(() => this.process(event));
   }
 
   async process({ conversationId, userId, messageId, text, dedupeKey, res }) {
+    const baseContext = buildContext({ conversationId, userId, requestId: dedupeKey });
     if (!this.enabled) {
-      logger.info("[long-text-graph] Пропуск обработки: NATS недоступен", {
-        conversationId,
-        messageId,
-      });
+      logger.info(
+        "rag.longText.skip",
+        buildContext(baseContext, { reason: "nats_disabled", messageId })
+      );
       return;
     }
     if (!conversationId || !userId) {
-      logger.warn("[long-text-graph] Пропуск: conversationId/userId отсутствует", {
-        conversationId,
-        userId,
-      });
+      logger.warn(
+        "rag.longText.skip",
+        buildContext(baseContext, { reason: "missing_ids", messageId })
+      );
       return;
     }
 
     const rawText = typeof text === "string" && text.trim().length ? text : "";
     if (!rawText) {
-      logger.warn("[long-text-graph] Пропуск: текст отсутствует", {
-        conversationId,
-        messageId,
-      });
+      logger.warn(
+        "rag.longText.skip",
+        buildContext(baseContext, { reason: "empty_text", messageId })
+      );
       return;
     }
 
     const chunks = createChunks(rawText);
     if (!chunks.length) {
-      logger.warn("[long-text-graph] Пропуск: chunk-ов нет", { conversationId, messageId });
+      logger.warn(
+        "rag.longText.skip",
+        buildContext(baseContext, { reason: "no_chunks", messageId })
+      );
       return;
     }
 
-    logger.info("[long-text-graph] Начинаем обработку", {
-      conversationId,
-      messageId,
-      chunkCount: chunks.length,
-    });
-    logger.info('[rag.graph.followup]', {
-      conversationId,
-      entity: undefined,
-      chunkCount: chunks.length,
-    });
+    logger.info(
+      "rag.longText.chunk_start",
+      buildContext(baseContext, { chunkCount: chunks.length, messageId })
+    );
 
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
@@ -343,33 +355,21 @@ class LongTextGraphWorker {
         });
       } catch (error) {
         logger.error(
-          `[long-text-graph] Отладка chunk ${chunk.idx}: ${error?.message || error}`,
-          {
-            conversationId,
+          "rag.longText.chunk_error",
+          buildContext(baseContext, {
             chunkIdx: chunk.idx,
             chunkHash: chunk.hash,
-            dedupeKey,
-            stack: error?.stack,
-          },
-        );
-        logger.error(
-          `[long-text-graph] Ошибка chunk ${chunk.idx}: ${error?.message || error}`,
-          {
-            conversationId,
-            chunkIdx: chunk.idx,
-            chunkHash: chunk.hash,
-            length: chunk.content.length,
-            dedupeKey,
-            stack: error?.stack,
-          },
+            chunkChars: chunk.content.length,
+            err: error,
+          })
         );
       }
     }
 
-    logger.info("[long-text-graph] Готово", {
-      conversationId,
-      chunkCount: chunks.length,
-    });
+    logger.info(
+      "rag.longText.done",
+      buildContext(baseContext, { chunkCount: chunks.length })
+    );
 
     this.emitProgress({
       res,
@@ -384,6 +384,7 @@ class LongTextGraphWorker {
 
   async processChunk({ chunk, chunks, conversationId, userId, dedupeKey, originalMessageId }) {
     const { idx, content, hash } = chunk;
+    const chunkContext = buildContext({ conversationId, userId }, { chunkIdx: idx, chunkHash: hash });
     const chunkStatus = await chunkStore.get(conversationId, hash);
 
     if (!chunkStatus[VECTOR_FLAG]) {
@@ -393,13 +394,8 @@ class LongTextGraphWorker {
         incLongTextGraphChunk("vectorized");
       } catch (error) {
         logger.error(
-          `[long-text-graph] Ошибка vector chunk ${idx}: ${error?.message || error}`,
-          {
-            conversationId,
-            chunkIdx: idx,
-            dedupeKey,
-            stack: error?.stack,
-          },
+          "rag.longText.vector_error",
+          buildContext(chunkContext, { dedupeKey, err: error })
         );
         throw error;
       }
@@ -421,13 +417,8 @@ class LongTextGraphWorker {
         incLongTextGraphChunk("graph_enqueued");
       } catch (error) {
         logger.error(
-          `[long-text-graph] Ошибка graph chunk ${idx}: ${error?.message || error}`,
-          {
-            conversationId,
-            chunkIdx: idx,
-            dedupeKey,
-            stack: error?.stack,
-          },
+          "rag.longText.graph_error",
+          buildContext(chunkContext, { dedupeKey, err: error })
         );
         throw error;
       }
@@ -447,11 +438,10 @@ class LongTextGraphWorker {
       ingest_dedupe_key: vectorKey,
     };
 
-    logger.debug("[long-text-graph] enqueue vector chunk", {
-      conversationId,
-      chunkIdx: idx,
-      dedupeKey,
-    });
+    logger.info(
+      "rag.longText.vector_enqueue",
+      buildContext({ conversationId, userId }, { chunkIdx: idx, dedupeKey: vectorKey })
+    );
 
     await enqueueMemoryTasks(
       [
@@ -507,13 +497,15 @@ class LongTextGraphWorker {
 
     const timeoutMs = calcAdaptiveTimeout(idx, GRAPH_REQUEST_TIMEOUT_MS);
 
-    logger.info("[long-text-graph] enqueue graph chunk", {
-      conversationId,
-      chunkIdx: idx,
-      chunkCount,
-      timeoutMs,
-      graphKey,
-    });
+    logger.info(
+      "rag.longText.graph_enqueue",
+      buildContext({ conversationId, userId }, {
+        chunkIdx: idx,
+        chunkCount,
+        timeoutMs,
+        graphKey,
+      })
+    );
 
     await runWithResilience(
       "enqueueGraphChunk",
@@ -544,11 +536,10 @@ class LongTextGraphWorker {
         },
       });
     } catch (error) {
-      logger.debug("[long-text-graph] Не удалось отправить SSE", {
-        conversationId,
-        status,
-        error: error?.message,
-      });
+      logger.debug(
+        "rag.longText.sse_error",
+        buildContext({ conversationId }, { status, err: error })
+      );
     }
   }
 }
