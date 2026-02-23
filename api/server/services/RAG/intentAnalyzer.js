@@ -100,6 +100,8 @@ async function analyzeIntent({
     },
   );
 
+  logger.info('rag.intent.analyze_start', baseContext);
+
   try {
     const result = await withTimeout(operation, timeoutMs, 'Intent analysis timed out', signal);
     const duration = Date.now() - startedAt;

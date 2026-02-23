@@ -14,16 +14,13 @@ const {
 
 const { sendEvent } = require('@librechat/api');
 const { getLogger } = require('~/utils/logger');
-const { buildContext } = require('~/utils/logContext');
+const { buildContext, getRequestContext } = require('~/utils/logContext');
 const config = require('~/server/services/Config/ConfigService');
 const { clearDedupeKey } = require('~/server/services/Deduplication/clearDedupeKey');
 const { runWithResilience, normalizeLabelValue } = require('~/server/utils/resilience');
 const { canWrite, isResponseFinalized, makeDetachableRes } = require('~/server/utils/responseUtils');
 
-const {
-  handleAbortError,
-  createAbortController,
-} = require('~/server/middleware');
+const { handleAbortError, createAbortController } = require('~/server/middleware');
 
 const logger = getLogger('routes.agents.request');
 const { disposeClient, clientRegistry, requestDataMap } = require('~/server/cleanup');
@@ -356,7 +353,12 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       return { success: true, error: null, result };
     } catch (err) {
       logger.error(
-        `[MemoryQueue] Ошибка постановки задачи: причина=${meta?.reason}, диалог=${meta?.conversationId}, сообщение=${err?.message || err}.`,
+        'routes.agents.memory_queue_error',
+        buildContext(getRequestContext(req), {
+          reason: meta?.reason,
+          conversationId: meta?.conversationId,
+          err,
+        }),
       );
       return { success: false, error: err, result: null };
     }
@@ -596,10 +598,14 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
     }
 
     if (!assistantText || !assistantText.trim()) {
-      logger.debug('[GraphWorkflow] Пропуск Graph (нет текста ассистента)', {
-        conversationId: localConversationId,
-        assistantMessageId: localResponse?.messageId,
-      });
+          logger.debug(
+            'routes.agents.graph_skip',
+            buildContext(getRequestContext(req), {
+              conversationId: localConversationId,
+              assistantMessageId: localResponse?.messageId,
+              reason: 'no_assistant_text',
+            }),
+          );
       return;
     }
 
@@ -621,7 +627,12 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
         logger.debug(`[GraphWorkflow] Запущен для сообщения ${localResponse?.messageId}`);
       } catch (err) {
         logger.error(
-          `[GraphWorkflow] Ошибка постановки/выполнения (conversation=${localConversationId}, message=${localResponse?.messageId}): ${err?.message || err}`,
+          'routes.agents.graph_error',
+          buildContext(getRequestContext(req), {
+            conversationId: localConversationId,
+            messageId: localResponse?.messageId,
+            err,
+          }),
         );
       }
     });
@@ -968,7 +979,10 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
           try {
             abortController.abort();
           } catch {}
-          logger.info('[AgentController] Клиент разорвал соединение (аналог HTTP 499).');
+          logger.info(
+            'routes.agents.sse_abort',
+            buildContext(getRequestContext(req), { reason: 'client_close_before_finalize' }),
+          );
         }
       };
       res.once('close', onClose);
@@ -1152,13 +1166,19 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
     const onClose = () => {
       const closedAfterFinalize = responseFinalized || isResponseFinalized(dres);
       if (closedAfterFinalize) {
-        logger.debug('[AgentController] Соединение клиента закрыто после финализации (headless).');
+        logger.debug(
+          'routes.agents.sse_close_after_final',
+          buildContext(getRequestContext(req), { mode: 'headless' }),
+        );
         return;
       }
       if (!detached) {
         dres.setDetached(true);
         detached = true;
-        logger.info('[AgentController] Клиент отключился, отсоединяем потоковую передачу');
+        logger.info(
+          'routes.agents.sse_detach',
+          buildContext(getRequestContext(req), { mode: 'headless' }),
+        );
       }
     };
     res.once('close', onClose);

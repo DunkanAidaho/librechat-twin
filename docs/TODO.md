@@ -58,7 +58,7 @@
   - ✅ RAG core (`condense`, `multiStepOrchestrator`, `LongTextWorker`, `RagContextBuilder`, `RagCache`, `intentAnalyzer`) завершён.
   - В работе: маршруты SSE.
   - Предстоит: LLM clients (`Anthropic`, `OpenAI`, `Google`, `BaseClient`).
-- [ ] RAG core: RagContextBuilder / RagCache / intentAnalyzer / multiStepOrchestrator / LongTextWorker  
+- [x] RAG core: RagContextBuilder / RagCache / intentAnalyzer / multiStepOrchestrator / LongTextWorker  
 - [ ] LLM clients: BaseClient / Anthropic / OpenAI / Google
 - **Что нужно сделать**
   - Построить единый слой логирования для всех API-проходов (клиенты, контроллеры, сервисы, очереди, утилиты), чтобы каждая стадия запроса фиксировалась с единым форматом и requestId.

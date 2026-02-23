@@ -32,7 +32,7 @@
 
 | Модуль / область                     | Статус   | Комментарии |
 |-------------------------------------|----------|-------------|
-| Routes / middleware (`routes/agents`, `routes/files`) | ✅ Готово | requestId middleware + `buildContext` |
+| Routes / middleware (`routes/agents`, `routes/files`) | ✅ Готово | requestId middleware + `buildContext`; `controllers/agents/request` переведён на scoped логгер `routes.agents.request` |
 | Memory queue & Temporal client      | ✅ Готово | `rag.memoryQueue`, `utils.temporalClient` на scoped логгере |
 | Response utils / SSE                | ✅ Готово | `safeWrite/safeEnd` через `buildContext` |
 | RAG core (`condense`, `multiStep`, `LongTextWorker`, `RagContextBuilder`, `RagCache`, `intentAnalyzer`) | ✅ Готово | все сервисы используют scoped логгеры и `buildContext` |
@@ -44,6 +44,7 @@
 | RagCache                           | ✅ Готово | `rag.cache.*` события с контекстом |
 | multiStep orchestrator             | ✅ Готово | `rag.multiStep.*` события с entity/pass |
 | LongTextWorker                     | ✅ Готово | `rag.longText.*` события по chunk-ам |
+| IntentAnalyzer                     | ✅ Готово | `rag.intent.*` события с duration |
 
 **3. Примеры логов**
 

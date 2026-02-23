@@ -105,12 +105,21 @@ async function enqueueFollowUp({
   }
 }
 
-async function fetchGraph({ fetchGraphContext, entity, passIndex, config, signal, conversationId, userId }) {
+async function fetchGraph({
+  fetchGraphContext,
+  entity,
+  passIndex,
+  config,
+  signal,
+  baseContext,
+}) {
   if (!fetchGraphContext || !entity) {
     return { lines: [], status: 'skipped' };
   }
 
-  const ctx = buildContext({ conversationId, userId }, { entity: entity.name, passIndex });
+  const ctx = baseContext
+    ? buildContext(baseContext, { entity: entity.name, passIndex })
+    : buildContext({}, { entity: entity.name, passIndex });
   try {
     const graphContext = await withTimeout(
       fetchGraphContext({
@@ -244,8 +253,7 @@ async function runMultiStepRag({
         passIndex,
         config: config.graph,
         signal,
-        conversationId,
-        userId,
+        baseContext: baseLogContext,
       });
 
       logger.info(

@@ -294,7 +294,7 @@ class LongTextGraphWorker {
   }
 
   async process({ conversationId, userId, messageId, text, dedupeKey, res }) {
-    const baseContext = buildContext({ conversationId, userId, requestId: dedupeKey });
+    const baseContext = buildContext({ conversationId, userId, requestId: dedupeKey }, { messageId });
     if (!this.enabled) {
       logger.info(
         "rag.longText.skip",
@@ -330,7 +330,7 @@ class LongTextGraphWorker {
 
     logger.info(
       "rag.longText.chunk_start",
-      buildContext(baseContext, { chunkCount: chunks.length, messageId })
+      buildContext(baseContext, { chunkCount: chunks.length })
     );
 
     for (let i = 0; i < chunks.length; i++) {
@@ -440,7 +440,7 @@ class LongTextGraphWorker {
 
     logger.info(
       "rag.longText.vector_enqueue",
-      buildContext({ conversationId, userId }, { chunkIdx: idx, dedupeKey: vectorKey })
+      buildContext({ conversationId, userId }, { chunkIdx: idx, chunkHash: hash, dedupeKey: vectorKey })
     );
 
     await enqueueMemoryTasks(
@@ -504,6 +504,7 @@ class LongTextGraphWorker {
         chunkCount,
         timeoutMs,
         graphKey,
+        messageId,
       })
     );
 

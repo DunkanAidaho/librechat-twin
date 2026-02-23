@@ -17,10 +17,9 @@
 
 -## 3. Логирование и наблюдаемость
 - **Transparent logging initiative**: только scoped логгер (`utils/logger`) или `ragLogger` для RAG. Никаких `debug`, `console.log`, `warn` напрямую.
-- **logContext helper**: перед любым логом вызывать `buildLogContext(reqOrMeta, extra)` из `~/utils/logContext.js`, чтобы добавить `requestId/conversationId/userId`. Изменения по логам обязательно фиксируем в документации (`docs/1_Transparent_logging.md`, `docs/TODO.md`).
+- **Контроллеры `/agents`**: `api/server/controllers/agents/request.js` обязан создавать scoped логгер `routes.agents.request` и прокидывать контекст через `buildContext`/`getRequestContext` для всех логов и SSE.
+- **Перед любым логом используем buildLogContext/buildContext**: импортируем из `~/utils/logContext`, чтобы включить `requestId`, `conversationId`, `userId`, `agentId`. После каждого модуля, мигрированного на новый логгер, обновляем `docs/1_Trasparent_logging.md` и соответствующий пункт в `docs/TODO.md`.
 - **Гигиена репозитория:** при переносе/переименовании логгеров удаляем старые файлы (`logger.js`, `.bak`, временные копии) и проверяем `git status`. Перед сборкой контейнера запускаем `docker build --no-cache` (или аналогичный шаг CI), чтобы исключить подтягивание устаревших артефактов.
-- **buildContext обязателен**: перед любым логированием используем `buildContext` (или `buildLogContext`) для добавления `requestId`, `conversationId`, `userId`, `agentId`. Без контекста лог считается неполным.
-- **Обновление прогресса**: каждая миграция модуля на новый логгер сопровождается изменениями в `docs/1_Trasparent_logging.md` и `docs/TODO.md` (таблица статусов + чеклисты).
 - **Request context**: контроллеры обязаны создавать `requestId` и передавать его дальше (в SSE, RAG, очереди). Логи без `requestId` считаются долгом.
 - **Единый формат событий**: `scope`, `phase`, `conversationId`, `userId`, `agentId`, `latency`, `model`, `attempt`, `signalAborted` и т.п. — по списку из `docs/1_Trasparent_logging.md`.
 - **Структурные meta-поля**: `context` и другие объекты проходят через `sanitizePlainObject` (с лимитами глубины/размера и защитой от циклов). Нельзя применять `JSON.stringify` в hot-path или превращать объекты в строки — передаём лёгкую, но структурированную версию.

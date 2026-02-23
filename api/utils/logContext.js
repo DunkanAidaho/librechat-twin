@@ -1,12 +1,25 @@
 'use strict';
 
 function extractFromReq(req = {}) {
+  if (!req || typeof req !== 'object') {
+    return {};
+  }
+
+  const requestId =
+    req.context?.requestId || req.headers?.['x-request-id'] || req.headers?.['x-trace-id'];
+  const conversationId =
+    req.conversationId ||
+    req.body?.conversationId ||
+    req.params?.conversationId ||
+    req.query?.conversationId;
+  const userId = req.user?.id || req.body?.userId;
+  const agentId = req.body?.agentId || req.params?.agentId;
+
   return {
-    requestId: req.context?.requestId,
-    conversationId:
-      req.body?.conversationId || req.params?.conversationId || req.query?.conversationId || undefined,
-    userId: req.user?.id,
-    agentId: req.body?.agentId || req.params?.agentId || undefined,
+    requestId,
+    conversationId,
+    userId,
+    agentId,
   };
 }
 
@@ -31,6 +44,14 @@ function buildContext(source, extra = {}) {
   };
 }
 
+function getRequestContext(req) {
+  if (!req) {
+    return {};
+  }
+  return extractFromReq(req);
+}
+
 module.exports = {
   buildContext,
+  getRequestContext,
 };

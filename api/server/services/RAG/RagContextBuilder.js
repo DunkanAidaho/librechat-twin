@@ -135,11 +135,11 @@ class RagContextBuilder {
    * @param {Object} params
    * @returns {Promise<{lines: string[], queryHint: string}|null>}
    */
-  async fetchGraphContext({ conversationId, toolsGatewayUrl, limit, timeoutMs }) {
+  async fetchGraphContext({ conversationId, toolsGatewayUrl, limit, timeoutMs, context }) {
     const url = `${toolsGatewayUrl}/neo4j/graph_context`;
     const requestPayload = { conversation_id: conversationId, limit };
 
-    const ctx = buildContext({ conversationId });
+    const ctx = buildContext(context || { conversationId });
     logger.info(
       'rag.context.graph_fetch',
       buildContext(ctx, {
@@ -198,6 +198,7 @@ class RagContextBuilder {
     embeddingModel,
     userId,
     timeoutMs,
+    context,
   }) {
     try {
       const response = await axios.post(
@@ -216,11 +217,19 @@ class RagContextBuilder {
         ? response.data.results.map((item) => item?.content ?? '').filter(Boolean)
         : [];
 
+      logger.info(
+        'rag.context.vector_fetch',
+        buildContext(context || { conversationId }, {
+          chunks: rawChunks.length,
+          vectorTopK,
+        }),
+      );
+
       return rawChunks;
     } catch (error) {
       logger.error(
         'rag.context.vector_fetch_error',
-        buildContext({ conversationId }, { err: error })
+        buildContext(context || { conversationId }, { err: error })
       );
       return [];
     }
@@ -237,6 +246,7 @@ class RagContextBuilder {
     recentTurns,
     userId,
     timeoutMs,
+    context,
   }) {
     try {
       const recentResp = await axios.post(
@@ -256,7 +266,7 @@ class RagContextBuilder {
       return rawRecent;
     } catch (e) {
       const status = e?.response?.status;
-      const ctx = buildContext({ conversationId });
+      const ctx = buildContext(context || { conversationId });
       if (status === 404 || status === 501) {
         logger.info('rag.context.recent_unavailable', buildContext(ctx, { status }));
       } else {
@@ -289,10 +299,22 @@ class RagContextBuilder {
   }) {
     this.cacheTtlMs = Math.max(Number(runtimeCfg.ragCacheTtl) * 1000, 0);
 
+    const requestContext = buildContext(
+      {
+        conversationId,
+        requestId: req?.context?.requestId || req?.requestId,
+        userId: req?.user?.id,
+      },
+      {
+        endpoint: endpointOption?.endpoint,
+        model: endpointOption?.model,
+      },
+    );
+
     if (!runtimeCfg.useConversationMemory || !conversationId || !userQuery) {
       logger.info(
         'rag.context.skip',
-        buildContext({ conversationId }, {
+        buildContext(requestContext, {
           reason: 'disabled_or_empty_query',
           enableMemoryCache: runtimeCfg.enableMemoryCache,
         }),
@@ -313,7 +335,7 @@ class RagContextBuilder {
 
     logger.debug(
       'rag.context.query_tokens',
-      buildContext({ conversationId }, {
+      buildContext(requestContext, {
         length: normalizedQuery.length,
         tokens: queryTokenCount,
       }),
@@ -354,7 +376,7 @@ class RagContextBuilder {
         const cachedMetrics = cached.metrics || {};
         logger.info(
           'rag.context.cache_hit',
-          buildContext({ conversationId }, { cacheKey }),
+          buildContext(requestContext, { cacheKey }),
         );
         return {
           patchedSystemContent: cached.systemContent,
@@ -368,7 +390,7 @@ class RagContextBuilder {
       observeCache('miss');
       logger.info(
         'rag.context.cache_miss',
-        buildContext({ conversationId }, { cacheKey })
+        buildContext(requestContext, { cacheKey })
       );
     }
 
@@ -396,6 +418,7 @@ class RagContextBuilder {
         toolsGatewayUrl,
         limit: graphMaxLines,
         timeoutMs: toolsGatewayTimeout,
+        context: requestContext,
       });
 
       if (graphContext?.lines?.length) {
@@ -434,6 +457,7 @@ class RagContextBuilder {
         embeddingModel,
         userId: req?.user?.id,
         timeoutMs: toolsGatewayTimeout,
+        context: requestContext,
       });
 
       vectorChunks = this.sanitizeVectorChunks(rawChunks, {
@@ -448,6 +472,7 @@ class RagContextBuilder {
           recentTurns,
           userId: req?.user?.id,
           timeoutMs: toolsGatewayTimeout,
+          context: requestContext,
         });
 
         const recentChunks = this.sanitizeVectorChunks(rawRecent, {
@@ -505,7 +530,7 @@ class RagContextBuilder {
             summarizationConfig: summarizationCfg,
           });
         } catch (error) {
-        logger.error('rag.context.summarize_error', buildContext({ conversationId }, { err: error }));
+          logger.error('rag.context.summarize_error', buildContext(requestContext, { err: error }));
         }
       }
 
@@ -519,7 +544,7 @@ class RagContextBuilder {
       try {
         sanitizedBlock = sanitizeInput(combined);
       } catch (error) {
-        logger.error('rag.context.sanitize_error', buildContext({ conversationId }, { err: error }));
+        logger.error('rag.context.sanitize_error', buildContext(requestContext, { err: error }));
       }
 
       finalSystemContent = sanitizedBlock + systemContent;
@@ -570,7 +595,7 @@ class RagContextBuilder {
       });
       logger.info(
         'rag.context.cache_store',
-        buildContext({ conversationId }, { cacheKey, ttlMs: this.cacheTtlMs })
+        buildContext(requestContext, { cacheKey, ttlMs: this.cacheTtlMs })
       );
     }
 
