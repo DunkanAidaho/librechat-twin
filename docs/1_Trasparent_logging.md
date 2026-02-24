@@ -37,7 +37,7 @@
 | Response utils / SSE                | ✅ Готово | `safeWrite/safeEnd` через `buildContext` |
 | RAG core (`condense`, `multiStep`, `LongTextWorker`, `RagContextBuilder`, `RagCache`, `intentAnalyzer`) | ✅ Готово | все сервисы используют scoped логгеры и `buildContext`; `rag.condense.*` покрывает Map/Reduce и итоговый `rag.condense.mr_finished` |
 | Message history (MessageHistoryManager, trimmers) | ✅ Готово | scoped логгер `rag.history.*`, buildContext({ conversationId, userId }), события drop/prompt/context_layers/enqueue |
-| LLM clients (`Anthropic`, `OpenAI`, `Google`, `BaseClient`) | ⏳ В работе | BaseClient + OpenAI обновлены, Anthropic/Google в прогрессе |
+| LLM clients (`Anthropic`, `OpenAI`, `Google`, `BaseClient`) | ✅ Готово | все клиенты используют scoped логгеры, buildContext и события вида `clients.<provider>.*` без дампа payload |
 | Скрипты (`manage_summaries`, `sync_history`) | ✅ Готово | scoped логгеры и контекст |
 | Документация                        | ⏳ В работе | Таблица прогресса, чеклист, TODO |
 
