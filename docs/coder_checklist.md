@@ -16,7 +16,7 @@
 - **Валидация**: любые числовые/булевы параметры — через `parseOptionalInt/Bool/Float` или `zod`-схемы ConfigService.
 
 -## 3. Логирование и наблюдаемость
-- **Transparent logging initiative**: только scoped логгер (`utils/logger`) или `ragLogger` для RAG. Никаких `debug`, `console.log`, `warn` напрямую.
+- **Transparent logging initiative**: только scoped логгер (`utils/logger`) или `ragLogger` для RAG. Никаких `debug`, `console.log`, `warn` напрямую. Map/Reduce конденсация обязана использовать `rag.condense.*` события и `buildContext` для request/chunk/reduce контекстов; history manager использует `buildContext({ conversationId, userId })` и `rag.history.*` события.
 - **Контроллеры `/agents`**: `api/server/controllers/agents/request.js` обязан создавать scoped логгер `routes.agents.request` и прокидывать контекст через `buildContext`/`getRequestContext` для всех логов и SSE.
 - **Перед любым логом используем buildLogContext/buildContext**: импортируем из `~/utils/logContext`, чтобы включить `requestId`, `conversationId`, `userId`, `agentId`. После каждого модуля, мигрированного на новый логгер, обновляем `docs/1_Trasparent_logging.md` и соответствующий пункт в `docs/TODO.md`.
 - **Гигиена репозитория:** при переносе/переименовании логгеров удаляем старые файлы (`logger.js`, `.bak`, временные копии) и проверяем `git status`. Перед сборкой контейнера запускаем `docker build --no-cache` (или аналогичный шаг CI), чтобы исключить подтягивание устаревших артефактов.

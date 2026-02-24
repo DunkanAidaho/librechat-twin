@@ -35,7 +35,8 @@
 | Routes / middleware (`routes/agents`, `routes/files`) | ✅ Готово | requestId middleware + `buildContext`; `controllers/agents/request` переведён на scoped логгер `routes.agents.request` |
 | Memory queue & Temporal client      | ✅ Готово | `rag.memoryQueue`, `utils.temporalClient` на scoped логгере |
 | Response utils / SSE                | ✅ Готово | `safeWrite/safeEnd` через `buildContext` |
-| RAG core (`condense`, `multiStep`, `LongTextWorker`, `RagContextBuilder`, `RagCache`, `intentAnalyzer`) | ✅ Готово | все сервисы используют scoped логгеры и `buildContext` |
+| RAG core (`condense`, `multiStep`, `LongTextWorker`, `RagContextBuilder`, `RagCache`, `intentAnalyzer`) | ✅ Готово | все сервисы используют scoped логгеры и `buildContext`; `rag.condense.*` покрывает Map/Reduce |
+| Message history (MessageHistoryManager, trimmers) | ✅ Готово | scoped логгер `rag.history.*`, buildContext({ conversationId, userId }) |
 | LLM clients (`Anthropic`, `OpenAI`, `Google`, `BaseClient`) | 🔄 Не начато | Требуется унификация событий |
 | Скрипты (`manage_summaries`, `sync_history`) | ✅ Готово | scoped логгеры и контекст |
 | Документация                        | ⏳ В работе | Таблица прогресса, чеклист, TODO |
@@ -61,6 +62,21 @@
 - JSON формат (`rag.multiStep`):
   ```json
   {"timestamp":"2026-02-23T18:10:00.456Z","level":"info","scope":"rag.multiStep","message":"rag.multiStep.pass_start","context":{"conversationId":"conv-42","requestId":"req-99","userId":"user-7"},"passIndex":1,"entities":["Alpha","Beta"]}
+  ```
+
+- JSON формат (`rag.condense.chunk_start`):
+  ```json
+  {"timestamp":"2026-02-24T10:10:00.000Z","level":"info","scope":"rag.condense","message":"rag.condense.chunk_start","context":{"conversationId":"conv-1","userId":"user-2"},"chunkIndex":2,"chunkTotal":5,"chunkLength":14250}
+  ```
+
+- JSON формат (`rag.condense.mr_finished`):
+  ```json
+  {"timestamp":"2026-02-24T10:10:05.000Z","level":"info","scope":"rag.condense","message":"rag.condense.mr_finished","context":{"conversationId":"conv-1","userId":"user-2"},"finalLength":5800,"provider":"openrouter:llama-3.1","durationMs":4523}
+  ```
+
+- JSON формат (`rag.history.prompt_shrink`):
+  ```json
+  {"timestamp":"2026-02-24T10:12:00.000Z","level":"info","scope":"rag.history","message":"rag.history.prompt_shrink","context":{"conversationId":"conv-1","userId":"user-2"},"index":3,"role":"assistant","len":18000,"reason":"length","limitLabel":"ASSIST_LONG_TO_RAG","limitValue":15000,"snippetLen":1500}
   ```
 
 - Текстовый формат (`rag.longTextWorker`):

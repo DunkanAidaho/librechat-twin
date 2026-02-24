@@ -464,26 +464,37 @@ async function summarizeWithDescriptor(descriptor, { prompt, originalText, budge
   }
 }
 
-async function summarizeWithChain({ chain, prompt, originalText, budgetChars, stage }) {
+async function summarizeWithChain({ chain, prompt, originalText, budgetChars, stage, requestContext }) {
   for (const descriptor of chain) {
     try {
       const result = await summarizeWithDescriptor(descriptor, { prompt, originalText, budgetChars });
       if (typeof result === 'string' && result.trim().length > 0) {
         return { text: result.trim(), providerLabel: descriptor.label };
       }
-      logger.warn(`[RAG][condense] ${stage} провайдер ${descriptor.label} вернул пустой результат.`);
+      logger.warn(
+        'rag.condense.provider_empty',
+        buildContext(requestContext || {}, {
+          stage,
+          provider: descriptor.label,
+        }),
+      );
     } catch (error) {
       logger.error(
-        `[RAG][condense] ${stage} провайдер ${descriptor.label} завершился ошибкой: ${error.message}`,
-        {
-          provider: descriptor.label,
+        'rag.condense.provider_error',
+        buildContext(requestContext || {}, {
           stage,
+          provider: descriptor.label,
+          message: error?.message,
           stack: error?.stack,
-        },
+        }),
       );
     }
   }
 
+  logger.warn(
+    'rag.condense.provider_chain_exhausted',
+    buildContext(requestContext || {}, { stage }),
+  );
   return { text: '', providerLabel: null };
 }
 
@@ -500,18 +511,24 @@ async function condenseContext({
 }) {
   const t0 = Date.now();
   try {
+    const requestContext = buildContext(req || {}, {
+      endpoint: endpointOption?.endpoint,
+      model: endpointOption?.model,
+    });
     // ИСПРАВЛЕНО: Передаем timeoutMs в resolveSummarizerProviders
     const effectiveTimeout = timeoutMs || CONDENSE_TIMEOUT_MS;
     
-    logger.info('[RAG][condense] Configuration', {
+    logger.info('rag.condense.config', buildContext(requestContext, {
       budgetChars,
       chunkChars,
       timeoutMs: effectiveTimeout,
       contextLength: contextText.length,
-    });
+    }));
     
     const { chain: providerChain, warnings, signature: chainSignature } = resolveSummarizerProviders();
-    warnings.forEach((message) => logger.warn(`[RAG][condense] ${message}`));
+    warnings.forEach((message) =>
+      logger.warn('rag.condense.config_warning', buildContext(requestContext, { warning: message })),
+    );
 
     // ИСПРАВЛЕНО: Обновляем таймауты в дескрипторах провайдеров
     for (const descriptor of providerChain) {
@@ -521,25 +538,40 @@ async function condenseContext({
     }
 
     if (!providerChain.length) {
-      logger.warn('[RAG][condense] Цепочка провайдеров пуста, возвращаем исходный контекст.');
+      logger.warn('rag.condense.config_error', buildContext(requestContext, {
+        reason: 'empty_chain',
+      }));
       return contextText;
     }
 
     if (providerChain.length === 1 && providerChain[0].provider === 'none') {
-      logger.info('[RAG][condense] Провайдер "none" активирован. Map-Reduce отключён.');
+      logger.info('rag.condense.config', buildContext(requestContext, {
+        mode: 'provider_none_passthrough',
+      }));
       return contextText;
     }
 
     const chunks = splitIntoChunks(contextText, chunkChars, Math.floor(chunkChars * 1.25));
     const providerChainLabel = describeProviderChain(providerChain);
     logger.info(
-      `[RAG][condense] MR-Start: chunks=${chunks.length}, budget=${budgetChars}, chunkChars=${chunkChars}, timeout=${effectiveTimeout}ms, providers=${providerChainLabel}`,
+      'rag.condense.map_start',
+      buildContext(requestContext, {
+        chunkTotal: chunks.length,
+        budgetChars,
+        chunkChars,
+        timeoutMs: effectiveTimeout,
+        providers: providerChainLabel,
+      }),
     );
 
     const graphExtra = prepareGraphExtras(graphContext);
     if (DEBUG_CONDENSE && (graphExtra.hint || graphExtra.lines.length)) {
       logger.info(
-        `[RAG][condense] Graph extras enabled (lines=${graphExtra.lines.length}, hint=${graphExtra.hint ? graphExtra.hint.length : 0} chars).`,
+        'rag.condense.graph_extras',
+        buildContext(requestContext, {
+          hintLength: graphExtra.hint ? graphExtra.hint.length : 0,
+          lineCount: graphExtra.lines.length,
+        }),
       );
     }
 
@@ -550,16 +582,19 @@ async function condenseContext({
     const actualPLimit = await getPLimit();
     const limit = actualPLimit(CONCURRENCY);
 
-    if (DEBUG_CONDENSE) {
-      logger.info(`[RAG][condense] Concurrency limit: ${CONCURRENCY}, Cache TTL: ${CACHE_TTL}s, Timeout: ${effectiveTimeout}ms`);
-    }
-
     const summaries = await Promise.all(
       chunks.map((chunk, index) =>
         limit(async () => {
           const chunkNumber = index + 1;
+          const chunkContext = buildContext(requestContext, {
+            chunkIndex: chunkNumber,
+            chunkTotal: chunks.length,
+            chunkLength: chunk.length,
+          });
           const prompt = `${mapPrompt(userQuery, graphExtra)}\n\n=== Текст чанка ===\n${chunk}`;
           const cacheKey = cacheKeyChunk(chainSignature, budgetChars, userQuery, chunk, graphExtra);
+
+          logger.info('rag.condense.chunk_start', chunkContext);
 
           if (r && CACHE_TTL > 0) {
             try {
@@ -569,32 +604,33 @@ async function condenseContext({
                 const cachedSummary =
                   typeof cachedValue === 'string' ? cachedValue : cachedValue?.summary;
                 if (cachedSummary) {
-                  if (DEBUG_CONDENSE) {
-                    const cachedProvider =
-                      typeof cachedValue === 'object' && cachedValue?.provider
-                        ? cachedValue.provider
-                        : 'cache';
-                    logger.info(
-                      `[RAG][condense] Cache hit for chunk ${chunkNumber}/${chunks.length} (provider=${cachedProvider}).`,
-                    );
-                  }
+                  const cachedProvider =
+                    typeof cachedValue === 'object' && cachedValue?.provider
+                      ? cachedValue.provider
+                      : 'cache';
+                  logger.info(
+                    'rag.condense.chunk_cache_hit',
+                    buildContext(chunkContext, { provider: cachedProvider }),
+                  );
                   return cachedSummary;
                 }
               }
             } catch (cacheError) {
-              logger.warn('[RAG][condense] Ошибка чтения кеша суммаризации чанка', {
-                error: cacheError?.message,
-              });
+              logger.warn(
+                'rag.condense.chunk_cache_error',
+                buildContext(chunkContext, { error: cacheError?.message }),
+              );
             }
           }
 
-          logger.info(`[RAG][condense] Summarizing chunk ${chunkNumber}/${chunks.length}...`);
+          const chunkStartTime = Date.now();
           const { text, providerLabel } = await summarizeWithChain({
             chain: providerChain,
             prompt,
             originalText: chunk,
             budgetChars,
             stage: `map:${chunkNumber}/${chunks.length}`,
+            requestContext: chunkContext,
           });
 
           let summaryText = typeof text === 'string' ? text.trim() : '';
@@ -604,11 +640,20 @@ async function condenseContext({
             summaryText = localFallback(chunk, budgetChars);
             summaryProvider = 'local:truncate';
             logger.warn(
-              `[RAG][condense] map:${chunkNumber}/${chunks.length} используется локальный fallback (len=${summaryText.length}).`,
+              'rag.condense.chunk_local_fallback',
+              buildContext(chunkContext, {
+                reason: 'empty_provider',
+                fallbackLength: summaryText.length,
+              }),
             );
           } else {
             logger.info(
-              `[RAG][condense] map:${chunkNumber}/${chunks.length} провайдер=${summaryProvider} -> len=${summaryText.length}`,
+              'rag.condense.chunk_done',
+              buildContext(chunkContext, {
+                provider: summaryProvider,
+                length: summaryText.length,
+                durationMs: Date.now() - chunkStartTime,
+              }),
             );
           }
 
@@ -626,15 +671,15 @@ async function condenseContext({
                 CACHE_TTL,
                 JSON.stringify({ summary: summaryText, provider: summaryProvider }),
               );
-              if (DEBUG_CONDENSE) {
-                logger.info(
-                  `[RAG][condense] Cached chunk ${chunkNumber}/${chunks.length} (provider=${summaryProvider}).`,
-                );
-              }
+              logger.info(
+                'rag.condense.chunk_cached',
+                buildContext(chunkContext, { provider: summaryProvider }),
+              );
             } catch (setError) {
-              logger.warn('[RAG][condense] Не удалось записать суммаризацию чанка в кеш', {
-                error: setError?.message,
-              });
+              logger.warn(
+                'rag.condense.chunk_cache_store_error',
+                buildContext(chunkContext, { error: setError?.message }),
+              );
             }
           }
 
@@ -645,26 +690,46 @@ async function condenseContext({
 
     const joined = summaries.filter(Boolean).join('\n\n---\n\n');
     logger.info(
-      `[RAG][condense] Map-Phase finished: ${summaries.length} chunks summarized into ${joined.length} chars. Wall-clock: ${(Date.now() - t0) / 1000}s`,
+      'rag.condense.map_done',
+      buildContext(requestContext, {
+        chunkTotal: summaries.length,
+        joinedLength: joined.length,
+        durationMs: Date.now() - t0,
+      }),
     );
 
     if (!joined || joined.length <= budgetChars || summaries.length <= 1) {
-      if (DEBUG_CONDENSE) {
-        logger.info(
-          `[RAG][condense] Skipping Reduce-Phase (joined length ${joined.length} <= budget ${budgetChars} or single chunk).`,
-        );
-      }
       logger.info(
-        `[RAG][condense] MR-Finished. Final context length: ${joined.length}. Total wall-clock: ${(Date.now() - t0) / 1000}s`,
+        'rag.condense.reduce_skipped',
+        buildContext(requestContext, {
+          joinedLength: joined.length,
+          budgetChars,
+          reason: !joined
+            ? 'empty_joined'
+            : joined.length <= budgetChars
+              ? 'within_budget'
+              : 'single_chunk',
+        }),
+      );
+      logger.info(
+        'rag.condense.mr_finished',
+        buildContext(requestContext, {
+          finalLength: joined.length,
+          provider: 'map_only',
+          durationMs: Date.now() - t0,
+        }),
       );
       return joined || contextText;
     }
 
-    if (DEBUG_CONDENSE) {
-      logger.info(
-        `[RAG][condense] Starting Reduce-Phase (joined length ${joined.length} > budget ${budgetChars}).`,
-      );
-    }
+    logger.info(
+      'rag.condense.reduce_start',
+      buildContext(requestContext, {
+        chunkTotal: summaries.length,
+        joinedLength: joined.length,
+        budgetChars,
+      }),
+    );
 
     const reduceCacheKey = cacheKeyReduce(chainSignature, budgetChars, userQuery, joined, graphExtra);
     if (r && CACHE_TTL > 0) {
@@ -675,23 +740,30 @@ async function condenseContext({
           const cachedSummary =
             typeof cachedValue === 'string' ? cachedValue : cachedValue?.summary;
           if (cachedSummary) {
-            if (DEBUG_CONDENSE) {
-              const cachedProvider =
-                typeof cachedValue === 'object' && cachedValue?.provider
-                  ? cachedValue.provider
-                  : 'cache';
-              logger.info(`[RAG][condense] Reduce cache hit (provider=${cachedProvider}).`);
-            }
+            const cachedProvider =
+              typeof cachedValue === 'object' && cachedValue?.provider
+                ? cachedValue.provider
+                : 'cache';
             logger.info(
-              `[RAG][condense] MR-Finished. Final context length: ${cachedSummary.length}. Total wall-clock: ${(Date.now() - t0) / 1000}s`,
+              'rag.condense.reduce_cache_hit',
+              buildContext(requestContext, { provider: cachedProvider }),
+            );
+            logger.info(
+              'rag.condense.mr_finished',
+              buildContext(requestContext, {
+                finalLength: cachedSummary.length,
+                provider: cachedProvider,
+                durationMs: Date.now() - t0,
+              }),
             );
             return cachedSummary;
           }
         }
       } catch (cacheError) {
-        logger.warn('[RAG][condense] Ошибка чтения кеша reduce-фазы', {
-          error: cacheError?.message,
-        });
+        logger.warn(
+          'rag.condense.reduce_cache_error',
+          buildContext(requestContext, { error: cacheError?.message }),
+        );
       }
     }
 
@@ -702,6 +774,7 @@ async function condenseContext({
       originalText: joined,
       budgetChars,
       stage: 'reduce:initial',
+      requestContext,
     });
 
     let summaryText = typeof finalSummary === 'string' ? finalSummary.trim() : '';
@@ -711,23 +784,41 @@ async function condenseContext({
       summaryText = localFallback(joined, budgetChars);
       summaryProvider = 'local:truncate';
       logger.warn(
-        `[RAG][condense] reduce:initial использует локальный fallback (len=${summaryText.length}).`,
+        'rag.condense.reduce_local_fallback',
+        buildContext(requestContext, {
+          stage: 'initial',
+          reason: 'empty_provider',
+          fallbackLength: summaryText.length,
+        }),
       );
     } else {
       logger.info(
-        `[RAG][condense] reduce:initial провайдер=${summaryProvider} -> len=${summaryText.length}`,
+        'rag.condense.reduce_done',
+        buildContext(requestContext, {
+          stage: 'initial',
+          provider: summaryProvider,
+          length: summaryText.length,
+        }),
       );
     }
 
     let guard = 0;
     while (summaryText && summaryText.length > budgetChars && guard < 2) {
       const guardPrompt = `Сожми ещё до ~${budgetChars} символов, сохранив ключевые факты и числа.\n\n=== Текст ===\n${summaryText}`;
+      logger.warn(
+        'rag.condense.reduce_guard_start',
+        buildContext(requestContext, {
+          attempt: guard + 1,
+          length: summaryText.length,
+        }),
+      );
       const { text: guardText, providerLabel: guardProvider } = await summarizeWithChain({
         chain: providerChain,
         prompt: guardPrompt,
         originalText: summaryText,
         budgetChars,
         stage: `reduce:guard:${guard + 1}`,
+        requestContext,
       });
 
       const candidate = typeof guardText === 'string' ? guardText.trim() : '';
@@ -735,7 +826,11 @@ async function condenseContext({
         summaryText = localFallback(summaryText, budgetChars);
         summaryProvider = 'local:truncate';
         logger.warn(
-          `[RAG][condense] reduce:guard:${guard + 1} fallback to local truncate (len=${summaryText.length}).`,
+          'rag.condense.reduce_guard_fallback',
+          buildContext(requestContext, {
+            attempt: guard + 1,
+            fallbackLength: summaryText.length,
+          }),
         );
         break;
       }
@@ -743,8 +838,13 @@ async function condenseContext({
       summaryText = candidate;
       summaryProvider = guardProvider || summaryProvider;
       guard += 1;
-      logger.warn(
-        `[RAG][condense] Reduce guard pass ${guard}, provider=${summaryProvider}, len=${summaryText.length}`,
+      logger.info(
+        'rag.condense.reduce_guard_done',
+        buildContext(requestContext, {
+          attempt: guard,
+          provider: summaryProvider,
+          length: summaryText.length,
+        }),
       );
     }
 
@@ -762,22 +862,35 @@ async function condenseContext({
           CACHE_TTL,
           JSON.stringify({ summary: summaryText, provider: summaryProvider }),
         );
-        if (DEBUG_CONDENSE) {
-          logger.info(`[RAG][condense] Cached Reduce result (provider=${summaryProvider}).`);
-        }
+        logger.info(
+          'rag.condense.reduce_cached',
+          buildContext(requestContext, { provider: summaryProvider }),
+        );
       } catch (setError) {
-        logger.warn('[RAG][condense] Не удалось записать reduce-фазу в кеш', {
-          error: setError?.message,
-        });
+        logger.warn(
+          'rag.condense.reduce_cache_store_error',
+          buildContext(requestContext, { error: setError?.message }),
+        );
       }
     }
 
     logger.info(
-      `[RAG][condense] MR-Finished. Final context length: ${summaryText.length}. Provider=${summaryProvider}. Total wall-clock: ${(Date.now() - t0) / 1000}s`,
+      'rag.condense.mr_finished',
+      buildContext(requestContext, {
+        finalLength: summaryText.length,
+        provider: summaryProvider,
+        durationMs: Date.now() - t0,
+      }),
     );
     return summaryText || joined || contextText;
   } catch (error) {
-    logger.error(error, '[RAG][condense] Final error in condenseContext');
+    logger.error(
+      'rag.condense.error',
+      buildContext(req || {}, {
+        message: error?.message,
+        stack: error?.stack,
+      }),
+    );
     return contextText;
   }
 }

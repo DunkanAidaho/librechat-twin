@@ -58,7 +58,7 @@
   - ✅ RAG core (`condense`, `multiStepOrchestrator`, `LongTextWorker`, `RagContextBuilder`, `RagCache`, `intentAnalyzer`) завершён.
   - В работе: маршруты SSE.
   - Предстоит: LLM clients (`Anthropic`, `OpenAI`, `Google`, `BaseClient`).
-- [x] RAG core: RagContextBuilder / RagCache / intentAnalyzer / multiStepOrchestrator / LongTextWorker  
+- [x] RAG core: RagContextBuilder / RagCache / intentAnalyzer / multiStepOrchestrator / LongTextWorker / condense  
 - [ ] LLM clients: BaseClient / Anthropic / OpenAI / Google
 - **Что нужно сделать**
   - Построить единый слой логирования для всех API-проходов (клиенты, контроллеры, сервисы, очереди, утилиты), чтобы каждая стадия запроса фиксировалась с единым форматом и requestId.
@@ -73,10 +73,10 @@
   3. **Request context & middleware**
      - В `server/routes/agents/chat.js` и других входных точках генерировать `requestId`, пробрасывать в `req.context`.
      - Обновить SSE/response utils (`server/utils/responseUtils.js`) для хранения `requestId`/`conversationId` в логах.
-  4. **Инструментирование модулей (по project_map)**
+-  4. **Инструментирование модулей (по project_map)**
      - **Клиенты LLM** (`app/clients/AnthropicClient.js`, `BaseClient.js`, `GoogleClient.js`, `OpenAIClient.js`, `app/clients/utils/instructions.js`): *в процессе* — стандартизовать события `request:start`, `stream:token`, `request:retry`, `request:error`.
      - **Контроллеры** (`server/controllers/agents/client.js`, `server/controllers/agents/request.js`, middleware, routes/files/*, response utils): *частично готово* — requestId middleware в `/agents`, `/files`, response utils обновлены.
-     - **RAG / Memory сервисы** (`server/services/RAG/*`, `server/services/Graph/LongTextWorker.js`, `server/services/agents/*`, `server/services/Deduplication/*`, `server/services/Endpoints/*`, `server/services/pricing/*`): *memoryQueue + temporalClient выполнены*, оставшиеся сервисы в миграции.
+     - **RAG / Memory сервисы** (`server/services/RAG/*`, `server/services/Graph/LongTextWorker.js`, `server/services/agents/*`, `server/services/Deduplication/*`, `server/services/Endpoints/*`, `server/services/pricing/*`): *memoryQueue + temporalClient выполнены, Map/Reduce condense и MessageHistoryManager перенесены*, оставшиеся сервисы в миграции.
      - **Утилиты и очереди** (`utils/metrics.js`, `utils/ragMetrics.js`, `utils/memoryConfig.js`, `utils/natsClient.js`, `utils/async.js`, `manage_summaries.js`, `sync_history.js`, `server/routes/files/*`, `server/routes/convos.js`): *routes/files и core scripts обновлены*, остальные queued.
   5. **Форматы и соглашения**
      - Утвердить набор полей (`timestamp`, `level`, `scope`, `message`, `requestId`, `conversationId`, `userId`, `context`).

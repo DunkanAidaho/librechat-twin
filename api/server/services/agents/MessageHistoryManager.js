@@ -1,4 +1,5 @@
-const { logger } = require('@librechat/data-schemas');
+const { getLogger } = require('~/utils/logger');
+const { buildContext } = require('~/utils/logContext');
 const {
   extractMessageText,
   normalizeMemoryText,
@@ -15,6 +16,14 @@ class MessageHistoryManager {
     this.ingestedHistory = options.ingestedHistory || new Set();
     this.config = options.config || {};
     this.memoryTaskTimeout = options.memoryTaskTimeout || 30000;
+    this.logger = getLogger('rag.history');
+  }
+
+  getLogContext(conversationId, userId, extra = {}) {
+    if (conversationId || userId) {
+      return buildContext({ conversationId, userId }, extra);
+    }
+    return buildContext({}, extra);
   }
 
   /**
@@ -80,17 +89,22 @@ class MessageHistoryManager {
           fireAndForget: droppedTasks.length > 50,
         });
 
-        logger.info(`[history->RAG][dropped] queued ${droppedTasks.length} dropped messages`, {
-          conversationId,
-          status: result?.status,
-          actualCount: result?.count,
-        });
+        this.logger.info(
+          'rag.history.drop_enqueue',
+          this.getLogContext(conversationId, userId, {
+            messageCount: droppedTasks.length,
+            status: result?.status,
+            actualCount: result?.count,
+          }),
+        );
       } catch (queueError) {
-        logger.error('[history->RAG][dropped] Failed to enqueue dropped messages', {
-          conversationId,
-          messageCount: droppedTasks.length,
-          message: queueError?.message,
-        });
+        this.logger.error(
+          'rag.history.drop_enqueue_failure',
+          this.getLogContext(conversationId, userId, {
+            messageCount: droppedTasks.length,
+            err: { message: queueError?.message, stack: queueError?.stack },
+          }),
+        );
       }
     }
   }
@@ -155,10 +169,12 @@ class MessageHistoryManager {
           const dedupeKey = makeIngestKey(conversationId, m.messageId, normalizedText);
 
           if (this.ingestedHistory.has(dedupeKey)) {
-            logger.debug('[history->RAG][dedup] skip message already enqueued', {
-              conversationId,
-              messageId: m?.messageId,
-            });
+            this.logger.debug(
+              'rag.history.dedup_skip',
+              this.getLogContext(conversationId, userId, {
+                messageId: m?.messageId,
+              }),
+            );
           } else {
             const stableId =
               m.messageId || `hist-${idx}-${this.hashPayload(normalizedText).slice(0, 12)}`;
@@ -170,12 +186,14 @@ class MessageHistoryManager {
             };
             this.ingestedHistory.add(dedupeKey);
             toIngest.push(taskPayload);
-            logger.info('[history->RAG] prepared memory task', {
-              conversationId,
-              messageId: taskPayload.message_id,
-              role: taskPayload.role,
-              textLength: len,
-            });
+            this.logger.info(
+              'rag.history.memory_task_prepared',
+              this.getLogContext(conversationId, userId, {
+                messageId: taskPayload.message_id,
+                role: taskPayload.role,
+                textLength: len,
+              }),
+            );
           }
 
           const roleTag = m?.isCreatedByUser ? 'user' : 'assistant';
@@ -194,22 +212,38 @@ class MessageHistoryManager {
             const limitLabel = m?.isCreatedByUser ? 'HIST_LONG_USER_TO_RAG' : 'ASSIST_LONG_TO_RAG';
             const limitValue = m?.isCreatedByUser ? histLongUserToRag : assistLongToRag;
             const shrinkReason = looksHTML ? 'html' : hasThink ? 'reasoning' : 'length';
-            logger.info(
-              `[prompt][shrink] idx=${idx} role=${roleTag} reason=${shrinkReason} limit=${limitLabel} limitValue=${limitValue} snippetLen=${snippet.length}`,
+            this.logger.info(
+              'rag.history.prompt_shrink',
+              this.getLogContext(conversationId, userId, {
+                index: idx,
+                role: roleTag,
+                len,
+                reason: shrinkReason,
+                limitLabel,
+                limitValue,
+                snippetLen: snippet.length,
+              }),
             );
           } else {
-            logger.info(
-              `[prompt][shrink] idx=${idx} role=${roleTag} len=${len} action=keep-full keepReason=memory.history.dontShrinkLastN value=${dontShrinkLastN}`,
+            this.logger.info(
+              'rag.history.prompt_keep',
+              this.getLogContext(conversationId, userId, {
+                index: idx,
+                role: roleTag,
+                len,
+                dontShrinkLastN,
+              }),
             );
           }
         }
       } catch (error) {
-        logger.warn('[history->RAG] error while scanning message', {
-          conversationId,
-          messageId: m?.messageId,
-          error: error?.message,
-          stack: error?.stack,
-        });
+        this.logger.error(
+          'rag.history.scan_error',
+          this.getLogContext(conversationId, userId, {
+            messageId: m?.messageId,
+            err: { message: error?.message, stack: error?.stack },
+          }),
+        );
       }
     }
 
@@ -228,23 +262,27 @@ class MessageHistoryManager {
           );
 
           trimmedMessages = keptMessages;
-          logger.info('[contextCompression.layers]', {
-            conversationId,
-            budget,
-            contextHeadroom: headroom,
-            remainingTokens,
-            layers: stats.map((stat) => ({
-              layer: stat.layer,
-              messageCount: stat.messageCount,
-              tokens: stat.tokens,
-            })),
-          });
+          this.logger.info(
+            'rag.history.context_layers',
+            this.getLogContext(conversationId, userId, {
+              budget,
+              contextHeadroom: headroom,
+              remainingTokens,
+              layers: stats.map((stat) => ({
+                layer: stat.layer,
+                messageCount: stat.messageCount,
+                tokens: stat.tokens,
+              })),
+            }),
+          );
         }
       } catch (error) {
-        logger.error('[contextCompression.error]', {
-          conversationId,
-          message: error?.message,
-        });
+        this.logger.error(
+          'rag.history.context_layers_error',
+          this.getLogContext(conversationId, userId, {
+            err: { message: error?.message, stack: error?.stack },
+          }),
+        );
       }
     }
 
@@ -285,18 +323,25 @@ class MessageHistoryManager {
           textLength: totalLength,
         });
 
-        logger.info(
-          `[history->RAG] queued ${tasks.length} turn(s) через JetStream ` +
-            `(conversation=${conversationId}, totalChars=${totalLength}).`,
+        this.logger.info(
+          'rag.history.enqueue_success',
+          this.getLogContext(conversationId, userId, {
+            messageCount: tasks.length,
+            reason,
+            textLength: totalLength,
+          }),
         );
 
         return result?.status === 'queued';
       } catch (queueError) {
-        logger.error('[history->RAG] Failed to enqueue history tasks', {
-          conversationId,
-          messageCount: tasks.length,
-          message: queueError?.message,
-        });
+        this.logger.error(
+          'rag.history.enqueue_failure',
+          this.getLogContext(conversationId, userId, {
+            messageCount: tasks.length,
+            reason,
+            err: { message: queueError?.message, stack: queueError?.stack },
+          }),
+        );
         return false;
       }
     }
@@ -321,8 +366,13 @@ class MessageHistoryManager {
 
       const finalMessages = systemMessage ? [systemMessage, ...keptMessages] : keptMessages;
 
-      logger.warn(
-        `[PROMPT-LIMIT] Принудительно усекаем историю с ${otherMessages.length} до ${maxMessages} сообщений. Dropped: ${droppedMessages.length}`,
+      this.logger.warn(
+        'rag.history.prompt_limit',
+        buildContext({}, {
+          maxMessages,
+          droppedCount: droppedMessages.length,
+          totalMessages: otherMessages.length,
+        }),
       );
 
       return { keptMessages: finalMessages, droppedMessages };
