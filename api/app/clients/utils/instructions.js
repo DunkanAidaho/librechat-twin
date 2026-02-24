@@ -1,10 +1,12 @@
 'use strict';
 
 const configService = require('~/server/services/Config/ConfigService');
-const { logger } = require('@librechat/data-schemas');
+const { getLogger } = require('~/utils/logger');
+const { buildContext } = require('~/utils/logContext');
 const { Tokenizer } = require('@librechat/api');
 
 const DEFAULT_ENCODING = configService.get('agents.encoding.defaultTokenizerEncoding', 'o200k_base');
+const logger = getLogger('clients.instructions');
 
 /**
  * Преобразует произвольный формат инструкций в объект с содержимым и числом токенов.
@@ -27,7 +29,10 @@ function normalizeInstructionsPayload(rawInstructions, encodingResolver, logPref
           return resolved;
         }
       } catch (error) {
-        logger.warn(`${logPrefix} Не удалось получить кодировку: ${error?.message || error}`);
+        logger.warn(
+          'clients.instructions.encoding_resolve_failed',
+          buildContext({ logPrefix }, { err: { message: error?.message || String(error) } }),
+        );
       }
     } else if (typeof encodingResolver === 'string' && encodingResolver.length > 0) {
       return encodingResolver;
@@ -50,7 +55,10 @@ function normalizeInstructionsPayload(rawInstructions, encodingResolver, logPref
     try {
       return Tokenizer.getTokenCount(text, encoding);
     } catch (error) {
-      logger.warn(`${logPrefix} Ошибка подсчёта токенов (${encoding}): ${error?.message || error}`);
+      logger.warn(
+        'clients.instructions.token_count_failed',
+        buildContext({ logPrefix }, { encoding, err: { message: error?.message || String(error) } }),
+      );
     }
     return text.length;
   };
@@ -61,14 +69,18 @@ function normalizeInstructionsPayload(rawInstructions, encodingResolver, logPref
 
   if (typeof rawInstructions === 'object') {
     if (typeof rawInstructions.content !== 'string' || rawInstructions.content.length === 0) {
-      logger.warn(`${logPrefix} Объект инструкций без корректного поля content.`);
+      logger.warn(
+        'clients.instructions.content_missing',
+        buildContext({ logPrefix }, {}),
+      );
       return { content: '', tokenCount: 0 };
     }
     const tokenCount = computeTokens(rawInstructions.content);
     if (rawInstructions.tokenCount != null && rawInstructions.tokenCount !== tokenCount) {
       const previousTokens = rawInstructions.tokenCount;
       logger.info(
-        `${logPrefix} Пересчитано количество токенов: было ${previousTokens}, стало ${tokenCount}.`,
+        'clients.instructions.tokens_recomputed',
+        buildContext({ logPrefix }, { previousTokens, tokenCount, length: rawInstructions.content.length }),
       );
     }
     return {
@@ -78,7 +90,10 @@ function normalizeInstructionsPayload(rawInstructions, encodingResolver, logPref
   }
 
   if (typeof rawInstructions !== 'string') {
-    logger.warn(`${logPrefix} Неподдерживаемый тип инструкций: ${typeof rawInstructions}`);
+    logger.warn(
+      'clients.instructions.type_unsupported',
+      buildContext({ logPrefix }, { type: typeof rawInstructions }),
+    );
     return { content: '', tokenCount: 0 };
   }
 
@@ -89,7 +104,8 @@ function normalizeInstructionsPayload(rawInstructions, encodingResolver, logPref
 
   const tokenCount = computeTokens(trimmed);
   logger.info(
-    `${logPrefix} Инструкции преобразованы в строку. Символов: ${trimmed.length}, токенов: ${tokenCount}.`,
+    'clients.instructions.string_normalized',
+    buildContext({ logPrefix }, { length: trimmed.length, tokenCount }),
   );
 
   return {

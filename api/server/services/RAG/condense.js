@@ -510,11 +510,11 @@ async function condenseContext({
   timeoutMs = null, // ДОБАВЛЕНО: Принимаем таймаут извне
 }) {
   const t0 = Date.now();
+  const requestContext = buildContext(req || {}, {
+    endpoint: endpointOption?.endpoint,
+    model: endpointOption?.model,
+  });
   try {
-    const requestContext = buildContext(req || {}, {
-      endpoint: endpointOption?.endpoint,
-      model: endpointOption?.model,
-    });
     // ИСПРАВЛЕНО: Передаем timeoutMs в resolveSummarizerProviders
     const effectiveTimeout = timeoutMs || CONDENSE_TIMEOUT_MS;
     
@@ -886,7 +886,7 @@ async function condenseContext({
   } catch (error) {
     logger.error(
       'rag.condense.error',
-      buildContext(req || {}, {
+      buildContext(requestContext, {
         message: error?.message,
         stack: error?.stack,
       }),

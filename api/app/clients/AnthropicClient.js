@@ -1,5 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
-const { logger } = require('@librechat/data-schemas');
+const { getLogger } = require('~/utils/logger');
+const { buildContext, getRequestContext } = require('~/utils/logContext');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const {
   Constants,
@@ -66,6 +67,7 @@ class AnthropicClient extends BaseClient {
       ? options.contextStrategy.toLowerCase()
       : 'discard';
     this.setOptions(options);
+    this.logger = getLogger('clients.anthropic');
     /** @type {string | undefined} */
     this.systemMessage;
     /** @type {{ content: string; tokenCount: number }} */
@@ -91,6 +93,16 @@ class AnthropicClient extends BaseClient {
     this.outputTokensKey = 'output_tokens';
     /** @type {SplitStreamHandler | undefined} */
     this.streamHandler;
+  }
+
+  buildClientContext(extra = {}) {
+    const reqContext = getRequestContext(this.options?.req) || {};
+    return buildContext(reqContext, {
+      conversationId: this.conversationId,
+      userId: this.user,
+      agentId: this.options?.agent?.id,
+      ...extra,
+    });
   }
 
   setOptions(options) {
@@ -141,7 +153,6 @@ class AnthropicClient extends BaseClient {
 
     this.defaultVisionModel = this.options.visionModel ?? 'claude-3-sonnet-20240229';
     this.options.attachments?.then((attachments) => this.checkVisionRequest(attachments));
-
     this.maxContextTokens =
       this.options.maxContextTokens ??
       getModelMaxTokens(this.modelOptions.model, EModelEndpoint.anthropic) ??
@@ -161,12 +172,12 @@ class AnthropicClient extends BaseClient {
     if (reservedTokens > this.maxContextTokens) {
       const info = `Total Possible Tokens + Max Output Tokens must be less than or equal to Max Context Tokens: ${this.maxPromptTokens} (total possible output) + ${this.maxResponseTokens} (max output) = ${reservedTokens}/${this.maxContextTokens} (max context)`;
       const errorMessage = `{ "type": "${ErrorTypes.INPUT_LENGTH}", "info": "${info}" }`;
-      logger.warn(info);
+      this.logger.warn('clients.anthropic.config_error', this.buildClientContext({ info }));
       throw new Error(errorMessage);
     } else if (this.maxResponseTokens === this.maxContextTokens) {
       const info = `Max Output Tokens must be less than Max Context Tokens: ${this.maxResponseTokens} (max output) = ${this.maxContextTokens} (max context)`;
       const errorMessage = `{ "type": "${ErrorTypes.INPUT_LENGTH}", "info": "${info}" }`;
-      logger.warn(info);
+      this.logger.warn('clients.anthropic.config_error', this.buildClientContext({ info }));
       throw new Error(errorMessage);
     }
 
@@ -369,7 +380,13 @@ class AnthropicClient extends BaseClient {
       parentMessageId,
     });
 
-    logger.debug('[AnthropicClient] orderedMessages', { orderedMessages, parentMessageId });
+    this.logger.debug(
+      'clients.anthropic.build_messages',
+      this.buildClientContext({
+        parentMessageId,
+        orderedCount: orderedMessages.length,
+      }),
+    );
 
     if (this.options.attachments) {
       const attachments = await this.options.attachments;
@@ -461,10 +478,13 @@ class AnthropicClient extends BaseClient {
         return map;
       }, {});
 
-    logger.debug('[AnthropicClient]', {
-      messagesInWindow: messagesInWindow.length,
-      remainingContextTokens,
-    });
+    this.logger.debug(
+      'clients.anthropic.context_window',
+      this.buildClientContext({
+        messagesInWindow: messagesInWindow.length,
+        remainingContextTokens,
+      }),
+    );
 
     let lastAuthor = '';
     let groupedMessages = [];
@@ -697,7 +717,10 @@ class AnthropicClient extends BaseClient {
   }
 
   getCompletion() {
-    logger.debug("AnthropicClient doesn't use getCompletion (all handled in sendCompletion)");
+    this.logger.debug(
+      'clients.anthropic.deprecated_get_completion',
+      this.buildClientContext(),
+    );
   }
 
   /**
@@ -757,7 +780,13 @@ class AnthropicClient extends BaseClient {
       modelOptions.stream = true;
     }
 
-    logger.debug('modelOptions', { modelOptions });
+    this.logger.debug(
+      'clients.anthropic.request_config',
+      this.buildClientContext({
+        model: modelOptions.model,
+        stream: modelOptions.stream === true,
+      }),
+    );
     const metadata = {
       user_id: this.user,
     };
@@ -818,7 +847,14 @@ class AnthropicClient extends BaseClient {
       requestOptions.messages = addCacheControl(requestOptions.messages);
     }
 
-    logger.debug('[AnthropicClient]', { ...requestOptions });
+    this.logger.info(
+      'clients.anthropic.request_start',
+      this.buildClientContext({
+        model: requestOptions.model,
+        stream: requestOptions.stream === true,
+        useMessages: this.useMessages,
+      }),
+    );
     const handlers = createStreamEventHandlers(this.options.res);
     this.streamHandler = new SplitStreamHandler({
       accumulate: true,
@@ -832,7 +868,10 @@ class AnthropicClient extends BaseClient {
     let response;
 
     const abortHandler = () => {
-      logger.debug('[AnthropicClient] message aborted!');
+      this.logger.warn(
+        'clients.anthropic.request_abort',
+        this.buildClientContext({ reason: signal.reason ?? 'abortController' }),
+      );
       if (response?.controller?.abort) {
         response.controller.abort();
       }
@@ -848,7 +887,10 @@ class AnthropicClient extends BaseClient {
         for await (const completion of response) {
           const type = completion?.type ?? '';
           if (tokenEventTypes.has(type)) {
-            logger.debug(`[AnthropicClient] ${type}`, completion);
+            this.logger.debug(
+              'clients.anthropic.stream_token',
+              this.buildClientContext({ eventType: type }),
+            );
             this[type] = completion;
           }
           this.streamHandler.handle(completion);
@@ -863,11 +905,31 @@ class AnthropicClient extends BaseClient {
       await this.runWithClientResilience(executeRequest, {
         action: 'AnthropicClient.sendCompletion',
         onRetry: async (err, attempt = 0) => {
-          logger.warn(`User: ${this.user} | Anthropic Request retry #${attempt + 1}: ${err.message}`);
+          this.logger.warn(
+            'clients.anthropic.request_retry',
+            this.buildClientContext({
+              attempt: attempt + 1,
+              err: { message: err?.message, stack: err?.stack },
+            }),
+          );
           await delayBeforeRetry(attempt + 1, 350);
         },
       });
+      this.logger.info(
+        'clients.anthropic.request_success',
+        this.buildClientContext({
+          durationMs: Date.now() - requestStart,
+          usage: this.getStreamUsage?.(),
+        }),
+      );
     } catch (error) {
+      this.logger.error(
+        'clients.anthropic.request_error',
+        this.buildClientContext({
+          durationMs: Date.now() - requestStart,
+          err: { message: error?.message, stack: error?.stack },
+        }),
+      );
       if (this.streamHandler && this.streamHandler.reasoningTokens.length) {
         return this.getStreamText();
       }
@@ -898,7 +960,7 @@ class AnthropicClient extends BaseClient {
   }
 
   getBuildMessagesOptions() {
-    logger.debug("AnthropicClient doesn't use getBuildMessagesOptions");
+    this.logger.debug('clients.anthropic.no_build_messages_options', this.buildClientContext());
   }
 
   getEncoding() {
@@ -970,7 +1032,10 @@ class AnthropicClient extends BaseClient {
           {
             action: 'AnthropicClient.titleChatCompletion',
             onRetry: (err) =>
-              logger.warn('[AnthropicClient] Retry title generation failed', err),
+              this.logger.warn(
+                'clients.anthropic.title_retry',
+                this.buildClientContext({ err: { message: err?.message, stack: err?.stack } }),
+              ),
           },
         );
         let promptTokens = response?.usage?.input_tokens;
@@ -991,12 +1056,18 @@ class AnthropicClient extends BaseClient {
         const text = response.content[0].text;
         title = parseParamFromPrompt(text, 'title');
       } catch (e) {
-        logger.error('[AnthropicClient] There was an issue generating the title', e);
+        this.logger.error(
+          'clients.anthropic.title_error',
+          this.buildClientContext({ err: { message: e?.message, stack: e?.stack } }),
+        );
       }
     };
 
     await titleChatCompletion();
-    logger.debug('[AnthropicClient] Convo Title: ' + title);
+    this.logger.debug(
+      'clients.anthropic.title_success',
+      this.buildClientContext({ title }),
+    );
     return title;
   }
 }

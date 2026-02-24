@@ -1,6 +1,7 @@
 const { google } = require('googleapis');
 const { sleep } = require('@librechat/agents');
-const { logger } = require('@librechat/data-schemas');
+const { getLogger } = require('~/utils/logger');
+const { buildContext, getRequestContext } = require('~/utils/logContext');
 const { getModelMaxTokens } = require('@librechat/api');
 const { concat } = require('@langchain/core/utils/stream');
 const { ChatVertexAI } = require('@langchain/google-vertexai');
@@ -79,10 +80,22 @@ class GoogleClient extends BaseClient {
     /** @type {string} */
     this.systemMessage;
     this.systemInstructions = { content: '', tokenCount: 0 };
+    this.logger = getLogger('clients.google');
     if (options.skipSetOptions) {
       return;
     }
     this.setOptions(options);
+  }
+
+  buildClientContext(extra = {}) {
+    const reqContext = getRequestContext(this.options?.req) || {};
+    return buildContext(reqContext, {
+      conversationId: this.conversationId,
+      userId: this.user ?? this.options?.req?.user?.id,
+      agentId: this.options?.agent?.id,
+      model: this.modelOptions?.model,
+      ...extra,
+    });
   }
 
   /* Google specific methods */
@@ -96,7 +109,10 @@ class GoogleClient extends BaseClient {
 
     jwtClient.authorize((err) => {
       if (err) {
-        logger.error('jwtClient failed to authorize', err);
+        this.logger.error(
+          'clients.google.jwt_authorize_error',
+          this.buildClientContext({ err: { message: err?.message, stack: err?.stack } }),
+        );
         throw err;
       }
     });
@@ -111,7 +127,10 @@ class GoogleClient extends BaseClient {
     return new Promise((resolve, reject) => {
       jwtClient.authorize((err, tokens) => {
         if (err) {
-          logger.error('jwtClient failed to authorize', err);
+          this.logger.error(
+            'clients.google.jwt_authorize_error',
+            this.buildClientContext({ err: { message: err?.message, stack: err?.stack } }),
+          );
           reject(err);
         } else {
           resolve(tokens.access_token);
@@ -412,7 +431,10 @@ class GoogleClient extends BaseClient {
       if (this.maxContextTokens < 0) {
         const info = `${instructionsTokenCount} / ${this.maxContextTokens}`;
         const errorMessage = `{ "type": "${ErrorTypes.INPUT_LENGTH}", "info": "${info}" }`;
-        logger.warn(`Instructions token count exceeds max context (${info}).`);
+        this.logger.warn(
+          'clients.google.instructions_too_long',
+          this.buildClientContext({ info }),
+        );
         throw new Error(errorMessage);
       }
     }
@@ -465,7 +487,13 @@ class GoogleClient extends BaseClient {
       payload.instances[0].context = this.systemMessage;
     }
 
-    logger.debug('[GoogleClient] buildMessages', payload);
+    this.logger.debug(
+      'clients.google.build_messages',
+      this.buildClientContext({
+        payloadSize: Array.isArray(payload?.instances) ? payload.instances.length : 0,
+        hasContext: Boolean(payload?.instances?.[0]?.context),
+      }),
+    );
     return { prompt: payload, tokenCountMap, promptTokens };
   }
 
@@ -475,10 +503,13 @@ class GoogleClient extends BaseClient {
       parentMessageId,
     });
 
-    logger.debug('[GoogleClient]', {
-      orderedMessages,
-      parentMessageId,
-    });
+    this.logger.debug(
+      'clients.google.build_messages_prompt',
+      this.buildClientContext({
+        orderedCount: orderedMessages.length,
+        parentMessageId,
+      }),
+    );
 
     const formattedMessages = orderedMessages.map(this.formatMessages());
 
@@ -630,7 +661,7 @@ class GoogleClient extends BaseClient {
     }
 
     if (this.project_id != null) {
-      logger.debug('Creating VertexAI client');
+      this.logger.debug('clients.google.create_vertex_client', this.buildClientContext());
       this.visionMode = undefined;
       clientOptions.streaming = true;
       const client = new ChatVertexAI(clientOptions);
@@ -643,11 +674,11 @@ class GoogleClient extends BaseClient {
       client.maxOutputTokens = clientOptions.maxOutputTokens;
       return client;
     } else if (!EXCLUDED_GENAI_MODELS.test(model)) {
-      logger.debug('Creating GenAI client');
+      this.logger.debug('clients.google.create_genai_client', this.buildClientContext());
       return new GenAI(this.apiKey).getGenerativeModel({ model }, requestOptions);
     }
 
-    logger.debug('Creating Chat Google Generative AI client');
+    this.logger.debug('clients.google.create_chat_client', this.buildClientContext());
     return new ChatGoogleGenerativeAI({ ...clientOptions, apiKey: this.apiKey });
   }
 
@@ -675,6 +706,7 @@ class GoogleClient extends BaseClient {
   async getCompletion(_payload, options = {}) {
     const { onProgress, abortController } = options;
     const safetySettings = getSafetySettings(this.modelOptions.model);
+    const requestStart = Date.now();
     const streamRate = this.options.streamRate ?? Constants.DEFAULT_STREAM_RATE;
     const modelName = this.modelOptions.modelName ?? this.modelOptions.model ?? '';
 
@@ -710,7 +742,10 @@ class GoogleClient extends BaseClient {
         abortController.signal.addEventListener(
           'abort',
           () => {
-            logger.warn('[GoogleClient] Request was aborted', abortController.signal.reason);
+            this.logger.warn(
+              'clients.google.request_abort',
+              this.buildClientContext({ reason: abortController.signal.reason }),
+            );
           },
           { once: true },
         );
@@ -723,7 +758,13 @@ class GoogleClient extends BaseClient {
           {
             action: 'GoogleClient.generateContentStream',
             onRetry: (err) =>
-              logger.warn('[GoogleClient] Retry generateContentStream attempt failed', err),
+              this.logger.warn(
+                'clients.google.request_retry',
+                this.buildClientContext({
+                  action: 'generateContentStream',
+                  err: { message: err?.message, stack: err?.stack },
+                }),
+              ),
           },
         );
         for await (const chunk of result.stream) {
@@ -745,6 +786,13 @@ class GoogleClient extends BaseClient {
           };
         }
 
+        this.logger.info(
+          'clients.google.request_success',
+          this.buildClientContext({
+            durationMs: Date.now() - requestStart,
+            usage: this.getStreamUsage(),
+          }),
+        );
         return reply;
       }
 
@@ -759,7 +807,7 @@ class GoogleClient extends BaseClient {
       let usageMetadata;
       /** @type {ChatVertexAI} */
       const client = this.client;
-      const stream = await this.runWithClientResilience(
+        const stream = await this.runWithClientResilience(
         async () =>
           client.stream(messages, {
             signal: abortController.signal,
@@ -767,8 +815,15 @@ class GoogleClient extends BaseClient {
             safetySettings,
           }),
         {
-          action: 'GoogleClient.vertexStream',
-          onRetry: (err) => logger.warn('[GoogleClient] Retry vertex stream attempt failed', err),
+            action: 'GoogleClient.vertexStream',
+            onRetry: (err) =>
+              this.logger.warn(
+                'clients.google.request_retry',
+                this.buildClientContext({
+                  action: 'vertexStream',
+                  err: { message: err?.message, stack: err?.stack },
+                }),
+              ),
         },
       );
 
@@ -805,9 +860,22 @@ class GoogleClient extends BaseClient {
       if (usageMetadata) {
         this.usage = usageMetadata;
       }
+      this.logger.info(
+        'clients.google.request_success',
+        this.buildClientContext({
+          durationMs: Date.now() - requestStart,
+          usage: this.getStreamUsage(),
+        }),
+      );
     } catch (e) {
       error = e;
-      logger.error('[GoogleClient] There was an issue generating the completion', e);
+      this.logger.error(
+        'clients.google.request_error',
+        this.buildClientContext({
+          durationMs: Date.now() - requestStart,
+          err: { message: e?.message, stack: e?.stack },
+        }),
+      );
     }
 
     if (error != null && reply === '') {
@@ -899,12 +967,13 @@ class GoogleClient extends BaseClient {
   async titleChatCompletion(_payload, options = {}) {
     let reply = '';
     const { abortController } = options;
+    const requestStart = Date.now();
 
     const model =
       this.options.titleModel ?? this.modelOptions.modelName ?? this.modelOptions.model ?? '';
     const safetySettings = getSafetySettings(model);
     if (!EXCLUDED_GENAI_MODELS.test(model) && !this.project_id) {
-      logger.debug('Identified titling model as GenAI version');
+      this.logger.debug('clients.google.title_genai', this.buildClientContext());
       /** @type {GenerativeModel} */
       const client = this.client;
       const requestOptions = {
@@ -919,10 +988,18 @@ class GoogleClient extends BaseClient {
         async () => client.generateContent(requestOptions),
         {
           action: 'GoogleClient.generateContent',
-          onRetry: (err) => logger.warn('[GoogleClient] Retry generateContent attempt failed', err),
+          onRetry: (err) =>
+            this.logger.warn(
+              'clients.google.title_retry',
+              this.buildClientContext({ err: { message: err?.message, stack: err?.stack } }),
+            ),
         },
       );
       reply = result.response?.text();
+      this.logger.debug(
+        'clients.google.title_success',
+        this.buildClientContext({ durationMs: Date.now() - requestStart, title: reply }),
+      );
       return reply;
     } else {
       const { instances } = _payload;
@@ -936,7 +1013,11 @@ class GoogleClient extends BaseClient {
           }),
         {
           action: 'GoogleClient.titleInvoke',
-          onRetry: (err) => logger.warn('[GoogleClient] Retry title invoke attempt failed', err),
+          onRetry: (err) =>
+            this.logger.warn(
+              'clients.google.title_retry',
+              this.buildClientContext({ err: { message: err?.message, stack: err?.stack } }),
+            ),
         },
       );
 
@@ -950,6 +1031,10 @@ class GoogleClient extends BaseClient {
       }
 
       reply = titleResponse.content;
+      this.logger.debug(
+        'clients.google.title_success',
+        this.buildClientContext({ durationMs: Date.now() - requestStart, title: reply }),
+      );
       return reply;
     }
   }
@@ -973,16 +1058,26 @@ class GoogleClient extends BaseClient {
       },
     ]);
 
+    const titleStart = Date.now();
     try {
       this.initializeClient();
       title = await this.titleChatCompletion(payload, {
         abortController: new AbortController(),
         onProgress: () => {},
       });
+      this.logger.info(
+        'clients.google.title_request_success',
+        this.buildClientContext({ durationMs: Date.now() - titleStart, title }),
+      );
     } catch (e) {
-      logger.error('[GoogleClient] There was an issue generating the title', e);
+      this.logger.error(
+        'clients.google.title_error',
+        this.buildClientContext({
+          durationMs: Date.now() - titleStart,
+          err: { message: e?.message, stack: e?.stack },
+        }),
+      );
     }
-    logger.debug(`Title response: ${title}`);
     return title;
   }
 

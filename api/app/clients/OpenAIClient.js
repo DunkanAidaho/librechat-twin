@@ -1,4 +1,5 @@
-const { logger } = require('@librechat/data-schemas');
+const { getLogger } = require('~/utils/logger');
+const { buildContext, getRequestContext } = require('~/utils/logContext');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const { sleep, SplitStreamHandler, CustomOpenAIClient: OpenAI } = require('@librechat/agents');
 const {
@@ -53,6 +54,7 @@ class OpenAIClient extends BaseClient {
     this.shouldSummarize = this.contextStrategy === 'summarize';
     /** @type {AzureOptions} */
     this.azure = options.azure || false;
+    this.logger = getLogger('clients.openai');
     this.setOptions(options);
     this.metadata = {};
 
@@ -65,6 +67,18 @@ class OpenAIClient extends BaseClient {
     this.isOmni;
     /** @type {SplitStreamHandler | undefined} */
     this.streamHandler;
+  }
+
+  buildClientContext(extra = {}) {
+    const reqContext = getRequestContext(this.options?.req) || {};
+    return buildContext(reqContext, {
+      conversationId: this.conversationId,
+      userId: this.user ?? this.options?.req?.user?.id,
+      agentId: this.options?.agent?.id,
+      endpoint: this.options?.endpoint,
+      model: this.modelOptions?.model,
+      ...extra,
+    });
   }
 
   // TODO: PluginsClient calls this 3x, unneeded
@@ -167,7 +181,10 @@ class OpenAIClient extends BaseClient {
     }
 
     if (this.options.debug) {
-      logger.debug('[OpenAIClient] maxContextTokens', this.maxContextTokens);
+      this.logger.debug(
+        'clients.openai.debug_max_tokens',
+        this.buildClientContext({ maxContextTokens: this.maxContextTokens }),
+      );
     }
 
     this.maxResponseTokens =
@@ -218,7 +235,7 @@ class OpenAIClient extends BaseClient {
     }
 
     if (this.azureEndpoint && this.options.debug) {
-      logger.debug('Using Azure endpoint');
+      this.logger.debug('clients.openai.azure_endpoint', this.buildClientContext());
     }
 
     return this;
@@ -606,7 +623,10 @@ class OpenAIClient extends BaseClient {
         return result.trim();
       }
 
-      logger.debug('[OpenAIClient] sendCompletion: result', { ...result });
+      this.logger.debug(
+        'clients.openai.send_completion_result',
+        this.buildClientContext({ hasResult: !!result }),
+      );
 
       if (this.isChatCompletion) {
         reply = result.choices[0].message.content;
@@ -748,16 +768,19 @@ ${convo}
 
         await this.recordTokenUsage({ promptTokens, completionTokens, context: 'title' });
       } catch (e) {
-        logger.error(
-          '[OpenAIClient] There was an issue generating the title with the completion method',
-          e,
+        this.logger.error(
+          'clients.openai.title_completion_error',
+          this.buildClientContext({ err: { message: e?.message, stack: e?.stack } }),
         );
       }
     };
 
     if (this.options.titleMethod === 'completion') {
       await titleChatCompletion();
-      logger.debug('[OpenAIClient] Convo Title: ' + title);
+      this.logger.debug(
+        'clients.openai.title_success',
+        this.buildClientContext({ title }),
+      );
       return title;
     }
 
@@ -773,18 +796,24 @@ ${convo}
       title = await runTitleChain({ llm, text, convo, signal: this.abortController.signal });
     } catch (e) {
       if (e?.message?.toLowerCase()?.includes('abort')) {
-        logger.debug('[OpenAIClient] Aborted title generation');
+        this.logger.debug(
+          'clients.openai.title_abort',
+          this.buildClientContext({ reason: e?.message }),
+        );
         return;
       }
-      logger.error(
-        '[OpenAIClient] There was an issue generating title with LangChain, trying completion method...',
-        e,
+      this.logger.error(
+        'clients.openai.title_langchain_error',
+        this.buildClientContext({ err: { message: e?.message, stack: e?.stack } }),
       );
 
       await titleChatCompletion();
     }
 
-    logger.debug('[OpenAIClient] Convo Title: ' + title);
+    this.logger.debug(
+      'clients.openai.title_success',
+      this.buildClientContext({ title }),
+    );
     return title;
   }
 
@@ -843,7 +872,7 @@ ${convo}
   }
 
   async summarizeMessages({ messagesToRefine, remainingContextTokens }) {
-    logger.debug('[OpenAIClient] Summarizing messages...');
+    this.logger.debug('clients.openai.summary_start', this.buildClientContext());
     let context = messagesToRefine;
     let prompt;
 
@@ -881,8 +910,9 @@ ${convo}
     }
 
     if (context.length === 0) {
-      logger.debug(
-        '[OpenAIClient] Summary context is empty, using latest message within token limit',
+      this.logger.debug(
+        'clients.openai.summary_context_empty',
+        this.buildClientContext(),
       );
 
       promptBuffer = 32;
@@ -910,7 +940,10 @@ ${convo}
     // by recreating the summary prompt (single message) to avoid LangChain handling
 
     const initialPromptTokens = this.maxContextTokens - remainingContextTokens;
-    logger.debug('[OpenAIClient] initialPromptTokens', initialPromptTokens);
+    this.logger.debug(
+      'clients.openai.summary_initial_tokens',
+      this.buildClientContext({ initialPromptTokens }),
+    );
 
     const llm = this.initializeLLM({
       model,
@@ -936,18 +969,26 @@ ${convo}
       const summaryTokenCount = this.getTokenCountForMessage(summaryMessage);
 
       if (this.options.debug) {
-        logger.debug('[OpenAIClient] summaryTokenCount', summaryTokenCount);
-        logger.debug(
-          `[OpenAIClient] Summarization complete: remainingContextTokens: ${remainingContextTokens}, after refining: ${
-            remainingContextTokens - summaryTokenCount
-          }`,
+        this.logger.debug(
+          'clients.openai.summary_token_count',
+          this.buildClientContext({ summaryTokenCount }),
+        );
+        this.logger.debug(
+          'clients.openai.summary_done',
+          this.buildClientContext({
+            remainingBefore: remainingContextTokens,
+            remainingAfter: remainingContextTokens - summaryTokenCount,
+          }),
         );
       }
 
       return { summaryMessage, summaryTokenCount };
     } catch (e) {
       if (e?.message?.toLowerCase()?.includes('abort')) {
-        logger.debug('[OpenAIClient] Aborted summarization');
+        this.logger.debug(
+          'clients.openai.summary_abort',
+          this.buildClientContext({ reason: e?.message }),
+        );
         const { run, runId } = this.runManager.getRunByConversationId(this.conversationId);
         if (run && run.error) {
           const { error } = run;
@@ -955,7 +996,10 @@ ${convo}
           throw new Error(error);
         }
       }
-      logger.error('[OpenAIClient] Error summarizing messages', e);
+      this.logger.error(
+        'clients.openai.summary_error',
+        this.buildClientContext({ err: { message: e?.message, stack: e?.stack } }),
+      );
       return {};
     }
   }
@@ -1061,6 +1105,14 @@ ${convo}
   async chatCompletion({ payload, onProgress, abortController = null }) {
     const appConfig = this.options.req?.config;
     let error = null;
+    const requestStart = Date.now();
+    this.logger.info(
+      'clients.openai.request_start',
+      this.buildClientContext({
+        model: this.modelOptions?.model,
+        stream: typeof onProgress === 'function',
+      }),
+    );
     let intermediateReply = [];
     const errorCallback = (err) => (error = err);
     try {
@@ -1080,7 +1132,10 @@ ${convo}
       }
 
       const baseURL = extractBaseURL(this.completionsUrl);
-      logger.debug('[OpenAIClient] chatCompletion', { baseURL, modelOptions });
+      this.logger.debug(
+        'clients.openai.chat_completion_start',
+        this.buildClientContext({ baseURL }),
+      );
       const opts = {
         baseURL,
         fetchOptions: {},
@@ -1225,10 +1280,10 @@ ${convo}
           ...modelOptions,
           ...addParams,
         };
-        logger.debug('[OpenAIClient] chatCompletion: added params', {
-          addParams: addParams,
-          modelOptions,
-        });
+        this.logger.debug(
+          'clients.openai.chat_completion_added_params',
+          this.buildClientContext({ addParams }),
+        );
       }
 
       /** Note: OpenAI Web Search models do not support any known parameters besdies `max_tokens` */
@@ -1259,10 +1314,10 @@ ${convo}
         dropParams.forEach((param) => {
           delete modelOptions[param];
         });
-        logger.debug('[OpenAIClient] chatCompletion: dropped params', {
-          dropParams: dropParams,
-          modelOptions,
-        });
+        this.logger.debug(
+          'clients.openai.chat_completion_dropped_params',
+          this.buildClientContext({ dropParams }),
+        );
       }
 
       const streamRate = this.options.streamRate ?? Constants.DEFAULT_STREAM_RATE;
@@ -1378,6 +1433,12 @@ ${convo}
             });
           }
           this.streamHandler.handle(chunk);
+          this.logger.debug(
+            'clients.openai.stream_token',
+            this.buildClientContext({
+              chunkLen: chunk?.choices?.[0]?.delta?.content?.length ?? 0,
+            }),
+          );
           if (abortController.signal.aborted) {
             stream.controller.abort();
             break;
@@ -1423,33 +1484,44 @@ ${convo}
       const { choices } = chatCompletion;
       this.usage = chatCompletion.usage;
       if (this.useOpenRouter && chatCompletion.usage) {
-        logger.info('[openrouter.usage]', {
-          model: chatCompletion.model ?? this.modelOptions.model,
-          promptTokens: chatCompletion.usage.prompt_tokens,
-          completionTokens: chatCompletion.usage.completion_tokens,
-        });
+        this.logger.info(
+          'clients.openai.openrouter_usage',
+          this.buildClientContext({
+            usage: {
+              model: chatCompletion.model ?? this.modelOptions.model,
+              promptTokens: chatCompletion.usage.prompt_tokens,
+              completionTokens: chatCompletion.usage.completion_tokens,
+            },
+          }),
+        );
       }
 
       if (!Array.isArray(choices) || choices.length === 0) {
-        logger.warn('[OpenAIClient] Chat completion response has no choices');
+        this.logger.warn('clients.openai.response_no_choices', this.buildClientContext());
         return this.streamHandler.tokens.join('');
       }
 
       const { message, finish_reason } = choices[0] ?? {};
       this.metadata = { finish_reason };
 
-      logger.debug('[OpenAIClient] chatCompletion response', chatCompletion);
+        this.logger.info(
+          'clients.openai.request_success',
+          this.buildClientContext({
+            durationMs: Date.now() - requestStart,
+            usage: chatCompletion?.usage,
+          }),
+        );
 
       if (!message) {
-        logger.warn('[OpenAIClient] Message is undefined in chatCompletion response');
+        this.logger.warn('clients.openai.response_missing_message', this.buildClientContext());
         return this.streamHandler.tokens.join('');
       }
 
       if (typeof message.content !== 'string' || message.content.trim() === '') {
         const reply = this.streamHandler.tokens.join('');
-        logger.debug(
-          '[OpenAIClient] chatCompletion: using intermediateReply due to empty message.content',
-          { intermediateReply: reply },
+        this.logger.debug(
+          'clients.openai.response_empty_using_stream',
+          this.buildClientContext({ length: reply.length }),
         );
         return reply;
       }
@@ -1470,10 +1542,15 @@ ${convo}
 
       return message.content;
     } catch (err) {
+      const durationMs = Date.now() - requestStart;
       if (
         err?.message?.includes('abort') ||
         (err instanceof OpenAI.APIError && err?.message?.includes('abort'))
       ) {
+        this.logger.warn(
+          'clients.openai.request_abort',
+          this.buildClientContext({ durationMs, reason: err?.message }),
+        );
         return this.getStreamText(intermediateReply);
       }
       if (
@@ -1488,7 +1565,13 @@ ${convo}
         err?.message?.includes('missing role') ||
         (err instanceof OpenAI.OpenAIError && err?.message?.includes('missing finish_reason'))
       ) {
-        logger.error('[OpenAIClient] Known OpenAI error:', err);
+        this.logger.error(
+          'clients.openai.request_error',
+          this.buildClientContext({
+            durationMs,
+            err: { message: err?.message, stack: err?.stack },
+          }),
+        );
         if (this.streamHandler && this.streamHandler.reasoningTokens.length) {
           return this.getStreamText();
         } else if (intermediateReply.length > 0) {
@@ -1505,7 +1588,13 @@ ${convo}
           throw err;
         }
       } else {
-        logger.error('[OpenAIClient.chatCompletion] Unhandled error type', err);
+        this.logger.error(
+          'clients.openai.request_error',
+          this.buildClientContext({
+            durationMs,
+            err: { message: err?.message, stack: err?.stack },
+          }),
+        );
         throw err;
       }
     }

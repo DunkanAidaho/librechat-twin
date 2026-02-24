@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const fetch = require('node-fetch');
-const { logger } = require('@librechat/data-schemas');
+const { getLogger } = require('~/utils/logger');
+const { buildContext, getRequestContext } = require('~/utils/logContext');
 const { getBalanceConfig, Tokenizer, TextStream } = require('@librechat/api');
 const configService = require('~/server/services/Config/ConfigService');
 const {
@@ -86,16 +87,26 @@ class BaseClient {
     /** @type {TMessage[]} */
     this.currentMessages = [];
     /** @type {import('librechat-data-provider').VisionModes | undefined} */
+    this.logger = getLogger('clients.base');
     if (!BaseClient._historyBudgetLogged) {
       BaseClient._historyBudgetLogged = true;
       const historyTokenBudget = historyConfig?.tokenBudget ?? 0;
-      logger.info({
-        msg: '[BaseClient] HISTORY_TOKEN_BUDGET',
-        historyTokenBudget,
-      });
+      this.logger.info(
+        'clients.base.config',
+        buildContext({}, { historyTokenBudget, event: 'history_budget' }),
+      );
     }
-
     this.visionMode;
+  }
+
+  buildLogContext(extra = {}) {
+    const reqContext = getRequestContext(this.options?.req) || {};
+    return buildContext(reqContext, {
+      conversationId: this.conversationId,
+      userId: this.user,
+      agentId: this.options?.agent?.id,
+      ...extra,
+    });
   }
 
     /**
@@ -168,7 +179,7 @@ class BaseClient {
    * @returns {number}
    */
   getTokenCountForResponse(responseMessage) {
-    logger.debug('[BaseClient] `recordTokenUsage` not implemented.', responseMessage);
+    this.logger.debug('clients.base.token_usage_missing', this.buildLogContext({ responseMessage }));
   }
 
   /**
@@ -182,12 +193,10 @@ class BaseClient {
    * @returns {Promise<void>}
    */
   async recordTokenUsage({ model, balance, promptTokens, completionTokens }) {
-    logger.debug('[BaseClient] `recordTokenUsage` not implemented.', {
-      model,
-      balance,
-      promptTokens,
-      completionTokens,
-    });
+    this.logger.debug(
+      'clients.base.token_usage_missing',
+      this.buildLogContext({ model, balance, promptTokens, completionTokens }),
+    );
   }
 
   /**
@@ -202,7 +211,10 @@ class BaseClient {
     if (this.options.directEndpoint) {
       url = this.options.reverseProxyUrl;
     }
-    logger.debug(`Making request to ${url}`);
+    this.logger.debug(
+      'clients.base.config',
+      this.buildLogContext({ event: 'fetch', url, method: init?.method }),
+    );
     if (typeof Bun !== 'undefined') {
       return await fetch(url, init);
     }
@@ -303,12 +315,23 @@ class BaseClient {
     const resolvedTimeout = this.getClientTimeoutMs(timeoutMs);
     const resolvedRetry = this.getClientRetryOptions(retryOptions);
 
+    const startedAt = Date.now();
     const operation = async (attempt) => {
       if (typeof beforeAttempt === 'function') {
         await beforeAttempt(attempt);
       }
 
       const attemptLabel = `${action} (попытка ${attempt + 1})`;
+      this.logger.info(
+        'clients.base.request_start',
+        this.buildLogContext({
+          action,
+          attempt: attempt + 1,
+          endpoint: this.options?.endpoint,
+          model: this.getResponseModel?.(),
+          retryConfig: resolvedRetry,
+        }),
+      );
       const execution = Promise.resolve(task(attempt));
 
       return withTimeout(
@@ -327,18 +350,51 @@ class BaseClient {
           throw err;
         }
 
-        logger.warn(
-          '[%s] Попытка %d завершилась ошибкой: %s',
-          action,
-          attempt,
-          err?.message || err,
+        this.logger.warn(
+          'clients.base.request_retry',
+          this.buildLogContext({
+            action,
+            attempt: attempt + 1,
+            error: { message: err?.message, code: err?.code },
+          }),
         );
 
         if (typeof onRetry === 'function') {
           await onRetry(err, attempt);
         }
       },
-    });
+    }).then(
+      (result) => {
+        this.logger.info(
+          'clients.base.request_success',
+          this.buildLogContext({
+            action,
+            durationMs: Date.now() - startedAt,
+            usage: this.getStreamUsage?.(),
+          }),
+        );
+        return result;
+      },
+      (error) => {
+        const durationMs = Date.now() - startedAt;
+        if (error?.name === 'AbortError') {
+          this.logger.warn(
+            'clients.base.request_abort',
+            this.buildLogContext({ action, durationMs, reason: error?.message }),
+          );
+        } else {
+          this.logger.error(
+            'clients.base.request_error',
+            this.buildLogContext({
+              action,
+              durationMs,
+              err: { message: error?.message, stack: error?.stack, code: error?.code },
+            }),
+          );
+        }
+        throw error;
+      },
+    );
   }
 
     /**
@@ -350,7 +406,19 @@ class BaseClient {
      */
   async generateTextStream(text, onProgress, options = {}) {
     const stream = new TextStream(text, options);
-    await stream.processTextStream(onProgress);
+    let cumulativeLen = 0;
+    await stream.processTextStream(async (chunk) => {
+      cumulativeLen += chunk?.length ?? 0;
+      if (typeof onProgress === 'function') {
+        await onProgress(chunk);
+      }
+      if (!this.options?.quietStreamLogging) {
+        this.logger.debug(
+          'clients.base.stream_token',
+          this.buildLogContext({ chunkLen: chunk?.length ?? 0, cumulativeLen }),
+        );
+      }
+    });
   }
 
   /**
@@ -521,7 +589,10 @@ class BaseClient {
             return resolved;
           }
         } catch (error) {
-          logger.warn(`${logPrefix} Failed to resolve encoding via function: ${error.message}`);
+          this.logger.warn(
+            'clients.base.instructions_encoding_resolve_failed',
+            this.buildLogContext({ error: error?.message, logPrefix }),
+          );
         }
       } else if (typeof encodingResolver === 'string' && encodingResolver.trim().length > 0) {
         return encodingResolver.trim();
@@ -534,7 +605,10 @@ class BaseClient {
             return encoding;
           }
         } catch (error) {
-          logger.warn(`${logPrefix} getEncoding() failed: ${error.message}`);
+          this.logger.warn(
+            'clients.base.instructions_encoding_get_failed',
+            this.buildLogContext({ error: error?.message, logPrefix }),
+          );
         }
       }
 
@@ -544,20 +618,26 @@ class BaseClient {
     const encoding = resolveEncoding();
 
     const computeTokens = (text) => {
-  if (!text) {
-    return 0;
-  }
-  if (Tokenizer?.getTokenCount) {
-    try {
-      return Tokenizer.getTokenCount(text, encoding);
-    } catch (error) {
-      safeWarn(`${logPrefix} Failed to count tokens: ${error.message}`);
-    }
-  } else {
-    safeWarn(`${logPrefix} Tokenizer unavailable, using string length as estimate.`);
-  }
-  return text.length;
-};
+      if (!text) {
+        return 0;
+      }
+      if (Tokenizer?.getTokenCount) {
+        try {
+          return Tokenizer.getTokenCount(text, encoding);
+        } catch (error) {
+          this.logger.warn(
+            'clients.base.instructions_token_count_failed',
+            this.buildLogContext({ error: error?.message, logPrefix }),
+          );
+        }
+      } else {
+        this.logger.warn(
+          'clients.base.instructions_tokenizer_missing',
+          this.buildLogContext({ logPrefix }),
+        );
+      }
+      return text.length;
+    };
 
     if (rawInstructions == null) {
       return { content: '', tokenCount: 0 };
@@ -566,14 +646,22 @@ class BaseClient {
     if (typeof rawInstructions === 'object') {
       const content = rawInstructions.content;
       if (typeof content !== 'string') {
-        logger.warn(`${logPrefix} Instructions object missing valid content property.`);
+        this.logger.warn(
+          'clients.base.instructions_content_missing',
+          this.buildLogContext({ logPrefix }),
+        );
         return { content: '', tokenCount: 0 };
       }
 
       const tokenCount = computeTokens(content);
       if (rawInstructions.tokenCount !== tokenCount) {
-        logger.info(
-          `${logPrefix} Recomputed instruction tokens. Length: ${content.length}, Tokens: ${tokenCount}`,
+        this.logger.info(
+          'clients.base.instructions_tokens_recomputed',
+          this.buildLogContext({
+            logPrefix,
+            length: content.length,
+            tokenCount,
+          }),
         );
       }
 
@@ -581,13 +669,21 @@ class BaseClient {
     }
 
     if (typeof rawInstructions !== 'string') {
-      logger.warn(`${logPrefix} Unsupported instructions type: ${typeof rawInstructions}`);
+      this.logger.warn(
+        'clients.base.instructions_type_unsupported',
+        this.buildLogContext({ logPrefix, type: typeof rawInstructions }),
+      );
       return { content: '', tokenCount: 0 };
     }
 
     const tokenCount = computeTokens(rawInstructions);
-    logger.info(
-      `${logPrefix} Converted string instructions. Length: ${rawInstructions.length}, Tokens: ${tokenCount}`,
+    this.logger.info(
+      'clients.base.instructions_string_normalized',
+      this.buildLogContext({
+        logPrefix,
+        length: rawInstructions.length,
+        tokenCount,
+      }),
     );
 
     return {
@@ -651,14 +747,20 @@ class BaseClient {
       const update = {};
 
       if (messageId === tokenCountMap.summaryMessage?.messageId) {
-        logger.debug(`[BaseClient] Adding summary props to ${messageId}.`);
+        this.logger.debug(
+          'clients.base.summary_props_added',
+          this.buildLogContext({ messageId }),
+        );
 
         update.summary = tokenCountMap.summaryMessage.content;
         update.summaryTokenCount = tokenCountMap.summaryMessage.tokenCount;
       }
 
       if (message.tokenCount && !update.summaryTokenCount) {
-        logger.debug(`[BaseClient] Skipping ${messageId}: already had a token count.`);
+        this.logger.debug(
+          'clients.base.token_count_skip',
+          this.buildLogContext({ messageId }),
+        );
         continue;
       }
 
@@ -759,11 +861,17 @@ class BaseClient {
       ({ tokenCount, ..._instructions } = instructions);
     }
 
-    _instructions && logger.debug('[BaseClient] instructions tokenCount: ' + tokenCount);
+    _instructions && this.logger.debug(
+      'clients.base.instructions_summary',
+      this.buildLogContext({ tokenCount }),
+    );
     if (tokenCount && tokenCount > this.maxContextTokens) {
       const info = `${tokenCount} / ${this.maxContextTokens}`;
       const errorMessage = `{ "type": "${ErrorTypes.INPUT_LENGTH}", "info": "${info}" }`;
-      logger.warn(`Instructions token count exceeds max token count (${info}).`);
+      this.logger.warn(
+        'clients.base.instructions_exceed_context',
+        this.buildLogContext({ tokenCount, maxContextTokens: this.maxContextTokens }),
+      );
       throw new Error(errorMessage);
     }
 
@@ -775,7 +883,10 @@ class BaseClient {
       );
 
       if (editedIndices.length > 0) {
-        logger.debug('[BaseClient] Truncated tool call outputs:', editedIndices);
+        this.logger.debug(
+          'clients.base.truncated_tool_calls',
+          this.buildLogContext({ truncatedCount: editedIndices.length }),
+        );
         for (const index of editedIndices) {
           formattedMessages[index].content = dbMessages[index].content;
         }
@@ -791,10 +902,10 @@ class BaseClient {
         instructions,
       });
 
-    logger.debug('[BaseClient] Context Count (1/2)', {
-      remainingContextTokens,
-      maxContextTokens: this.maxContextTokens,
-    });
+    this.logger.debug(
+      'clients.base.context_window_start',
+      this.buildLogContext({ remainingContextTokens, maxContextTokens: this.maxContextTokens }),
+    );
 
     let summaryMessage;
     let summaryTokenCount;
@@ -814,8 +925,13 @@ class BaseClient {
 
     if (diff > 0) {
       payload = formattedMessages.slice(diff);
-      logger.debug(
-        `[BaseClient] Difference between original payload (${length}) and context (${context.length}): ${diff}`,
+      this.logger.debug(
+        'clients.base.payload_trimmed',
+        this.buildLogContext({
+          originalLength: length,
+          contextLength: context.length,
+          trimmed: diff,
+        }),
       );
     }
 
@@ -825,7 +941,10 @@ class BaseClient {
     if (payload.length === 0 && !shouldSummarize && latestMessage) {
       const info = `${latestMessage.tokenCount} / ${this.maxContextTokens}`;
       const errorMessage = `{ "type": "${ErrorTypes.INPUT_LENGTH}", "info": "${info}" }`;
-      logger.warn(`Prompt token count exceeds max token count (${info}).`);
+      this.logger.warn(
+        'clients.base.prompt_exceeds_context',
+        this.buildLogContext({ tokenCount: latestMessage.tokenCount, maxContextTokens: this.maxContextTokens }),
+      );
       throw new Error(errorMessage);
     } else if (
       _instructions &&
@@ -834,8 +953,12 @@ class BaseClient {
     ) {
       const info = `${tokenCount + 3} / ${this.maxContextTokens}`;
       const errorMessage = `{ "type": "${ErrorTypes.INPUT_LENGTH}", "info": "${info}" }`;
-      logger.warn(
-        `Including instructions, the prompt token count exceeds remaining max token count (${info}).`,
+      this.logger.warn(
+        'clients.base.prompt_with_instructions_exceeds',
+        this.buildLogContext({
+          combinedTokens: tokenCount + 3,
+          maxContextTokens: this.maxContextTokens,
+        }),
       );
       throw new Error(errorMessage);
     }
@@ -857,10 +980,10 @@ class BaseClient {
     // Make sure to only continue summarization logic if the summary message was generated
     shouldSummarize = summaryMessage != null && shouldSummarize === true;
 
-    logger.debug('[BaseClient] Context Count (2/2)', {
-      remainingContextTokens,
-      maxContextTokens: this.maxContextTokens,
-    });
+    this.logger.debug(
+      'clients.base.context_window_end',
+      this.buildLogContext({ remainingContextTokens, maxContextTokens: this.maxContextTokens }),
+    );
 
     /** @type {Record<string, number> | undefined} */
     let tokenCountMap;
@@ -883,13 +1006,21 @@ class BaseClient {
 
     const promptTokens = this.maxContextTokens - remainingContextTokens;
 
-    logger.debug('[BaseClient] tokenCountMap:', tokenCountMap);
-    logger.debug('[BaseClient]', {
-      promptTokens,
-      remainingContextTokens,
-      payloadSize: payload.length,
-      maxContextTokens: this.maxContextTokens,
-    });
+    if (tokenCountMap) {
+      this.logger.debug(
+        'clients.base.token_map_summary',
+        this.buildLogContext({ tokenCountEntries: Object.keys(tokenCountMap).length }),
+      );
+    }
+    this.logger.debug(
+      'clients.base.prompt_summary',
+      this.buildLogContext({
+        promptTokens,
+        remainingContextTokens,
+        payloadSize: payload.length,
+        maxContextTokens: this.maxContextTokens,
+      }),
+    );
 
     return { payload, tokenCountMap, promptTokens, messages: orderedWithInstructions };
   }
@@ -970,10 +1101,16 @@ class BaseClient {
     );
 
     if (tokenCountMap) {
-      logger.debug('[BaseClient] tokenCountMap', tokenCountMap);
+      this.logger.debug(
+        'clients.base.token_map_details',
+        this.buildLogContext({ entryCount: Object.keys(tokenCountMap).length }),
+      );
       if (tokenCountMap[userMessage.messageId]) {
         userMessage.tokenCount = tokenCountMap[userMessage.messageId];
-        logger.debug('[BaseClient] userMessage', userMessage);
+        this.logger.debug(
+          'clients.base.user_message_tokens',
+          this.buildLogContext({ messageId: userMessage.messageId, tokenCount: userMessage.tokenCount }),
+        );
       }
 
       this.handleTokenCountMap(tokenCountMap);
@@ -1112,7 +1249,10 @@ class BaseClient {
       try {
         saveOptions.files = this.options.attachments.map((attachments) => attachments.file_id);
       } catch (error) {
-        logger.error('[BaseClient] Error mapping attachments for conversation', error);
+        this.logger.error(
+          'clients.base.attachments_mapping_error',
+          this.buildLogContext({ err: { message: error?.message } }),
+        );
       }
     }
 
@@ -1202,7 +1342,10 @@ class BaseClient {
      * @returns {Promise<Array>} Array of messages in conversation history.
      */
   async loadHistory(conversationId, parentMessageId = null) {
-    logger.debug('[BaseClient] Loading history:', { conversationId, parentMessageId });
+    this.logger.debug(
+      'clients.base.history_load',
+      this.buildLogContext({ conversationId, parentMessageId }),
+    );
 
     const messages = (await getMessages({ conversationId })) ?? [];
 
@@ -1237,12 +1380,10 @@ class BaseClient {
 
     if (this.previous_summary) {
       const { messageId, summary, tokenCount, summaryTokenCount } = this.previous_summary;
-      logger.debug('[BaseClient] Previous summary:', {
-        messageId,
-        summary,
-        tokenCount,
-        summaryTokenCount,
-      });
+      this.logger.debug(
+        'clients.base.previous_summary',
+        this.buildLogContext({ messageId, tokenCount, summaryTokenCount }),
+      );
     }
 
     return _messages;
