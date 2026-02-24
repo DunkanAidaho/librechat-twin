@@ -1,11 +1,8 @@
 const { getLogger } = require('~/utils/logger');
 const { buildContext } = require('~/utils/logContext');
-const {
-  extractMessageText,
-  normalizeMemoryText,
-  makeIngestKey,
-} = require('~/server/utils/messageUtils');
+const { extractMessageText, normalizeMemoryText, makeIngestKey } = require('~/server/utils/messageUtils');
 const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
+const { observeHistoryPassthrough } = require('~/utils/ragMetrics');
 const crypto = require('crypto');
 
 /**
@@ -115,20 +112,17 @@ class MessageHistoryManager {
    * @returns {Promise<{toIngest: Array, modifiedMessages: Array}>}
    */
   async processMessageHistory({
-    orderedMessages,
+    orderedMessages = [],
     conversationId,
     userId,
     histLongUserToRag = 20000,
     assistLongToRag = 15000,
-    assistSnippetChars = 1500,
-    dontShrinkLastN = 0,
     trimmer,
     tokenBudget,
     contextHeadroom = 0,
   }) {
     const toIngest = [];
-    const totalMessages = orderedMessages.length;
-    const dontShrinkStartIndex = Math.max(totalMessages - dontShrinkLastN, 0);
+    let heavyCount = 0;
 
     for (let idx = 0; idx < orderedMessages.length; idx++) {
       const m = orderedMessages[idx];
@@ -197,44 +191,24 @@ class MessageHistoryManager {
           }
 
           const roleTag = m?.isCreatedByUser ? 'user' : 'assistant';
-          const isLatestMessage = idx === orderedMessages.length - 1;
-          const skipShrinkForRecent = idx >= dontShrinkStartIndex;
-          const keepFullText = isLatestMessage || skipShrinkForRecent;
+          const limitLabel = m?.isCreatedByUser ? 'HIST_LONG_USER_TO_RAG' : 'ASSIST_LONG_TO_RAG';
+          const limitValue = m?.isCreatedByUser ? histLongUserToRag : assistLongToRag;
+          const shrinkReason = looksHTML ? 'html' : hasThink ? 'reasoning' : 'length';
 
-          if (!keepFullText) {
-            const snippetLen = m?.isCreatedByUser ? 2000 : assistSnippetChars;
-            const snippet = normalizedText.slice(0, snippetLen);
-            m.text = `[[moved_to_memory:RAG,len=${len},role=${roleTag}]]\n\n${snippet}`;
-            if (Array.isArray(m?.content)) {
-              m.content = [{ type: 'text', text: m.text }];
-            }
+          this.logger.info(
+            'rag.history.prompt_passthrough',
+            this.getLogContext(conversationId, userId, {
+              index: idx,
+              role: roleTag,
+              len,
+              reason: shrinkReason,
+              limitLabel,
+              limitValue,
+            }),
+          );
 
-            const limitLabel = m?.isCreatedByUser ? 'HIST_LONG_USER_TO_RAG' : 'ASSIST_LONG_TO_RAG';
-            const limitValue = m?.isCreatedByUser ? histLongUserToRag : assistLongToRag;
-            const shrinkReason = looksHTML ? 'html' : hasThink ? 'reasoning' : 'length';
-            this.logger.info(
-              'rag.history.prompt_shrink',
-              this.getLogContext(conversationId, userId, {
-                index: idx,
-                role: roleTag,
-                len,
-                reason: shrinkReason,
-                limitLabel,
-                limitValue,
-                snippetLen: snippet.length,
-              }),
-            );
-          } else {
-            this.logger.info(
-              'rag.history.prompt_keep',
-              this.getLogContext(conversationId, userId, {
-                index: idx,
-                role: roleTag,
-                len,
-                dontShrinkLastN,
-              }),
-            );
-          }
+          observeHistoryPassthrough({ role: roleTag, reason: shrinkReason });
+          heavyCount += 1;
         }
       } catch (error) {
         this.logger.error(
@@ -245,6 +219,15 @@ class MessageHistoryManager {
           }),
         );
       }
+    }
+
+    if (heavyCount > 0) {
+      this.logger.info(
+        'rag.history.heavy_total',
+        this.getLogContext(conversationId, userId, {
+          heavyCount,
+        }),
+      );
     }
 
     let trimmedMessages = orderedMessages;

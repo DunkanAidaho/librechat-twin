@@ -52,6 +52,16 @@ const ragContextGauge = reuseMetric(
     }),
 );
 
+const historyPassthroughGauge = reuseMetric(
+  'rag_history_passthrough_total',
+  () =>
+    new Gauge({
+      name: 'rag_history_passthrough_total',
+      help: 'Количество «тяжёлых» сообщений, пропущенных без shrink.',
+      labelNames: ['role', 'reason'],
+    }),
+);
+
 function observeSegmentTokens({ segment, tokens, endpoint = 'unknown', model = 'unknown' }) {
   if (!segment || tokens == null) {
     return;
@@ -80,14 +90,20 @@ function setContextLength({ segment, length, endpoint = 'unknown', model = 'unkn
   ragContextGauge.labels(segment, endpoint, model).set(length);
 }
 
+function observeHistoryPassthrough({ role = 'unknown', reason = 'unspecified' } = {}) {
+  historyPassthroughGauge.labels(role, reason).inc(1);
+}
+
 module.exports = {
   register,
   segmentCounter,
   cacheCounter,
   costCounter,
   ragContextGauge,
+  historyPassthroughGauge,
   observeSegmentTokens,
   observeCache,
   observeCost,
   setContextLength,
+  observeHistoryPassthrough,
 };

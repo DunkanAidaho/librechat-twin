@@ -1639,6 +1639,17 @@ Graph hints: ${graphQueryHint}`;
       summary: this.shouldSummarize,
     });
 
+    orderedMessages = orderedMessages.filter((message) => {
+      if (typeof message?.text === 'string' && message.text.startsWith('[[moved_to_memory')) {
+        logger.warn('[rag.history.legacy_stub]', {
+          conversationId: this.conversationId,
+          messageId: message?.messageId,
+        });
+        return false;
+      }
+      return true;
+    });
+
     const historyCompressionCfg = runtimeCfg?.historyCompression ?? {};
     const historyCfg = runtimeCfg?.history ?? {};
     const dontShrinkLastN = Number.isFinite(historyCfg?.dontShrinkLastN)
