@@ -867,6 +867,14 @@ class ConfigService {
             activationThreshold: parseOptionalInt(this.env.MEMORY_ACTIVATION_THRESHOLD) ?? 6,
             history: {
               tokenBudget: parseOptionalInt(this.env.HISTORY_TOKEN_BUDGET) ?? 8_000,
+              mode: sanitizeOptionalString(this.env.HISTORY_MODE) || 'legacy',
+              liveWindow: {
+                size: parseOptionalInt(this.env.HISTORY_LIVEWINDOW_SIZE) ?? 8,
+                minUserMessages:
+                  parseOptionalInt(this.env.HISTORY_LIVEWINDOW_MINUSERMESSAGES) ?? 1,
+                minAssistantMessages:
+                  parseOptionalInt(this.env.HISTORY_LIVEWINDOW_MINASSISTANTMESSAGES) ?? 1,
+              },
             },
             queue: {
               taskTimeoutMs: parseOptionalInt(this.env.MEMORY_TASK_TIMEOUT_MS) ?? 30_000,

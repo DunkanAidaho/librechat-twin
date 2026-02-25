@@ -1777,7 +1777,11 @@ Graph hints: ${graphQueryHint}`;
     }
 
     try {
-      const { toIngest = [], modifiedMessages } = await this.historyManager.processMessageHistory({
+      const {
+        toIngest = [],
+        modifiedMessages,
+        liveWindowStats,
+      } = await this.historyManager.processMessageHistory({
         orderedMessages,
         conversationId,
         userId: requestUserId,
@@ -1791,6 +1795,15 @@ Graph hints: ${graphQueryHint}`;
       });
 
       orderedMessages = modifiedMessages;
+
+      if (liveWindowStats) {
+        logger.info('[history.live_window.applied]', {
+          conversationId: this.conversationId,
+          mode: liveWindowStats.mode,
+          kept: liveWindowStats.kept,
+          dropped: liveWindowStats.dropped,
+        });
+      }
 
       if (toIngest.length && conversationId) {
         setImmediate(() =>

@@ -62,6 +62,16 @@ const historyPassthroughGauge = reuseMetric(
     }),
 );
 
+const liveWindowGauge = reuseMetric(
+  'rag_history_live_window_size',
+  () =>
+    new Gauge({
+      name: 'rag_history_live_window_size',
+      help: 'Размер живого окна истории, попавшего в prompt.',
+      labelNames: ['mode'],
+    }),
+);
+
 function observeSegmentTokens({ segment, tokens, endpoint = 'unknown', model = 'unknown' }) {
   if (!segment || tokens == null) {
     return;
@@ -94,6 +104,10 @@ function observeHistoryPassthrough({ role = 'unknown', reason = 'unspecified' } 
   historyPassthroughGauge.labels(role, reason).inc(1);
 }
 
+function observeLiveWindow({ mode = 'legacy', size = 0 } = {}) {
+  liveWindowGauge.labels(mode).set(size);
+}
+
 module.exports = {
   register,
   segmentCounter,
@@ -101,9 +115,11 @@ module.exports = {
   costCounter,
   ragContextGauge,
   historyPassthroughGauge,
+  liveWindowGauge,
   observeSegmentTokens,
   observeCache,
   observeCost,
   setContextLength,
   observeHistoryPassthrough,
+  observeLiveWindow,
 };
