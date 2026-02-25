@@ -93,6 +93,7 @@ function getMemoryConfig() {
     historyMinUser: process.env.HISTORY_LIVEWINDOW_MINUSERMESSAGES,
     historyMinAssistant: process.env.HISTORY_LIVEWINDOW_MINASSISTANTMESSAGES,
     historyTokenBudget: process.env.HISTORY_TOKEN_BUDGET,
+    historyWaitForIngest: process.env.HISTORY_WAIT_FOR_INGEST_MS,
   });
 
   if (!memoized || lastLoadedEnvSnapshot !== currentEnvSignature) {
@@ -110,6 +111,7 @@ function refreshMemoryConfig() {
     historyMinUser: process.env.HISTORY_LIVEWINDOW_MINUSERMESSAGES,
     historyMinAssistant: process.env.HISTORY_LIVEWINDOW_MINASSISTANTMESSAGES,
     historyTokenBudget: process.env.HISTORY_TOKEN_BUDGET,
+    historyWaitForIngest: process.env.HISTORY_WAIT_FOR_INGEST_MS,
   });
   return memoized;
 }

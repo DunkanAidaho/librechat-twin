@@ -1802,6 +1802,7 @@ Graph hints: ${graphQueryHint}`;
         logger.info('[history.live_window.applied]', {
           conversationId: this.conversationId,
           mode: liveWindowStats.mode,
+          requestedSize: runtimeCfg?.history?.liveWindow?.size,
           kept: liveWindowStats.kept,
           dropped: liveWindowStats.dropped,
         });

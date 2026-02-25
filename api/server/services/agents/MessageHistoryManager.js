@@ -16,6 +16,35 @@ class MessageHistoryManager {
     this.logger = getLogger('rag.history');
   }
 
+  sliceLiveWindow({ orderedMessages = [], size = 8, minUserMessages = 1, minAssistantMessages = 1 }) {
+    if (!Array.isArray(orderedMessages) || orderedMessages.length === 0) {
+      return { keptMessages: orderedMessages, droppedMessages: [] };
+    }
+
+    const targetSize = Math.max(0, size);
+    const baseTail = orderedMessages.slice(-targetSize);
+    let userCount = baseTail.filter((m) => m?.role === 'user').length;
+    let assistantCount = baseTail.filter((m) => m?.role === 'assistant').length;
+
+    let idx = orderedMessages.length - targetSize - 1;
+    const requiredUser = Math.max(0, minUserMessages);
+    const requiredAssistant = Math.max(0, minAssistantMessages);
+    const headBuffer = [];
+
+    while ((userCount < requiredUser || assistantCount < requiredAssistant) && idx >= 0) {
+      const candidate = orderedMessages[idx];
+      headBuffer.push(candidate);
+      if (candidate?.role === 'user') userCount += 1;
+      if (candidate?.role === 'assistant') assistantCount += 1;
+      idx -= 1;
+    }
+
+    const keptMessages = [...headBuffer.reverse(), ...baseTail];
+    const keptIds = new Set(keptMessages.map((m) => m?.messageId));
+    const droppedMessages = orderedMessages.filter((m) => !keptIds.has(m?.messageId));
+    return { keptMessages, droppedMessages };
+  }
+
   getLogContext(conversationId, userId, extra = {}) {
     if (conversationId || userId) {
       return buildContext({ conversationId, userId }, extra);
@@ -234,29 +263,67 @@ class MessageHistoryManager {
       );
     }
 
-    this.logger.info(
-      'rag.history.mode_selected',
-      this.getLogContext(conversationId, userId, {
-        mode: historyMode,
-        liveWindowSize: liveWindowCfg.size,
+    let finalMessages = orderedMessages;
+    let droppedMessages = [];
+
+    if (historyMode === 'live_window' && liveWindowCfg.size > 0) {
+      const { keptMessages, droppedMessages: dropped } = this.sliceLiveWindow({
+        orderedMessages,
+        size: liveWindowCfg.size,
         minUserMessages: liveWindowCfg.minUserMessages,
         minAssistantMessages: liveWindowCfg.minAssistantMessages,
-      }),
-    );
+      });
+      finalMessages = keptMessages;
+      droppedMessages = dropped;
 
-    if (typeof this.trimmer?.stats === 'object') {
-      observeLiveWindow({ mode: historyMode, size: this.trimmer.stats.kept ?? orderedMessages.length });
+      if (droppedMessages.length) {
+        this.logger.info(
+          'rag.history.live_window_dropped',
+          this.getLogContext(conversationId, userId, {
+            mode: historyMode,
+            requestedSize: liveWindowCfg.size,
+            kept: finalMessages.length,
+            dropped: droppedMessages.length,
+          }),
+        );
+        observeLiveWindow({ mode: historyMode, size: finalMessages.length });
+        await this.processDroppedMessages({
+          droppedMessages,
+          conversationId,
+          userId,
+        });
+      } else {
+        this.logger.info(
+          'rag.history.live_window_kept',
+          this.getLogContext(conversationId, userId, {
+            mode: historyMode,
+            requestedSize: liveWindowCfg.size,
+            kept: finalMessages.length,
+          }),
+        );
+        observeLiveWindow({ mode: historyMode, size: finalMessages.length });
+      }
     } else {
-      observeLiveWindow({ mode: historyMode, size: orderedMessages.length });
+      this.logger.info(
+        'rag.history.mode_selected',
+        this.getLogContext(conversationId, userId, {
+          mode: historyMode,
+          liveWindowSize: liveWindowCfg.size,
+          minUserMessages: liveWindowCfg.minUserMessages,
+          minAssistantMessages: liveWindowCfg.minAssistantMessages,
+        }),
+      );
+
+      observeLiveWindow({ mode: historyMode, size: finalMessages.length });
     }
 
     return {
       toIngest,
-      modifiedMessages: orderedMessages,
+      modifiedMessages: finalMessages,
       liveWindowStats: {
         mode: historyMode,
-        kept: orderedMessages.length,
-        dropped: 0,
+        kept: finalMessages.length,
+        dropped: droppedMessages.length,
       },
     };
   }

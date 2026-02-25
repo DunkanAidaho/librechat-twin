@@ -875,6 +875,8 @@ class ConfigService {
                 minAssistantMessages:
                   parseOptionalInt(this.env.HISTORY_LIVEWINDOW_MINASSISTANTMESSAGES) ?? 1,
               },
+              waitForIngestMs:
+                parseOptionalInt(this.env.HISTORY_WAIT_FOR_INGEST_MS) ?? 0,
             },
             queue: {
               taskTimeoutMs: parseOptionalInt(this.env.MEMORY_TASK_TIMEOUT_MS) ?? 30_000,
