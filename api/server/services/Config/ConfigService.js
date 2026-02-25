@@ -359,6 +359,13 @@ class ConfigService {
       activationThreshold: z.number().int().nonnegative(),
       history: z.object({
         tokenBudget: z.number().int().nonnegative(),
+        mode: z.enum(['legacy', 'live_window', 'drop']).default('legacy'),
+        liveWindow: z.object({
+          size: z.number().int().nonnegative().default(8),
+          minUserMessages: z.number().int().nonnegative().default(1),
+          minAssistantMessages: z.number().int().nonnegative().default(1),
+        }).default({ size: 8, minUserMessages: 1, minAssistantMessages: 1 }),
+        waitForIngestMs: z.number().int().nonnegative().default(0),
       }),
       queue: z.object({
         taskTimeoutMs: z.number().int().nonnegative(),
