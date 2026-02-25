@@ -3,6 +3,7 @@
 const configService = require('~/server/services/Config/ConfigService');
 
 let memoized;
+let lastLoadedEnvSnapshot = null;
 
 function buildMemoryConfig() {
   const memory = configService.getSection('memory');
@@ -27,6 +28,13 @@ function buildMemoryConfig() {
     history: Object.freeze({
       dontShrinkLastN: limits.dontShrinkLastN ?? 4,
       tokenBudget: memory.history?.tokenBudget ?? 8000,
+      mode: memory.history?.mode || 'legacy',
+      liveWindow: Object.freeze({
+        size: memory.history?.liveWindow?.size ?? 8,
+        minUserMessages: memory.history?.liveWindow?.minUserMessages ?? 1,
+        minAssistantMessages: memory.history?.liveWindow?.minAssistantMessages ?? 1,
+      }),
+      waitForIngestMs: memory.history?.waitForIngestMs ?? 0,
     }),
     historyCompression: Object.freeze({
       enabled: historyCompression.enabled,
@@ -79,14 +87,30 @@ function buildMemoryConfig() {
 }
 
 function getMemoryConfig() {
-  if (!memoized) {
+  const currentEnvSignature = JSON.stringify({
+    historyMode: process.env.HISTORY_MODE,
+    historySize: process.env.HISTORY_LIVEWINDOW_SIZE,
+    historyMinUser: process.env.HISTORY_LIVEWINDOW_MINUSERMESSAGES,
+    historyMinAssistant: process.env.HISTORY_LIVEWINDOW_MINASSISTANTMESSAGES,
+    historyTokenBudget: process.env.HISTORY_TOKEN_BUDGET,
+  });
+
+  if (!memoized || lastLoadedEnvSnapshot !== currentEnvSignature) {
     memoized = buildMemoryConfig();
+    lastLoadedEnvSnapshot = currentEnvSignature;
   }
   return memoized;
 }
 
 function refreshMemoryConfig() {
   memoized = buildMemoryConfig();
+  lastLoadedEnvSnapshot = JSON.stringify({
+    historyMode: process.env.HISTORY_MODE,
+    historySize: process.env.HISTORY_LIVEWINDOW_SIZE,
+    historyMinUser: process.env.HISTORY_LIVEWINDOW_MINUSERMESSAGES,
+    historyMinAssistant: process.env.HISTORY_LIVEWINDOW_MINASSISTANTMESSAGES,
+    historyTokenBudget: process.env.HISTORY_TOKEN_BUDGET,
+  });
   return memoized;
 }
 

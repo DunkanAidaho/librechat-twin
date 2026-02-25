@@ -948,7 +948,9 @@ class AgentClient extends BaseClient {
     this.processMemory;
     this.historyManager = new MessageHistoryManager({
       ingestedHistory: IngestedHistory,
-      config: runtimeMemoryConfig.getMemoryConfig(),
+      get config() {
+        return runtimeMemoryConfig.getMemoryConfig();
+      },
       memoryTaskTimeout: MEMORY_TASK_TIMEOUT_MS,
     });
 
@@ -1822,7 +1824,7 @@ Graph hints: ${graphQueryHint}`;
     const intentAnalysis = runtimeCfg?.multiStepRag?.enabled
       ? await analyzeIntent({
           message: orderedMessages[orderedMessages.length - 1],
-          context: orderedMessages.slice(-5),
+          context: orderedMessages.slice(-8),
           signal: this.options?.req?.abortController?.signal,
           timeoutMs: runtimeCfg.multiStepRag?.intentTimeoutMs || 2000,
         })

@@ -117,13 +117,11 @@ class MessageHistoryManager {
     userId,
     histLongUserToRag = 20000,
     assistLongToRag = 15000,
-    trimmer,
-    tokenBudget,
-    contextHeadroom = 0,
   }) {
     const toIngest = [];
-    const historyMode = this.config?.history?.mode || 'legacy';
-    const liveWindowCfg = this.config?.history?.liveWindow || {};
+    const config = typeof this.config === 'function' ? this.config() : this.config;
+    const historyMode = config?.history?.mode || 'legacy';
+    const liveWindowCfg = config?.history?.liveWindow || {};
     let heavyCount = 0;
 
     for (let idx = 0; idx < orderedMessages.length; idx++) {
@@ -209,7 +207,11 @@ class MessageHistoryManager {
             }),
           );
 
-          observeHistoryPassthrough({ role: roleTag, reason: shrinkReason });
+          observeHistoryPassthrough({
+            role: roleTag,
+            reason: shrinkReason,
+            length: len,
+          });
           heavyCount += 1;
         }
       } catch (error) {
@@ -232,156 +234,31 @@ class MessageHistoryManager {
       );
     }
 
-    if (historyMode !== 'live_window') {
-      const { trimmedMessages, stats } = await this.#trimMessages({
-        messages: orderedMessages,
-        trimmer,
-        tokenBudget,
-        contextHeadroom,
-        conversationId,
-        userId,
-      });
+    this.logger.info(
+      'rag.history.mode_selected',
+      this.getLogContext(conversationId, userId, {
+        mode: historyMode,
+        liveWindowSize: liveWindowCfg.size,
+        minUserMessages: liveWindowCfg.minUserMessages,
+        minAssistantMessages: liveWindowCfg.minAssistantMessages,
+      }),
+    );
 
-      observeLiveWindow({ mode: historyMode, size: trimmedMessages.length });
-
-      return {
-        toIngest,
-        modifiedMessages: trimmedMessages,
-        liveWindowStats: {
-          mode: historyMode,
-          kept: trimmedMessages.length,
-          dropped: stats?.droppedCount ?? 0,
-        },
-      };
-    }
-
-    let liveWindowMessages = orderedMessages;
-    let droppedForPrompt = [];
-
-    if (Array.isArray(orderedMessages) && orderedMessages.length) {
-      const liveWindowSize = Math.max(1, Number(liveWindowCfg.size) || 8);
-      const cutoffIndex = Math.max(orderedMessages.length - liveWindowSize, 0);
-      liveWindowMessages = orderedMessages.slice(cutoffIndex);
-      droppedForPrompt = orderedMessages.slice(0, cutoffIndex);
-
-      const minUser = Math.max(0, Number(liveWindowCfg.minUserMessages) || 1);
-      const minAssistant = Math.max(0, Number(liveWindowCfg.minAssistantMessages) || 1);
-
-      const ensureRoleQuota = (role, minCount) => {
-        if (minCount <= 0) return;
-        const countRole = (msgs) =>
-          msgs.reduce(
-            (acc, msg) => acc + (msg?.isCreatedByUser === (role === 'user') ? 1 : 0),
-            0,
-          );
-
-        while (countRole(liveWindowMessages) < minCount && droppedForPrompt.length) {
-          const candidate = droppedForPrompt.pop();
-          liveWindowMessages = [candidate, ...liveWindowMessages];
-        }
-      };
-
-      ensureRoleQuota('assistant', minAssistant);
-      ensureRoleQuota('user', minUser);
-
-      this.logger.info(
-        'rag.history.live_window_kept',
-        this.getLogContext(conversationId, userId, {
-          kept: liveWindowMessages.length,
-          dropped: droppedForPrompt.length,
-        }),
-      );
-
-      if (droppedForPrompt.length) {
-        const droppedIds = droppedForPrompt
-          .map((msg) => msg?.messageId)
-          .filter(Boolean)
-          .slice(0, 5);
-        this.logger.info(
-          'rag.history.live_window_dropped',
-          this.getLogContext(conversationId, userId, {
-            ids: droppedIds,
-            total: droppedForPrompt.length,
-          }),
-        );
-      }
-    }
-
-    const { trimmedMessages, stats } = await this.#trimMessages({
-      messages: liveWindowMessages,
-      trimmer,
-      tokenBudget,
-      contextHeadroom,
-      conversationId,
-      userId,
-    });
-
-    observeLiveWindow({ mode: historyMode, size: trimmedMessages.length });
-
-    if (droppedForPrompt.length) {
-      await this.processDroppedMessages({
-        droppedMessages: droppedForPrompt,
-        conversationId,
-        userId,
-      });
+    if (typeof this.trimmer?.stats === 'object') {
+      observeLiveWindow({ mode: historyMode, size: this.trimmer.stats.kept ?? orderedMessages.length });
+    } else {
+      observeLiveWindow({ mode: historyMode, size: orderedMessages.length });
     }
 
     return {
       toIngest,
-      modifiedMessages: trimmedMessages,
+      modifiedMessages: orderedMessages,
       liveWindowStats: {
         mode: historyMode,
-        kept: trimmedMessages.length,
-        dropped: droppedForPrompt.length + (stats?.droppedCount ?? 0),
+        kept: orderedMessages.length,
+        dropped: 0,
       },
     };
-  }
-
-  async #trimMessages({ messages, trimmer, tokenBudget, contextHeadroom, conversationId, userId }) {
-    let trimmedMessages = messages;
-    let trimmingStats = null;
-    if (trimmer && typeof trimmer.selectWithinBudget === 'function') {
-      try {
-        const effectiveBudget = Math.max(0, Number(tokenBudget) || 0);
-        const headroom = Math.max(0, Number(contextHeadroom) || 0);
-        const budget = effectiveBudget - headroom;
-        if (budget > 0) {
-          const layers = trimmer.buildLayers(messages);
-          const compressedLayers = await trimmer.compressLayers(layers);
-          const { keptMessages, stats, remainingTokens } = trimmer.selectWithinBudget(
-            compressedLayers,
-            budget,
-          );
-
-          trimmedMessages = keptMessages;
-          trimmingStats = {
-            droppedCount: stats.reduce((sum, layerStat) => sum + layerStat.messageCount, 0) -
-              keptMessages.length,
-          };
-          this.logger.info(
-            'rag.history.context_layers',
-            this.getLogContext(conversationId, userId, {
-              budget,
-              contextHeadroom: headroom,
-              remainingTokens,
-              layers: stats.map((stat) => ({
-                layer: stat.layer,
-                messageCount: stat.messageCount,
-                tokens: stat.tokens,
-              })),
-            }),
-          );
-        }
-      } catch (error) {
-        this.logger.error(
-          'rag.history.context_layers_error',
-          this.getLogContext(conversationId, userId, {
-            err: { message: error?.message, stack: error?.stack },
-          }),
-        );
-      }
-    }
-    return { trimmedMessages, stats: trimmingStats };
   }
 
   /**

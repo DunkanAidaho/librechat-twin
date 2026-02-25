@@ -9,6 +9,37 @@ const MIN_CONFIDENCE = 0.35;
 const logger = getLogger('rag.intentAnalyzer');
 const ENTITY_REGEX = /\b([A-ZА-ЯЁ][a-zа-яё]+(?:\s+[A-ZА-ЯЁ][a-zа-яё]+)*)\b/g;
 const RELATION_HINT_REGEX = /(между|связ(ь|и)|отношени[яе]|контакт[ы]?)/i;
+const ACK_REGEX = /^(ok|okay|ack|принято|ага|понял|да|✅|👌)/i;
+function normalizeText({ message, context }) {
+  const toText = (entry) => {
+    if (!entry) return '';
+    if (typeof entry === 'string') return entry;
+    if (typeof entry?.text === 'string') return entry.text;
+    if (Array.isArray(entry?.content)) {
+      return entry.content
+        .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+        .map((part) => part.text)
+        .join('\n');
+    }
+    return '';
+  };
+
+  const messageText = toText(message).trim();
+  const cleanedMessage = ACK_REGEX.test(messageText)
+    ? messageText.replace(ACK_REGEX, '').trim()
+    : messageText;
+
+  const contextText = Array.isArray(context)
+    ? context.map((entry) => toText(entry)).filter(Boolean).join('\n')
+    : typeof context === 'string'
+      ? context
+      : '';
+
+  return {
+    messageText: cleanedMessage,
+    contextText,
+  };
+}
 
 /**
  * Простая эвристика извлечения сущностей из текста
@@ -60,12 +91,7 @@ async function runAnalysis({ message, context, signal }) {
     throw createAbortError(signal);
   }
 
-  const text = message?.text || '';
-  const contextText = Array.isArray(context)
-    ? context.map((m) => m?.text || '').join('\n')
-    : typeof context === 'string'
-      ? context
-      : '';
+  const { messageText: text, contextText } = normalizeText({ message, context });
 
   const entities = extractEntities(text).map((entity) => ({
     ...entity,

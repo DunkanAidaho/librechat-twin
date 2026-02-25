@@ -100,8 +100,19 @@ function setContextLength({ segment, length, endpoint = 'unknown', model = 'unkn
   ragContextGauge.labels(segment, endpoint, model).set(length);
 }
 
-function observeHistoryPassthrough({ role = 'unknown', reason = 'unspecified' } = {}) {
+function observeHistoryPassthrough({
+  role = 'unknown',
+  reason = 'unspecified',
+  length,
+  limit,
+} = {}) {
   historyPassthroughGauge.labels(role, reason).inc(1);
+  if (Number.isFinite(length)) {
+    historyPassthroughGauge.labels(role, `${reason}_length`).set(length);
+  }
+  if (Number.isFinite(limit)) {
+    historyPassthroughGauge.labels(role, `${reason}_limit`).set(limit);
+  }
 }
 
 function observeLiveWindow({ mode = 'legacy', size = 0 } = {}) {
