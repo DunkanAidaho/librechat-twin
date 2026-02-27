@@ -112,6 +112,7 @@ async function fetchGraph({
   config,
   signal,
   baseContext,
+  relationHints,
 }) {
   if (!fetchGraphContext || !entity) {
     return { lines: [], status: 'skipped' };
@@ -124,7 +125,7 @@ async function fetchGraph({
     const graphContext = await withTimeout(
       fetchGraphContext({
         entity: entity.name,
-        relationHints: entity.hints,
+        relationHints: relationHints || entity.hints,
         limit: config?.maxLines,
         timeoutMs: config?.timeoutMs || DEFAULT_TIMEOUT_MS,
         signal,
@@ -183,6 +184,42 @@ function accumulateTokens(entityState, segment, tokens, length, endpoint, model)
   }
 }
 
+function collectGlobalGraphHints({ graphQueryHint, graphContextLines, maxHints = 6 }) {
+  const hints = [];
+  const pushHint = (value) => {
+    if (!value || hints.length >= maxHints) {
+      return;
+    }
+    const trimmed = String(value).replace(/\s+/g, ' ').trim();
+    if (!trimmed) {
+      return;
+    }
+    hints.push(trimmed.slice(0, 200));
+  };
+
+  if (graphQueryHint) {
+    pushHint(graphQueryHint);
+  }
+
+  for (const line of graphContextLines || []) {
+    const segments = String(line)
+      .split(/-->/)
+      .map((segment) => segment.trim())
+      .filter(Boolean);
+    for (const segment of segments) {
+      pushHint(segment);
+      if (hints.length >= maxHints) {
+        break;
+      }
+    }
+    if (hints.length >= maxHints) {
+      break;
+    }
+  }
+
+  return Array.from(new Set(hints)).slice(0, maxHints);
+}
+
 async function runMultiStepRag({
   intentAnalysis,
   runtimeCfg,
@@ -194,6 +231,8 @@ async function runMultiStepRag({
   endpoint,
   model,
   signal,
+  graphContextLines = [],
+  graphQueryHint = '',
 }) {
   const config = runtimeCfg?.multiStepRag || {};
   const requestId = baseContext?.context?.requestId || baseContext?.requestId;
@@ -212,16 +251,17 @@ async function runMultiStepRag({
 
   const entities = normalizeEntities(intentAnalysis, config.maxEntities);
   if (entities.length === 0) {
-    logger.info('rag.multiStep.skip', buildContext(baseLogContext, { reason: 'no_entities' }));
-    return {
-      globalContext: baseContext,
-      entities: [],
-      passesUsed: 0,
-      queueStatus: { memory: 'skipped', graph: 'skipped' },
-    };
+    logger.info('rag.multiStep.fallback_entities_missing', buildContext(baseLogContext, {
+      intentProvided: Boolean(intentAnalysis),
+    }));
   }
 
   const entityStates = entities.map(createEntityState);
+  const globalGraphHints = collectGlobalGraphHints({
+    graphQueryHint,
+    graphContextLines,
+    maxHints: config?.graph?.maxHints || 6,
+  });
   const queueStatus = { memory: 'skipped', graph: 'skipped' };
   let passesUsed = 0;
 
@@ -254,6 +294,9 @@ async function runMultiStepRag({
         config: config.graph,
         signal,
         baseContext: baseLogContext,
+        relationHints: Array.from(
+          new Set([...(entityState.hints || []), ...globalGraphHints]),
+        ),
       });
 
       logger.info(

@@ -1199,6 +1199,12 @@ class AgentClient extends BaseClient {
         logger.info(
           `[rag.context.cache.hit] conversation=${conversationId} cacheKey=${cacheKey} contextTokens=${cachedMetrics.contextTokens ?? 0} graphTokens=${cachedMetrics.graphTokens ?? 0} vectorTokens=${cachedMetrics.vectorTokens ?? 0} queryTokens=${cachedMetrics.queryTokens ?? 0}`
         );
+        if (req) {
+          req.cachedGraphContext = {
+            graphLines: cached.graphLines || [],
+            graphQueryHint: cached.graphQueryHint || '',
+          };
+        }
         return {
           patchedSystemContent: cached.systemContent,
           contextLength: cached.contextLength,
@@ -1643,12 +1649,18 @@ Graph hints: ${graphQueryHint}`;
       );
     }
 
+    const cachedGraphSnapshot = {
+      graphLines: graphContextLines,
+      graphQueryHint,
+    };
+
     if (runtimeCfg.enableMemoryCache) {
       ragCache.set(cacheKey, {
         systemContent: finalSystemContent,
         contextLength,
         metrics,
         expiresAt: now + ragCacheTtlMs,
+        ...cachedGraphSnapshot,
       });
       logger.debug(
         `[rag.context.cache.store] conversation=${conversationId} cacheKey=${cacheKey} contextTokens=${metrics.contextTokens} graphTokens=${metrics.graphTokens} vectorTokens=${metrics.vectorTokens} queryTokens=${metrics.queryTokens}`
@@ -1659,6 +1671,7 @@ Graph hints: ${graphQueryHint}`;
       req.ragCacheStatus = cacheStatus;
       req.ragMetrics = Object.assign({}, req.ragMetrics, metrics);
       req.ragContextTokens = metrics.contextTokens;
+      req.cachedGraphContext = cachedGraphSnapshot;
     }
 
     return {
@@ -1863,14 +1876,103 @@ Graph hints: ${graphQueryHint}`;
       logger.error('[history->RAG] failed', error);
     }
 
+    let intentWindow = [];
+    if (orderedMessages.length) {
+      const WINDOW_SIZE = Number(runtimeCfg?.multiStepRag?.intentWindowSize) || 6;
+      const rawSlice = orderedMessages.slice(-WINDOW_SIZE);
+      intentWindow = rawSlice
+        .filter((msg) => msg?.role === 'user' || msg?.role === 'assistant')
+        .map((msg) => ({
+          role: msg.role,
+          text: extractMessageText(msg, '[rag.intent.window]', { silent: true }) || '',
+        }))
+        .filter((entry) => entry.text);
+    }
+
     const intentAnalysis = runtimeCfg?.multiStepRag?.enabled
       ? await analyzeIntent({
           message: orderedMessages[orderedMessages.length - 1],
-          context: orderedMessages.slice(-8),
+          context: intentWindow,
           signal: this.options?.req?.abortController?.signal,
           timeoutMs: runtimeCfg.multiStepRag?.intentTimeoutMs || 2000,
         })
       : { entities: [], needsFollowUps: false };
+
+    const collectFallbackEntities = ({ graphHint, graphLines, vectorChunks, userMessage }) => {
+      const candidates = [];
+      const rawUserText = extractMessageText(userMessage, '[rag.intent.fallback]', { silent: true }) || '';
+      const trimmedUser = rawUserText.replace(/\s+/g, ' ').trim().slice(0, 80);
+      if (trimmedUser) {
+        candidates.push({ name: trimmedUser, source: 'user' });
+      }
+
+      const appendGraphParts = (text, source = 'graph') => {
+        if (!text) return;
+        const parts = text.split(/-->/).map((part) => part.trim()).filter(Boolean);
+        for (const part of parts) {
+          if (part.length > 2) {
+            candidates.push({ name: part, source });
+          }
+        }
+      };
+
+      if (graphHint?.trim()) {
+        appendGraphParts(graphHint.trim(), 'graph');
+      }
+
+      for (const line of graphLines || []) {
+        appendGraphParts(line, 'graph');
+      }
+
+      for (const chunk of vectorChunks || []) {
+        const summary = chunk.replace(/\s+/g, ' ').trim().slice(0, 60);
+        if (summary.length > 5) {
+          candidates.push({ name: summary, source: 'vector' });
+        }
+      }
+
+      const unique = new Map();
+      for (const entry of candidates) {
+        const key = entry.name.toLowerCase();
+        if (!unique.has(key)) {
+          unique.set(key, entry);
+        }
+      }
+
+      return Array.from(unique.values())
+        .slice(0, Number(runtimeCfg?.multiStepRag?.maxFallbackEntities) || 3)
+        .map((entry) => ({
+          name: entry.name,
+          type: 'fallback',
+          confidence: 0.4,
+          hints: [entry.source],
+        }));
+    };
+
+    const graphSnapshot = req?.cachedGraphContext || {
+      graphLines: graphContextLines,
+      graphQueryHint,
+    };
+
+    const fallbackEntities = collectFallbackEntities({
+      graphHint: graphSnapshot.graphQueryHint,
+      graphLines: graphSnapshot.graphLines,
+      vectorChunks,
+      userMessage: orderedMessages[orderedMessages.length - 1],
+    });
+    if (!Array.isArray(intentAnalysis?.entities) || intentAnalysis.entities.length === 0) {
+      if (fallbackEntities.length) {
+        for (const entity of fallbackEntities) {
+          logger.info('rag.multiStep.fallback_entity', {
+            conversationId: this.conversationId,
+            source: entity.hints?.[0],
+            name: entity.name.slice(0, 80),
+          });
+        }
+        intentAnalysis = { ...(intentAnalysis || {}), entities: fallbackEntities };
+      }
+    }
+
     if (this.options?.req) {
       this.options.req.intentAnalysis = intentAnalysis;
     }
@@ -2000,6 +2102,8 @@ Graph hints: ${graphQueryHint}`;
             endpoint: this.options?.endpoint,
             model: this.model,
             signal: this.options?.req?.abortController?.signal,
+            graphContextLines: graphSnapshot.graphLines,
+            graphQueryHint: graphSnapshot.graphQueryHint,
           })
         : { globalContext: systemContent, entities: [], passesUsed: 0, queueStatus: {} };
 

@@ -10,6 +10,37 @@ const logger = getLogger('rag.intentAnalyzer');
 const ENTITY_REGEX = /\b([A-ZА-ЯЁ][a-zа-яё]+(?:\s+[A-ZА-ЯЁ][a-zа-яё]+)*)\b/g;
 const RELATION_HINT_REGEX = /(между|связ(ь|и)|отношени[яе]|контакт[ы]?)/i;
 const ACK_REGEX = /^(ok|okay|ack|принято|ага|понял|да|✅|👌)/i;
+
+function estimateEntryLength(entry) {
+  if (!entry) {
+    return 0;
+  }
+
+  if (typeof entry === 'string') {
+    return entry.length;
+  }
+
+  if (typeof entry?.text === 'string') {
+    return entry.text.length;
+  }
+
+  if (typeof entry?.content === 'string') {
+    return entry.content.length;
+  }
+
+  if (Array.isArray(entry?.content)) {
+    return entry.content
+      .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+      .reduce((sum, part) => sum + part.text.length, 0);
+  }
+
+  if (entry?.message) {
+    return estimateEntryLength(entry.message);
+  }
+
+  return 0;
+}
+
 function normalizeText({ message, context }) {
   const toText = (entry) => {
     if (!entry) return '';
@@ -127,6 +158,22 @@ async function analyzeIntent({
   );
 
   logger.info('rag.intent.analyze_start', baseContext);
+  const contextSnapshot = Array.isArray(context)
+    ? context.map((entry, idx) => ({
+        idx,
+        role: entry?.role || entry?.message?.role || 'unknown',
+        length: estimateEntryLength(entry),
+      }))
+    : [];
+
+  logger.debug(
+    'rag.intent.analyze_input',
+    buildContext(baseContext, {
+      messageLength: estimateEntryLength(message),
+      contextSize: contextSnapshot.length,
+      contextEntries: contextSnapshot.slice(0, 10),
+    }),
+  );
 
   try {
     const result = await withTimeout(operation, timeoutMs, 'Intent analysis timed out', signal);
