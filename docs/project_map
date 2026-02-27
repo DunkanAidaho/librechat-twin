@@ -15,11 +15,12 @@ Functions:
 - processTokens: status=используется; callers: app/clients/AnthropicClient.js; Purpose: triggered from app/clients/AnthropicClient.js to process tokens
 - titleChatCompletion: status=используется | опасность, дублируется в: app/clients/AnthropicClient.js, app/clients/OpenAIClient.js; callers: app/clients/AnthropicClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js; Purpose: triggered from app/clients/AnthropicClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js to title chat completion
 Outgoing Calls:
-- require: count=11; defined_in=external/unknown; Purpose: invokes require
+- buildClientContext: count=16; defined_in=external/unknown; Purpose: invokes build client context
+- require: count=12; defined_in=external/unknown; Purpose: invokes require
 - test: count=9; defined_in=external/unknown; Purpose: invokes test
-- debug: count=9; defined_in=external/unknown; Purpose: invokes debug
+- debug: count=7; defined_in=external/unknown; Purpose: invokes debug
 - getTokenCountForMessage: count=6; defined_in=external/unknown; Purpose: invokes get token count for message
-- warn: count=4; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes warn
+- warn: count=5; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes warn
 - trim: count=4; defined_in=external/unknown; Purpose: invokes trim
 - getTokenCount: count=4; defined_in=external/unknown; Purpose: invokes get token count
 - getStreamText: count=3; defined_in=external/unknown; Purpose: invokes get stream text
@@ -37,14 +38,20 @@ Outgoing Calls:
 - replace: count=2; defined_in=external/unknown; Purpose: invokes replace
 - create: count=2; defined_in=external/unknown; Purpose: invokes create
 - join: count=2; defined_in=external/unknown; Purpose: invokes join
+- info: count=2; defined_in=external/unknown; Purpose: invokes info
 - getClient: count=2; defined_in=external/unknown; Purpose: invokes get client
 - createResponse: count=2; defined_in=external/unknown; Purpose: invokes create response
 - runWithClientResilience: count=2; defined_in=external/unknown; Purpose: invokes run with client resilience
+- now: count=2; defined_in=external/unknown; Purpose: invokes now
+- error: count=2; defined_in=external/unknown; Purpose: invokes error
 - truncateText: count=2; defined_in=external/unknown; Purpose: invokes truncate text
 - setTimeout: count=1; defined_in=external/unknown; Purpose: invokes set timeout
 - getSection: count=1; defined_in=external/unknown; Purpose: invokes get section
 - toLowerCase: count=1; defined_in=external/unknown; Purpose: invokes to lower case
 - setOptions: count=1; defined_in=external/unknown; Purpose: invokes set options
+- getLogger: count=1; defined_in=utils/logger/index.js; Purpose: invokes get logger
+- getRequestContext: count=1; defined_in=utils/logContext.js; Purpose: invokes get request context
+- buildContext: count=1; defined_in=utils/logContext.js; Purpose: invokes build context
 - matchModelName: count=1; defined_in=external/unknown; Purpose: invokes match model name
 - checkPromptCacheSupport: count=1; defined_in=external/unknown; Purpose: invokes check prompt cache support
 - checkVisionRequest: count=1; defined_in=external/unknown; Purpose: invokes check vision request
@@ -92,7 +99,6 @@ Outgoing Calls:
 - stringify: count=1; defined_in=external/unknown; Purpose: invokes stringify
 - recordTokenUsage: count=1; defined_in=external/unknown; Purpose: invokes record token usage
 - parseParamFromPrompt: count=1; defined_in=external/unknown; Purpose: invokes parse param from prompt
-- error: count=1; defined_in=external/unknown; Purpose: invokes error
 - titleChatCompletion: count=1; defined_in=app/clients/AnthropicClient.js, app/clients/OpenAIClient.js; Purpose: invokes title chat completion
 
 ## app/clients/BaseClient.js
@@ -107,27 +113,31 @@ Functions:
 - processValue: status=используется; callers: app/clients/BaseClient.js; Purpose: triggered from app/clients/BaseClient.js to process value
 - resolveEncoding: status=используется | опасность, дублируется в: app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js; callers: app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js; Purpose: triggered from app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js to resolve encoding
 Outgoing Calls:
-- debug: count=16; defined_in=external/unknown; Purpose: invokes debug
+- buildLogContext: count=34; defined_in=server/middleware/requestValidators.js, server/routes/convos.js; Purpose: invokes build log context
+- debug: count=17; defined_in=external/unknown; Purpose: invokes debug
+- require: count=12; defined_in=external/unknown; Purpose: invokes require
 - push: count=12; defined_in=external/unknown; Purpose: invokes push
-- require: count=11; defined_in=external/unknown; Purpose: invokes require
+- warn: count=11; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes warn
 - Number: count=9; defined_in=external/unknown; Purpose: invokes number
-- warn: count=8; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes warn
 - getTokenCount: count=7; defined_in=external/unknown; Purpose: invokes get token count
 - isFinite: count=6; defined_in=external/unknown; Purpose: invokes is finite
+- info: count=5; defined_in=external/unknown; Purpose: invokes info
 - randomUUID: count=5; defined_in=external/unknown; Purpose: invokes random uuid
 - add: count=5; defined_in=external/unknown; Purpose: invokes add
 - isArray: count=4; defined_in=external/unknown; Purpose: invokes is array
 - has: count=4; defined_in=external/unknown; Purpose: invokes has
 - concat: count=4; defined_in=external/unknown; Purpose: invokes concat
-- info: count=3; defined_in=external/unknown; Purpose: invokes info
 - parsePositiveInt: count=3; defined_in=app/clients/BaseClient.js; Purpose: invokes parse positive int
+- now: count=3; defined_in=external/unknown; Purpose: invokes now
 - getReqData: count=3; defined_in=server/controllers/agents/request.js; Purpose: invokes get req data
+- keys: count=3; defined_in=external/unknown; Purpose: invokes keys
 - slice: count=3; defined_in=external/unknown; Purpose: invokes slice
+- buildContext: count=2; defined_in=utils/logContext.js; Purpose: invokes build context
 - fetch: count=2; defined_in=external/unknown; Purpose: invokes fetch
+- error: count=2; defined_in=external/unknown; Purpose: invokes error
 - split: count=2; defined_in=external/unknown; Purpose: invokes split
 - setOptions: count=2; defined_in=external/unknown; Purpose: invokes set options
 - trim: count=2; defined_in=external/unknown; Purpose: invokes trim
-- safeWarn: count=2; defined_in=external/unknown; Purpose: invokes safe warn
 - computeTokens: count=2; defined_in=app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js; Purpose: invokes compute tokens
 - updateMessageInDatabase: count=2; defined_in=external/unknown; Purpose: invokes update message in database
 - reduce: count=2; defined_in=external/unknown; Purpose: invokes reduce
@@ -143,6 +153,8 @@ Outgoing Calls:
 - get: count=1; defined_in=external/unknown; Purpose: invokes get
 - parseInt: count=1; defined_in=external/unknown; Purpose: invokes parse int
 - toLocaleDateString: count=1; defined_in=external/unknown; Purpose: invokes to locale date string
+- getLogger: count=1; defined_in=utils/logger/index.js; Purpose: invokes get logger
+- getRequestContext: count=1; defined_in=utils/logContext.js; Purpose: invokes get request context
 - isAgentsEndpoint: count=1; defined_in=external/unknown; Purpose: invokes is agents endpoint
 - assign: count=1; defined_in=external/unknown; Purpose: invokes assign
 - getClientTimeoutMs: count=1; defined_in=external/unknown; Purpose: invokes get client timeout ms
@@ -151,9 +163,11 @@ Outgoing Calls:
 - resolve: count=1; defined_in=external/unknown; Purpose: invokes resolve
 - task: count=1; defined_in=external/unknown; Purpose: invokes task
 - withTimeout: count=1; defined_in=server/controllers/agents/client.js, utils/async.js; Purpose: invokes with timeout
+- then: count=1; defined_in=external/unknown; Purpose: invokes then
 - retryAsync: count=1; defined_in=utils/async.js; Purpose: invokes retry async
 - onRetry: count=1; defined_in=external/unknown; Purpose: invokes on retry
 - processTextStream: count=1; defined_in=external/unknown; Purpose: invokes process text stream
+- onProgress: count=1; defined_in=external/unknown; Purpose: invokes on progress
 - processOverideIds: count=1; defined_in=external/unknown; Purpose: invokes process overide ids
 - getSaveOptions: count=1; defined_in=external/unknown; Purpose: invokes get save options
 - loadHistory: count=1; defined_in=external/unknown; Purpose: invokes load history
@@ -164,7 +178,6 @@ Outgoing Calls:
 - encodingResolver: count=1; defined_in=external/unknown; Purpose: invokes encoding resolver
 - getEncoding: count=1; defined_in=external/unknown; Purpose: invokes get encoding
 - resolveEncoding: count=1; defined_in=app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js; Purpose: invokes resolve encoding
-- keys: count=1; defined_in=external/unknown; Purpose: invokes keys
 - pop: count=1; defined_in=external/unknown; Purpose: invokes pop
 - shift: count=1; defined_in=external/unknown; Purpose: invokes shift
 - truncateToolCallOutputs: count=1; defined_in=external/unknown; Purpose: invokes truncate tool call outputs
@@ -187,7 +200,6 @@ Outgoing Calls:
 - getTokenCountForResponse: count=1; defined_in=external/unknown; Purpose: invokes get token count for response
 - recordTokenUsage: count=1; defined_in=external/unknown; Purpose: invokes record token usage
 - filter: count=1; defined_in=external/unknown; Purpose: invokes filter
-- error: count=1; defined_in=external/unknown; Purpose: invokes error
 - calculateCurrentTokenCount: count=1; defined_in=external/unknown; Purpose: invokes calculate current token count
 - getMessages: count=1; defined_in=models/Message.js; Purpose: invokes get messages
 - getMessageMapMethod: count=1; defined_in=external/unknown; Purpose: invokes get message map method
@@ -214,10 +226,12 @@ Exports: None
 Functions:
 - buildPromptBody: status=используется | опасность, дублируется в: app/clients/AnthropicClient.js, app/clients/GoogleClient.js; callers: app/clients/AnthropicClient.js, app/clients/GoogleClient.js; Purpose: triggered from app/clients/AnthropicClient.js, app/clients/GoogleClient.js to build prompt body
 Outgoing Calls:
-- require: count=16; defined_in=external/unknown; Purpose: invokes require
+- buildClientContext: count=21; defined_in=external/unknown; Purpose: invokes build client context
+- require: count=17; defined_in=external/unknown; Purpose: invokes require
+- now: count=10; defined_in=external/unknown; Purpose: invokes now
 - push: count=8; defined_in=external/unknown; Purpose: invokes push
+- debug: count=8; defined_in=external/unknown; Purpose: invokes debug
 - trim: count=7; defined_in=external/unknown; Purpose: invokes trim
-- debug: count=7; defined_in=external/unknown; Purpose: invokes debug
 - test: count=6; defined_in=external/unknown; Purpose: invokes test
 - warn: count=6; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes warn
 - error: count=4; defined_in=external/unknown; Purpose: invokes error
@@ -229,8 +243,10 @@ Outgoing Calls:
 - normalizeInstructionsPayload: count=3; defined_in=app/clients/utils/instructions.js, server/controllers/agents/client.js; Purpose: invokes normalize instructions payload
 - initializeClient: count=3; defined_in=external/unknown; Purpose: invokes initialize client
 - includes: count=3; defined_in=external/unknown; Purpose: invokes includes
+- info: count=3; defined_in=external/unknown; Purpose: invokes info
 - authorize: count=2; defined_in=external/unknown; Purpose: invokes authorize
 - concat: count=2; defined_in=external/unknown; Purpose: invokes concat
+- isArray: count=2; defined_in=external/unknown; Purpose: invokes is array
 - addImageURLs: count=2; defined_in=external/unknown; Purpose: invokes add image urls
 - buildAugmentedPrompt: count=2; defined_in=external/unknown; Purpose: invokes build augmented prompt
 - formatMessage: count=2; defined_in=external/unknown; Purpose: invokes format message
@@ -240,10 +256,14 @@ Outgoing Calls:
 - replace: count=2; defined_in=external/unknown; Purpose: invokes replace
 - getSafetySettings: count=2; defined_in=external/unknown; Purpose: invokes get safety settings
 - generateTextStream: count=2; defined_in=external/unknown; Purpose: invokes generate text stream
+- getStreamUsage: count=2; defined_in=external/unknown; Purpose: invokes get stream usage
 - isNaN: count=2; defined_in=external/unknown; Purpose: invokes is na n
 - truncateText: count=2; defined_in=external/unknown; Purpose: invokes truncate text
 - get: count=1; defined_in=external/unknown; Purpose: invokes get
+- getLogger: count=1; defined_in=utils/logger/index.js; Purpose: invokes get logger
 - setOptions: count=1; defined_in=external/unknown; Purpose: invokes set options
+- getRequestContext: count=1; defined_in=utils/logContext.js; Purpose: invokes get request context
+- buildContext: count=1; defined_in=utils/logContext.js; Purpose: invokes build context
 - reject: count=1; defined_in=external/unknown; Purpose: invokes reject
 - resolve: count=1; defined_in=external/unknown; Purpose: invokes resolve
 - checkVisionRequest: count=1; defined_in=external/unknown; Purpose: invokes check vision request
@@ -253,7 +273,6 @@ Outgoing Calls:
 - validateVisionModel: count=1; defined_in=external/unknown; Purpose: invokes validate vision model
 - some: count=1; defined_in=external/unknown; Purpose: invokes some
 - bind: count=1; defined_in=external/unknown; Purpose: invokes bind
-- isArray: count=1; defined_in=external/unknown; Purpose: invokes is array
 - encodeAndFormat: count=1; defined_in=external/unknown; Purpose: invokes encode and format
 - createContextHandlers: count=1; defined_in=external/unknown; Purpose: invokes create context handlers
 - createContext: count=1; defined_in=external/unknown; Purpose: invokes create context
@@ -264,6 +283,7 @@ Outgoing Calls:
 - handleContextStrategy: count=1; defined_in=external/unknown; Purpose: invokes handle context strategy
 - buildGenerativeMessages: count=1; defined_in=external/unknown; Purpose: invokes build generative messages
 - buildVisionMessages: count=1; defined_in=external/unknown; Purpose: invokes build vision messages
+- Boolean: count=1; defined_in=external/unknown; Purpose: invokes boolean
 - getMessagesForConversation: count=1; defined_in=external/unknown; Purpose: invokes get messages for conversation
 - pop: count=1; defined_in=external/unknown; Purpose: invokes pop
 - setImmediate: count=1; defined_in=external/unknown; Purpose: invokes set immediate
@@ -300,8 +320,9 @@ Functions:
 - errorCallback: status=сирота; callers: —; Purpose: local helper to error callback
 - titleChatCompletion: status=используется | опасность, дублируется в: app/clients/AnthropicClient.js, app/clients/OpenAIClient.js; callers: app/clients/AnthropicClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js; Purpose: triggered from app/clients/AnthropicClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js to title chat completion
 Outgoing Calls:
+- buildClientContext: count=28; defined_in=external/unknown; Purpose: invokes build client context
+- require: count=17; defined_in=external/unknown; Purpose: invokes require
 - debug: count=17; defined_in=external/unknown; Purpose: invokes debug
-- require: count=16; defined_in=external/unknown; Purpose: invokes require
 - includes: count=11; defined_in=external/unknown; Purpose: invokes includes
 - trim: count=9; defined_in=external/unknown; Purpose: invokes trim
 - join: count=9; defined_in=external/unknown; Purpose: invokes join
@@ -317,7 +338,10 @@ Outgoing Calls:
 - on: count=4; defined_in=external/unknown; Purpose: invokes on
 - validateVisionModel: count=3; defined_in=external/unknown; Purpose: invokes validate vision model
 - split: count=3; defined_in=external/unknown; Purpose: invokes split
+- now: count=3; defined_in=external/unknown; Purpose: invokes now
+- info: count=3; defined_in=external/unknown; Purpose: invokes info
 - handleOpenAIErrors: count=3; defined_in=external/unknown; Purpose: invokes handle open aierrors
+- warn: count=3; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes warn
 - toLowerCase: count=2; defined_in=external/unknown; Purpose: invokes to lower case
 - checkVisionRequest: count=2; defined_in=external/unknown; Purpose: invokes check vision request
 - getModelMaxTokens: count=2; defined_in=external/unknown; Purpose: invokes get model max tokens
@@ -340,8 +364,10 @@ Outgoing Calls:
 - forEach: count=2; defined_in=external/unknown; Purpose: invokes for each
 - handle: count=2; defined_in=external/unknown; Purpose: invokes handle
 - catch: count=2; defined_in=external/unknown; Purpose: invokes catch
-- warn: count=2; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes warn
+- getLogger: count=1; defined_in=utils/logger/index.js; Purpose: invokes get logger
 - setOptions: count=1; defined_in=external/unknown; Purpose: invokes set options
+- getRequestContext: count=1; defined_in=utils/logContext.js; Purpose: invokes get request context
+- buildContext: count=1; defined_in=utils/logContext.js; Purpose: invokes build context
 - assign: count=1; defined_in=external/unknown; Purpose: invokes assign
 - then: count=1; defined_in=external/unknown; Purpose: invokes then
 - isEnabled: count=1; defined_in=utils/natsClient.js; Purpose: invokes is enabled
@@ -389,7 +415,6 @@ Outgoing Calls:
 - finalChatCompletion: count=1; defined_in=external/unknown; Purpose: invokes final chat completion
 - create: count=1; defined_in=external/unknown; Purpose: invokes create
 - removeEventListener: count=1; defined_in=external/unknown; Purpose: invokes remove event listener
-- info: count=1; defined_in=external/unknown; Purpose: invokes info
 
 ## app/clients/utils/instructions.js
 Purpose: Utility helpers
@@ -400,11 +425,14 @@ Functions:
 - normalizeInstructionsPayload: status=используется | опасность, дублируется в: app/clients/utils/instructions.js, server/controllers/agents/client.js; callers: app/clients/AnthropicClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js, server/controllers/agents/client.js; Purpose: triggered from app/clients/AnthropicClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js, server/controllers/agents/client.js to normalize instructions payload
 - resolveEncoding: status=используется | опасность, дублируется в: app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js; callers: app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js; Purpose: triggered from app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js to resolve encoding
 Outgoing Calls:
+- buildContext: count=6; defined_in=utils/logContext.js; Purpose: invokes build context
+- require: count=4; defined_in=external/unknown; Purpose: invokes require
 - warn: count=4; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes warn
-- require: count=3; defined_in=external/unknown; Purpose: invokes require
+- String: count=2; defined_in=external/unknown; Purpose: invokes string
 - computeTokens: count=2; defined_in=app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js; Purpose: invokes compute tokens
 - info: count=2; defined_in=external/unknown; Purpose: invokes info
 - get: count=1; defined_in=external/unknown; Purpose: invokes get
+- getLogger: count=1; defined_in=utils/logger/index.js; Purpose: invokes get logger
 - encodingResolver: count=1; defined_in=external/unknown; Purpose: invokes encoding resolver
 - resolveEncoding: count=1; defined_in=app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js; Purpose: invokes resolve encoding
 - getTokenCount: count=1; defined_in=external/unknown; Purpose: invokes get token count
@@ -680,24 +708,24 @@ Functions:
 - withTimeout: status=используется | опасность, дублируется в: server/controllers/agents/client.js, utils/async.js; callers: app/clients/BaseClient.js, server/controllers/agents/client.js, server/services/RAG/intentAnalyzer.js, server/services/RAG/multiStepOrchestrator.js, server/utils/resilience.js; Purpose: triggered from app/clients/BaseClient.js, server/controllers/agents/client.js, server/services/RAG/intentAnalyzer.js, server/services/RAG/multiStepOrchestrator.js, server/utils/resilience.js to with timeout
 Outgoing Calls:
 - debug: count=41; defined_in=external/unknown; Purpose: invokes debug
-- require: count=35; defined_in=external/unknown; Purpose: invokes require
+- require: count=36; defined_in=external/unknown; Purpose: invokes require
 - Number: count=34; defined_in=external/unknown; Purpose: invokes number
 - slice: count=29; defined_in=external/unknown; Purpose: invokes slice
-- error: count=26; defined_in=external/unknown; Purpose: invokes error
+- error: count=29; defined_in=external/unknown; Purpose: invokes error
+- warn: count=19; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes warn
+- info: count=19; defined_in=external/unknown; Purpose: invokes info
+- isArray: count=18; defined_in=external/unknown; Purpose: invokes is array
 - map: count=18; defined_in=external/unknown; Purpose: invokes map
-- isArray: count=17; defined_in=external/unknown; Purpose: invokes is array
+- filter: count=17; defined_in=external/unknown; Purpose: invokes filter
 - trim: count=17; defined_in=external/unknown; Purpose: invokes trim
-- warn: count=17; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes warn
-- info: count=17; defined_in=external/unknown; Purpose: invokes info
-- filter: count=16; defined_in=external/unknown; Purpose: invokes filter
 - getNumber: count=15; defined_in=server/controllers/agents/client.js; Purpose: invokes get number
+- isFinite: count=14; defined_in=external/unknown; Purpose: invokes is finite
 - join: count=14; defined_in=external/unknown; Purpose: invokes join
 - add: count=13; defined_in=external/unknown; Purpose: invokes add
-- isFinite: count=11; defined_in=external/unknown; Purpose: invokes is finite
 - parseUsdRate: count=10; defined_in=server/controllers/agents/client.js; Purpose: invokes parse usd rate
 - get: count=8; defined_in=external/unknown; Purpose: invokes get
 - String: count=6; defined_in=external/unknown; Purpose: invokes string
-- Boolean: count=5; defined_in=external/unknown; Purpose: invokes boolean
+- Boolean: count=6; defined_in=external/unknown; Purpose: invokes boolean
 - getBoolean: count=5; defined_in=server/controllers/agents/client.js; Purpose: invokes get boolean
 - stringify: count=4; defined_in=external/unknown; Purpose: invokes stringify
 - post: count=4; defined_in=external/unknown; Purpose: invokes post
@@ -714,20 +742,21 @@ Outgoing Calls:
 - calculateAdaptiveTimeout: count=2; defined_in=server/controllers/agents/client.js; Purpose: invokes calculate adaptive timeout
 - delete: count=1; defined_in=external/unknown; Purpose: invokes delete
 - toString: count=function toString() { [native code] }1; defined_in=external/unknown; Purpose: invokes to string
+- getEncoding: count=11; defined_in=external/unknown; Purpose: invokes get encoding
+- getTokenCount: count=11; defined_in=external/unknown; Purpose: invokes get token count
 - push: count=11; defined_in=external/unknown; Purpose: invokes push
-- getEncoding: count=10; defined_in=external/unknown; Purpose: invokes get encoding
 - safeWarn: count=8; defined_in=external/unknown; Purpose: invokes safe warn
-- getTokenCount: count=8; defined_in=external/unknown; Purpose: invokes get token count
 - _getType: count=7; defined_in=external/unknown; Purpose: invokes get type
+- assign: count=7; defined_in=external/unknown; Purpose: invokes assign
 - max: count=6; defined_in=external/unknown; Purpose: invokes max
 - includes: count=6; defined_in=external/unknown; Purpose: invokes includes
 - replace: count=5; defined_in=external/unknown; Purpose: invokes replace
 - floor: count=5; defined_in=external/unknown; Purpose: invokes floor
-- assign: count=5; defined_in=external/unknown; Purpose: invokes assign
 - setTimeout: count=4; defined_in=external/unknown; Purpose: invokes set timeout
 - has: count=3; defined_in=external/unknown; Purpose: invokes has
 - getTokenCountForMessage: count=3; defined_in=external/unknown; Purpose: invokes get token count for message
 - find: count=3; defined_in=external/unknown; Purpose: invokes find
+- withTimeout: count=3; defined_in=server/controllers/agents/client.js, utils/async.js; Purpose: invokes with timeout
 - some: count=3; defined_in=external/unknown; Purpose: invokes some
 - trace: count=3; defined_in=external/unknown; Purpose: invokes trace
 - spendTokens: count=3; defined_in=external/unknown; Purpose: invokes spend tokens
@@ -738,15 +767,20 @@ Outgoing Calls:
 - test: count=2; defined_in=external/unknown; Purpose: invokes test
 - isAgentsEndpoint: count=2; defined_in=external/unknown; Purpose: invokes is agents endpoint
 - parse: count=2; defined_in=external/unknown; Purpose: invokes parse
-- withTimeout: count=2; defined_in=server/controllers/agents/client.js, utils/async.js; Purpose: invokes with timeout
+- startsWith: count=2; defined_in=external/unknown; Purpose: invokes starts with
 - enqueueMemoryTasks: count=2; defined_in=server/services/RAG/memoryQueue.js; Purpose: invokes enqueue memory tasks
+- setDeferredContext: count=2; defined_in=server/services/RAG/RagContextManager.js; Purpose: invokes set deferred context
 - observeCache: count=2; defined_in=utils/ragMetrics.js; Purpose: invokes observe cache
 - fetchGraphContext: count=2; defined_in=server/controllers/agents/client.js; Purpose: invokes fetch graph context
 - endsWith: count=2; defined_in=external/unknown; Purpose: invokes ends with
 - sanitizeVectorChunks: count=2; defined_in=server/controllers/agents/client.js; Purpose: invokes sanitize vector chunks
+- mapReduceContext: count=2; defined_in=server/controllers/agents/client.js; Purpose: invokes map reduce context
+- buildRagBlock: count=2; defined_in=server/services/RAG/RagContextManager.js; Purpose: invokes build rag block
 - observeSegmentTokens: count=2; defined_in=utils/ragMetrics.js; Purpose: invokes observe segment tokens
 - setContextLength: count=2; defined_in=utils/ragMetrics.js; Purpose: invokes set context length
 - setImmediate: count=2; defined_in=external/unknown; Purpose: invokes set immediate
+- getDeferredContext: count=2; defined_in=server/services/RAG/RagContextManager.js; Purpose: invokes get deferred context
+- clearDeferredContext: count=2; defined_in=server/services/RAG/RagContextManager.js; Purpose: invokes clear deferred context
 - normalizeInstructionsPayload: count=2; defined_in=app/clients/utils/instructions.js, server/controllers/agents/client.js; Purpose: invokes normalize instructions payload
 - getBufferString: count=2; defined_in=external/unknown; Purpose: invokes get buffer string
 - catch: count=2; defined_in=external/unknown; Purpose: invokes catch
@@ -776,14 +810,12 @@ Outgoing Calls:
 - payloadParser: count=1; defined_in=server/controllers/agents/client.js; Purpose: invokes payload parser
 - removeNullishValues: count=1; defined_in=external/unknown; Purpose: invokes remove nullish values
 - encodeAndFormat: count=1; defined_in=external/unknown; Purpose: invokes encode and format
-- startsWith: count=1; defined_in=external/unknown; Purpose: invokes starts with
 - makeIngestKey: count=1; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes make ingest key
 - safeError: count=1; defined_in=external/unknown; Purpose: invokes safe error
 - pruneExpiredRagCache: count=1; defined_in=server/controllers/agents/client.js; Purpose: invokes prune expired rag cache
 - createCacheKey: count=1; defined_in=server/controllers/agents/client.js; Purpose: invokes create cache key
 - sanitizeGraphContext: count=1; defined_in=server/controllers/agents/client.js; Purpose: invokes sanitize graph context
 - condenseRagQuery: count=1; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes condense rag query
-- mapReduceContext: count=1; defined_in=server/controllers/agents/client.js; Purpose: invokes map reduce context
 - sanitizeInput: count=1; defined_in=utils/security.js; Purpose: invokes sanitize input
 - set: count=1; defined_in=external/unknown; Purpose: invokes set
 - getMessagesForConversation: count=1; defined_in=external/unknown; Purpose: invokes get messages for conversation
@@ -793,6 +825,7 @@ Outgoing Calls:
 - analyzeIntent: count=1; defined_in=server/services/RAG/intentAnalyzer.js; Purpose: invokes analyze intent
 - buildRagContext: count=1; defined_in=external/unknown; Purpose: invokes build rag context
 - runMultiStepRag: count=1; defined_in=server/services/RAG/multiStepOrchestrator.js; Purpose: invokes run multi step rag
+- applyDeferredCondensation: count=1; defined_in=external/unknown; Purpose: invokes apply deferred condensation
 - addImageURLs: count=1; defined_in=external/unknown; Purpose: invokes add image urls
 - createContextHandlers: count=1; defined_in=external/unknown; Purpose: invokes create context handlers
 - formatMessage: count=1; defined_in=external/unknown; Purpose: invokes format message
@@ -843,6 +876,9 @@ Outgoing Calls:
 - recordCollectedUsage: count=1; defined_in=external/unknown; Purpose: invokes record collected usage
 - computePromptTokenBreakdown: count=1; defined_in=server/utils/tokenBreakdown.js; Purpose: invokes compute prompt token breakdown
 - logPromptTokenBreakdown: count=1; defined_in=server/utils/tokenBreakdown.js; Purpose: invokes log prompt token breakdown
+- replaceRagBlock: count=1; defined_in=server/services/RAG/RagContextManager.js; Purpose: invokes replace rag block
+- systemContentRef: count=1; defined_in=external/unknown; Purpose: invokes system content ref
+- updateSystemContent: count=1; defined_in=external/unknown; Purpose: invokes update system content
 
 ## server/controllers/agents/request.js
 Purpose: Agent orchestration helpers
@@ -1003,7 +1039,7 @@ Inbound Links: none detected
 Exports: validateAgentRequest
 Functions:
 - appendIssue: status=используется; callers: server/middleware/requestValidators.js; Purpose: triggered from server/middleware/requestValidators.js to append issue
-- buildLogContext: status=используется | опасность, дублируется в: server/middleware/requestValidators.js, server/routes/convos.js; callers: server/middleware/requestValidators.js, server/routes/convos.js; Purpose: triggered from server/middleware/requestValidators.js, server/routes/convos.js to build log context
+- buildLogContext: status=используется | опасность, дублируется в: server/middleware/requestValidators.js, server/routes/convos.js; callers: app/clients/BaseClient.js, server/middleware/requestValidators.js, server/routes/convos.js; Purpose: triggered from app/clients/BaseClient.js, server/middleware/requestValidators.js, server/routes/convos.js to build log context
 - getFileSize: status=используется; callers: server/middleware/requestValidators.js; Purpose: triggered from server/middleware/requestValidators.js to get file size
 - getNumericEnv: status=используется; callers: server/middleware/requestValidators.js; Purpose: triggered from server/middleware/requestValidators.js to get numeric env
 - isNonEmptyString: status=используется; callers: server/middleware/requestValidators.js; Purpose: triggered from server/middleware/requestValidators.js to is non empty string
@@ -1074,7 +1110,7 @@ Purpose: Express routes
 Inbound Links: none detected
 Exports: None
 Functions:
-- buildLogContext: status=используется | опасность, дублируется в: server/middleware/requestValidators.js, server/routes/convos.js; callers: server/middleware/requestValidators.js, server/routes/convos.js; Purpose: triggered from server/middleware/requestValidators.js, server/routes/convos.js to build log context
+- buildLogContext: status=используется | опасность, дублируется в: server/middleware/requestValidators.js, server/routes/convos.js; callers: app/clients/BaseClient.js, server/middleware/requestValidators.js, server/routes/convos.js; Purpose: triggered from app/clients/BaseClient.js, server/middleware/requestValidators.js, server/routes/convos.js to build log context
 - extractText: status=используется | опасность, дублируется в: manage_summaries.js, server/controllers/agents/request.js, server/routes/convos.js; callers: manage_summaries.js, server/controllers/agents/request.js, server/routes/convos.js; Purpose: triggered from manage_summaries.js, server/controllers/agents/request.js, server/routes/convos.js to extract text
 - isBadTitle: status=используется; callers: server/routes/convos.js; Purpose: triggered from server/routes/convos.js to is bad title
 - sendDeleteTaskToRedis: status=используется; callers: server/routes/convos.js; Purpose: triggered from server/routes/convos.js to send delete task to redis
@@ -1261,38 +1297,40 @@ Inbound Links: none detected
 Exports: None
 Functions: none detected
 Outgoing Calls:
-- getLogContext: count=11; defined_in=external/unknown; Purpose: invokes get log context
-- info: count=6; defined_in=external/unknown; Purpose: invokes info
-- require: count=5; defined_in=external/unknown; Purpose: invokes require
+- getLogContext: count=12; defined_in=external/unknown; Purpose: invokes get log context
+- info: count=8; defined_in=external/unknown; Purpose: invokes info
+- require: count=6; defined_in=external/unknown; Purpose: invokes require
 - slice: count=5; defined_in=external/unknown; Purpose: invokes slice
-- error: count=4; defined_in=external/unknown; Purpose: invokes error
+- filter: count=5; defined_in=external/unknown; Purpose: invokes filter
+- max: count=3; defined_in=external/unknown; Purpose: invokes max
+- push: count=3; defined_in=external/unknown; Purpose: invokes push
+- has: count=3; defined_in=external/unknown; Purpose: invokes has
 - buildContext: count=3; defined_in=utils/logContext.js; Purpose: invokes build context
+- error: count=3; defined_in=external/unknown; Purpose: invokes error
+- test: count=3; defined_in=external/unknown; Purpose: invokes test
+- observeLiveWindow: count=3; defined_in=utils/ragMetrics.js; Purpose: invokes observe live window
+- isArray: count=2; defined_in=external/unknown; Purpose: invokes is array
+- map: count=2; defined_in=external/unknown; Purpose: invokes map
+- makeIngestKey: count=2; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes make ingest key
+- hashPayload: count=2; defined_in=server/controllers/agents/client.js; Purpose: invokes hash payload
 - getLogger: count=1; defined_in=utils/logger/index.js; Purpose: invokes get logger
+- reverse: count=1; defined_in=external/unknown; Purpose: invokes reverse
 - stringify: count=1; defined_in=external/unknown; Purpose: invokes stringify
 - toString: count=function toString() { [native code] }1; defined_in=external/unknown; Purpose: invokes to string
-- max: count=3; defined_in=external/unknown; Purpose: invokes max
-- test: count=3; defined_in=external/unknown; Purpose: invokes test
 - extractMessageText: count=2; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes extract message text
 - normalizeMemoryText: count=2; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes normalize memory text
-- makeIngestKey: count=2; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes make ingest key
-- has: count=2; defined_in=external/unknown; Purpose: invokes has
 - add: count=2; defined_in=external/unknown; Purpose: invokes add
-- hashPayload: count=2; defined_in=server/controllers/agents/client.js; Purpose: invokes hash payload
-- push: count=2; defined_in=external/unknown; Purpose: invokes push
 - enqueueMemoryTasks: count=2; defined_in=server/services/RAG/memoryQueue.js; Purpose: invokes enqueue memory tasks
-- isArray: count=2; defined_in=external/unknown; Purpose: invokes is array
-- Number: count=2; defined_in=external/unknown; Purpose: invokes number
-- map: count=2; defined_in=external/unknown; Purpose: invokes map
-- filter: count=2; defined_in=external/unknown; Purpose: invokes filter
 - digest: count=1; defined_in=external/unknown; Purpose: invokes digest
 - update: count=1; defined_in=external/unknown; Purpose: invokes update
 - createHash: count=1; defined_in=external/unknown; Purpose: invokes create hash
+- config: count=1; defined_in=external/unknown; Purpose: invokes config
 - some: count=1; defined_in=external/unknown; Purpose: invokes some
 - trim: count=1; defined_in=external/unknown; Purpose: invokes trim
 - debug: count=1; defined_in=external/unknown; Purpose: invokes debug
-- buildLayers: count=1; defined_in=external/unknown; Purpose: invokes build layers
-- compressLayers: count=1; defined_in=external/unknown; Purpose: invokes compress layers
-- selectWithinBudget: count=1; defined_in=external/unknown; Purpose: invokes select within budget
+- observeHistoryPassthrough: count=1; defined_in=utils/ragMetrics.js; Purpose: invokes observe history passthrough
+- sliceLiveWindow: count=1; defined_in=external/unknown; Purpose: invokes slice live window
+- processDroppedMessages: count=1; defined_in=external/unknown; Purpose: invokes process dropped messages
 - reduce: count=1; defined_in=external/unknown; Purpose: invokes reduce
 - find: count=1; defined_in=external/unknown; Purpose: invokes find
 - warn: count=1; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes warn
@@ -1329,21 +1367,22 @@ Functions:
 - sanitizeUrl: status=используется; callers: server/services/Config/ConfigService.js; Purpose: triggered from server/services/Config/ConfigService.js to sanitize url
 - splitStringList: status=используется; callers: server/services/Config/ConfigService.js; Purpose: triggered from server/services/Config/ConfigService.js to split string list
 Outgoing Calls:
-- parseOptionalInt: count=108; defined_in=server/services/Config/ConfigService.js; Purpose: invokes parse optional int
-- number: count=99; defined_in=external/unknown; Purpose: invokes number
-- int: count=90; defined_in=external/unknown; Purpose: invokes int
+- parseOptionalInt: count=112; defined_in=server/services/Config/ConfigService.js; Purpose: invokes parse optional int
+- number: count=103; defined_in=external/unknown; Purpose: invokes number
+- int: count=94; defined_in=external/unknown; Purpose: invokes int
 - optional: count=78; defined_in=external/unknown; Purpose: invokes optional
-- object: count=64; defined_in=external/unknown; Purpose: invokes object
+- object: count=65; defined_in=external/unknown; Purpose: invokes object
 - min: count=64; defined_in=external/unknown; Purpose: invokes min
 - string: count=63; defined_in=external/unknown; Purpose: invokes string
-- sanitizeOptionalString: count=55; defined_in=server/services/Config/ConfigService.js; Purpose: invokes sanitize optional string
+- sanitizeOptionalString: count=56; defined_in=server/services/Config/ConfigService.js; Purpose: invokes sanitize optional string
+- nonnegative: count=50; defined_in=external/unknown; Purpose: invokes nonnegative
 - positive: count=48; defined_in=external/unknown; Purpose: invokes positive
-- nonnegative: count=46; defined_in=external/unknown; Purpose: invokes nonnegative
 - parseOptionalBool: count=36; defined_in=server/services/Config/ConfigService.js; Purpose: invokes parse optional bool
 - boolean: count=32; defined_in=external/unknown; Purpose: invokes boolean
 - nullable: count=11; defined_in=external/unknown; Purpose: invokes nullable
 - max: count=9; defined_in=external/unknown; Purpose: invokes max
 - parseOptionalFloat: count=9; defined_in=server/services/Config/ConfigService.js; Purpose: invokes parse optional float
+- default: count=8; defined_in=external/unknown; Purpose: invokes default
 - has: count=6; defined_in=external/unknown; Purpose: invokes has
 - sanitizeUrl: count=6; defined_in=server/services/Config/ConfigService.js; Purpose: invokes sanitize url
 - toLowerCase: count=5; defined_in=external/unknown; Purpose: invokes to lower case
@@ -1355,6 +1394,7 @@ Outgoing Calls:
 - warn: count=4; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes warn
 - keys: count=3; defined_in=external/unknown; Purpose: invokes keys
 - url: count=3; defined_in=external/unknown; Purpose: invokes url
+- enum: count=3; defined_in=external/unknown; Purpose: invokes enum
 - info: count=3; defined_in=external/unknown; Purpose: invokes info
 - get: count=3; defined_in=external/unknown; Purpose: invokes get
 - set: count=3; defined_in=external/unknown; Purpose: invokes set
@@ -1362,8 +1402,6 @@ Outgoing Calls:
 - isNaN: count=2; defined_in=external/unknown; Purpose: invokes is na n
 - split: count=2; defined_in=external/unknown; Purpose: invokes split
 - replace: count=2; defined_in=external/unknown; Purpose: invokes replace
-- default: count=2; defined_in=external/unknown; Purpose: invokes default
-- enum: count=2; defined_in=external/unknown; Purpose: invokes enum
 - Boolean: count=2; defined_in=external/unknown; Purpose: invokes boolean
 - parseInt: count=1; defined_in=external/unknown; Purpose: invokes parse int
 - parseFloat: count=1; defined_in=external/unknown; Purpose: invokes parse float
@@ -1706,28 +1744,34 @@ Functions:
 - analyzeIntent: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to analyze intent
 - buildHints: status=используется; callers: server/services/RAG/intentAnalyzer.js; Purpose: triggered from server/services/RAG/intentAnalyzer.js to build hints
 - extractEntities: status=используется; callers: server/services/RAG/intentAnalyzer.js; Purpose: triggered from server/services/RAG/intentAnalyzer.js to extract entities
+- normalizeText: status=используется; callers: server/services/RAG/intentAnalyzer.js; Purpose: triggered from server/services/RAG/intentAnalyzer.js to normalize text
 - runAnalysis: status=используется; callers: server/services/RAG/intentAnalyzer.js; Purpose: triggered from server/services/RAG/intentAnalyzer.js to run analysis
+- toText: status=используется | опасность, дублируется в: server/services/RAG/intentAnalyzer.js, server/utils/tokenBreakdown.js; callers: server/services/RAG/intentAnalyzer.js, server/utils/tokenBreakdown.js; Purpose: triggered from server/services/RAG/intentAnalyzer.js, server/utils/tokenBreakdown.js to to text
 Outgoing Calls:
-- test: count=5; defined_in=external/unknown; Purpose: invokes test
+- test: count=6; defined_in=external/unknown; Purpose: invokes test
+- map: count=5; defined_in=external/unknown; Purpose: invokes map
 - buildContext: count=5; defined_in=utils/logContext.js; Purpose: invokes build context
-- map: count=4; defined_in=external/unknown; Purpose: invokes map
 - require: count=3; defined_in=external/unknown; Purpose: invokes require
+- trim: count=3; defined_in=external/unknown; Purpose: invokes trim
 - add: count=3; defined_in=external/unknown; Purpose: invokes add
 - now: count=3; defined_in=external/unknown; Purpose: invokes now
+- isArray: count=2; defined_in=external/unknown; Purpose: invokes is array
+- join: count=2; defined_in=external/unknown; Purpose: invokes join
+- filter: count=2; defined_in=external/unknown; Purpose: invokes filter
+- toText: count=2; defined_in=server/services/RAG/intentAnalyzer.js, server/utils/tokenBreakdown.js; Purpose: invokes to text
 - from: count=2; defined_in=external/unknown; Purpose: invokes from
 - info: count=2; defined_in=external/unknown; Purpose: invokes info
 - warn: count=2; defined_in=server/controllers/agents/client.js, server/utils/messageUtils.js; Purpose: invokes warn
 - getLogger: count=1; defined_in=utils/logger/index.js; Purpose: invokes get logger
+- replace: count=1; defined_in=external/unknown; Purpose: invokes replace
 - exec: count=1; defined_in=external/unknown; Purpose: invokes exec
-- trim: count=1; defined_in=external/unknown; Purpose: invokes trim
 - toLowerCase: count=1; defined_in=external/unknown; Purpose: invokes to lower case
 - get: count=1; defined_in=external/unknown; Purpose: invokes get
 - set: count=1; defined_in=external/unknown; Purpose: invokes set
 - values: count=1; defined_in=external/unknown; Purpose: invokes values
 - min: count=1; defined_in=external/unknown; Purpose: invokes min
 - createAbortError: count=1; defined_in=utils/async.js; Purpose: invokes create abort error
-- isArray: count=1; defined_in=external/unknown; Purpose: invokes is array
-- join: count=1; defined_in=external/unknown; Purpose: invokes join
+- normalizeText: count=1; defined_in=server/services/RAG/intentAnalyzer.js; Purpose: invokes normalize text
 - extractEntities: count=1; defined_in=server/services/RAG/intentAnalyzer.js; Purpose: invokes extract entities
 - buildHints: count=1; defined_in=server/services/RAG/intentAnalyzer.js; Purpose: invokes build hints
 - some: count=1; defined_in=external/unknown; Purpose: invokes some
@@ -1912,6 +1956,32 @@ Outgoing Calls:
 - split: count=1; defined_in=external/unknown; Purpose: invokes split
 - floor: count=1; defined_in=external/unknown; Purpose: invokes floor
 
+## server/services/RAG/RagContextManager.js
+Purpose: RAG pipeline utilities
+Inbound Links: none detected
+Exports: POLICY_INTRO, buildRagBlock, replaceRagBlock, setDeferredContext, getDeferredContext, consumeDeferredContext, clearDeferredContext
+Functions:
+- buildRagBlock: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to build rag block
+- clearDeferredContext: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to clear deferred context
+- coerceLines: status=используется; callers: server/services/RAG/RagContextManager.js; Purpose: triggered from server/services/RAG/RagContextManager.js to coerce lines
+- consumeDeferredContext: status=сирота; callers: —; Purpose: local helper to consume deferred context
+- getDeferredContext: status=используется; callers: server/controllers/agents/client.js, server/services/RAG/RagContextManager.js; Purpose: triggered from server/controllers/agents/client.js, server/services/RAG/RagContextManager.js to get deferred context
+- replaceRagBlock: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to replace rag block
+- setDeferredContext: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to set deferred context
+Outgoing Calls:
+- trim: count=4; defined_in=external/unknown; Purpose: invokes trim
+- sanitizeInput: count=2; defined_in=utils/security.js; Purpose: invokes sanitize input
+- slice: count=2; defined_in=external/unknown; Purpose: invokes slice
+- require: count=1; defined_in=external/unknown; Purpose: invokes require
+- isArray: count=1; defined_in=external/unknown; Purpose: invokes is array
+- filter: count=1; defined_in=external/unknown; Purpose: invokes filter
+- map: count=1; defined_in=external/unknown; Purpose: invokes map
+- coerceLines: count=1; defined_in=server/services/RAG/RagContextManager.js; Purpose: invokes coerce lines
+- join: count=1; defined_in=external/unknown; Purpose: invokes join
+- indexOf: count=1; defined_in=external/unknown; Purpose: invokes index of
+- replace: count=1; defined_in=external/unknown; Purpose: invokes replace
+- getDeferredContext: count=1; defined_in=server/services/RAG/RagContextManager.js; Purpose: invokes get deferred context
+
 ## server/services/tokens/TokenCounter.js
 Purpose: Server services
 Inbound Links: none detected
@@ -2037,14 +2107,14 @@ Functions:
 - logPromptTokenBreakdown: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to log prompt token breakdown
 - normalizeMessages: status=используется; callers: server/utils/tokenBreakdown.js; Purpose: triggered from server/utils/tokenBreakdown.js to normalize messages
 - toNumber: status=используется; callers: server/utils/tokenBreakdown.js; Purpose: triggered from server/utils/tokenBreakdown.js to to number
-- toText: status=используется; callers: server/utils/tokenBreakdown.js; Purpose: triggered from server/utils/tokenBreakdown.js to to text
+- toText: status=используется | опасность, дублируется в: server/services/RAG/intentAnalyzer.js, server/utils/tokenBreakdown.js; callers: server/services/RAG/intentAnalyzer.js, server/utils/tokenBreakdown.js; Purpose: triggered from server/services/RAG/intentAnalyzer.js, server/utils/tokenBreakdown.js to to text
 Outgoing Calls:
 - toNumber: count=12; defined_in=server/utils/tokenBreakdown.js; Purpose: invokes to number
 - isArray: count=4; defined_in=external/unknown; Purpose: invokes is array
 - map: count=3; defined_in=external/unknown; Purpose: invokes map
 - Boolean: count=3; defined_in=external/unknown; Purpose: invokes boolean
 - join: count=2; defined_in=external/unknown; Purpose: invokes join
-- toText: count=2; defined_in=server/utils/tokenBreakdown.js; Purpose: invokes to text
+- toText: count=2; defined_in=server/services/RAG/intentAnalyzer.js, server/utils/tokenBreakdown.js; Purpose: invokes to text
 - countTokens: count=2; defined_in=server/controllers/agents/client.js, server/services/tokens/TokenCounter.js, server/utils/tokenBreakdown.js; Purpose: invokes count tokens
 - applyPreview: count=2; defined_in=server/utils/tokenBreakdown.js; Purpose: invokes apply preview
 - logLevel: count=2; defined_in=external/unknown; Purpose: invokes log level
@@ -2153,9 +2223,9 @@ Purpose: Utility helpers
 Inbound Links: none detected
 Exports: buildContext, getRequestContext
 Functions:
-- buildContext: status=используется; callers: server/controllers/agents/request.js, server/routes/files/index.js, server/routes/files/rag.js, server/services/Graph/LongTextWorker.js, server/services/RAG/RagCache.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/condense.js, server/services/RAG/intentAnalyzer.js, server/services/RAG/memoryQueue.js, server/services/RAG/multiStepOrchestrator.js, server/services/agents/MessageHistoryManager.js, server/utils/responseUtils.js, utils/temporalClient.js; Purpose: triggered from server/controllers/agents/request.js, server/routes/files/index.js, server/routes/files/rag.js, server/services/Graph/LongTextWorker.js, server/services/RAG/RagCache.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/condense.js, server/services/RAG/intentAnalyzer.js, server/services/RAG/memoryQueue.js, server/services/RAG/multiStepOrchestrator.js, server/services/agents/MessageHistoryManager.js, server/utils/responseUtils.js, utils/temporalClient.js to build context
+- buildContext: status=используется; callers: app/clients/AnthropicClient.js, app/clients/BaseClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js, app/clients/utils/instructions.js, server/controllers/agents/request.js, server/routes/files/index.js, server/routes/files/rag.js, server/services/Graph/LongTextWorker.js, server/services/RAG/RagCache.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/condense.js, server/services/RAG/intentAnalyzer.js, server/services/RAG/memoryQueue.js, server/services/RAG/multiStepOrchestrator.js, server/services/agents/MessageHistoryManager.js, server/utils/responseUtils.js, utils/temporalClient.js; Purpose: triggered from app/clients/AnthropicClient.js, app/clients/BaseClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js, app/clients/utils/instructions.js, server/controllers/agents/request.js, server/routes/files/index.js, server/routes/files/rag.js, server/services/Graph/LongTextWorker.js, server/services/RAG/RagCache.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/condense.js, server/services/RAG/intentAnalyzer.js, server/services/RAG/memoryQueue.js, server/services/RAG/multiStepOrchestrator.js, server/services/agents/MessageHistoryManager.js, server/utils/responseUtils.js, utils/temporalClient.js to build context
 - extractFromReq: status=используется; callers: utils/logContext.js; Purpose: triggered from utils/logContext.js to extract from req
-- getRequestContext: status=используется; callers: server/controllers/agents/request.js; Purpose: triggered from server/controllers/agents/request.js to get request context
+- getRequestContext: status=используется; callers: app/clients/AnthropicClient.js, app/clients/BaseClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js, server/controllers/agents/request.js; Purpose: triggered from app/clients/AnthropicClient.js, app/clients/BaseClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js, server/controllers/agents/request.js to get request context
 Outgoing Calls:
 - extractFromReq: count=2; defined_in=utils/logContext.js; Purpose: invokes extract from req
 
@@ -2181,7 +2251,7 @@ Functions:
 - createScopedLogger: status=используется; callers: utils/logger/index.js; Purpose: triggered from utils/logger/index.js to create scoped logger
 - ensureDirectory: status=используется; callers: utils/logger/index.js; Purpose: triggered from utils/logger/index.js to ensure directory
 - formatError: status=используется; callers: utils/logger/index.js; Purpose: triggered from utils/logger/index.js to format error
-- getLogger: status=используется; callers: manage_summaries.js, server/controllers/agents/client.js, server/controllers/agents/request.js, server/middleware/requestValidators.js, server/routes/agents/chat.js, server/routes/convos.js, server/routes/files/index.js, server/routes/files/rag.js, server/services/Graph/LongTextWorker.js, server/services/RAG/RagCache.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/condense.js, server/services/RAG/intentAnalyzer.js, server/services/RAG/memoryQueue.js, server/services/RAG/multiStepOrchestrator.js, server/services/agents/MessageHistoryManager.js, server/utils/responseUtils.js, sync_history.js, utils/temporalClient.js; Purpose: triggered from manage_summaries.js, server/controllers/agents/client.js, server/controllers/agents/request.js, server/middleware/requestValidators.js, server/routes/agents/chat.js, server/routes/convos.js, server/routes/files/index.js, server/routes/files/rag.js, server/services/Graph/LongTextWorker.js, server/services/RAG/RagCache.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/condense.js, server/services/RAG/intentAnalyzer.js, server/services/RAG/memoryQueue.js, server/services/RAG/multiStepOrchestrator.js, server/services/agents/MessageHistoryManager.js, server/utils/responseUtils.js, sync_history.js, utils/temporalClient.js to get logger
+- getLogger: status=используется; callers: app/clients/AnthropicClient.js, app/clients/BaseClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js, app/clients/utils/instructions.js, manage_summaries.js, server/controllers/agents/client.js, server/controllers/agents/request.js, server/middleware/requestValidators.js, server/routes/agents/chat.js, server/routes/convos.js, server/routes/files/index.js, server/routes/files/rag.js, server/services/Graph/LongTextWorker.js, server/services/RAG/RagCache.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/condense.js, server/services/RAG/intentAnalyzer.js, server/services/RAG/memoryQueue.js, server/services/RAG/multiStepOrchestrator.js, server/services/agents/MessageHistoryManager.js, server/utils/responseUtils.js, sync_history.js, utils/temporalClient.js; Purpose: triggered from app/clients/AnthropicClient.js, app/clients/BaseClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js, app/clients/utils/instructions.js, manage_summaries.js, server/controllers/agents/client.js, server/controllers/agents/request.js, server/middleware/requestValidators.js, server/routes/agents/chat.js, server/routes/convos.js, server/routes/files/index.js, server/routes/files/rag.js, server/services/Graph/LongTextWorker.js, server/services/RAG/RagCache.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/condense.js, server/services/RAG/intentAnalyzer.js, server/services/RAG/memoryQueue.js, server/services/RAG/multiStepOrchestrator.js, server/services/agents/MessageHistoryManager.js, server/utils/responseUtils.js, sync_history.js, utils/temporalClient.js to get logger
 - getLoggingConfig: status=сирота; callers: —; Purpose: local helper to get logging config
 - getLoggingConfigHash: status=используется; callers: utils/logger/index.js; Purpose: triggered from utils/logger/index.js to get logging config hash
 - isPlainObject: status=используется | опасность, дублируется в: server/middleware/requestValidators.js, utils/logger/index.js; callers: server/middleware/requestValidators.js, utils/logger/index.js; Purpose: triggered from server/middleware/requestValidators.js, utils/logger/index.js to is plain object
@@ -2255,8 +2325,9 @@ Functions:
 - getMemoryConfig: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to get memory config
 - refreshMemoryConfig: status=сирота; callers: —; Purpose: local helper to refresh memory config
 Outgoing Calls:
-- freeze: count=12; defined_in=external/unknown; Purpose: invokes freeze
+- freeze: count=13; defined_in=external/unknown; Purpose: invokes freeze
 - getSection: count=6; defined_in=external/unknown; Purpose: invokes get section
+- stringify: count=2; defined_in=external/unknown; Purpose: invokes stringify
 - buildMemoryConfig: count=2; defined_in=utils/memoryConfig.js; Purpose: invokes build memory config
 - require: count=1; defined_in=external/unknown; Purpose: invokes require
 - get: count=1; defined_in=external/unknown; Purpose: invokes get
@@ -2382,22 +2453,25 @@ Outgoing Calls:
 ## utils/ragMetrics.js
 Purpose: Utility helpers
 Inbound Links: none detected
-Exports: register, segmentCounter, cacheCounter, costCounter, ragContextGauge, observeSegmentTokens, observeCache, observeCost, setContextLength
+Exports: register, segmentCounter, cacheCounter, costCounter, ragContextGauge, historyPassthroughGauge, liveWindowGauge, observeSegmentTokens, observeCache, observeCost, setContextLength, observeHistoryPassthrough, observeLiveWindow
 Functions:
 - observeCache: status=используется; callers: server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js; Purpose: triggered from server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js to observe cache
 - observeCost: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to observe cost
+- observeHistoryPassthrough: status=используется; callers: server/services/agents/MessageHistoryManager.js; Purpose: triggered from server/services/agents/MessageHistoryManager.js to observe history passthrough
+- observeLiveWindow: status=используется; callers: server/services/agents/MessageHistoryManager.js; Purpose: triggered from server/services/agents/MessageHistoryManager.js to observe live window
 - observeSegmentTokens: status=используется; callers: server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/multiStepOrchestrator.js; Purpose: triggered from server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/multiStepOrchestrator.js to observe segment tokens
 - reuseMetric: status=используется; callers: utils/ragMetrics.js; Purpose: triggered from utils/ragMetrics.js to reuse metric
 - setContextLength: status=используется; callers: server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/multiStepOrchestrator.js; Purpose: triggered from server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/multiStepOrchestrator.js to set context length
 Outgoing Calls:
-- reuseMetric: count=4; defined_in=utils/ragMetrics.js; Purpose: invokes reuse metric
-- labels: count=4; defined_in=external/unknown; Purpose: invokes labels
-- inc: count=3; defined_in=external/unknown; Purpose: invokes inc
+- labels: count=8; defined_in=external/unknown; Purpose: invokes labels
+- reuseMetric: count=6; defined_in=utils/ragMetrics.js; Purpose: invokes reuse metric
+- inc: count=4; defined_in=external/unknown; Purpose: invokes inc
+- set: count=4; defined_in=external/unknown; Purpose: invokes set
+- isFinite: count=2; defined_in=external/unknown; Purpose: invokes is finite
 - require: count=1; defined_in=external/unknown; Purpose: invokes require
 - getSingleMetric: count=1; defined_in=external/unknown; Purpose: invokes get single metric
 - factory: count=1; defined_in=external/unknown; Purpose: invokes factory
 - registerMetric: count=1; defined_in=external/unknown; Purpose: invokes register metric
-- set: count=1; defined_in=external/unknown; Purpose: invokes set
 
 ## utils/security.js
 Purpose: Utility helpers
@@ -2407,7 +2481,7 @@ Functions:
 - escapeHtml: status=используется; callers: utils/security.js; Purpose: triggered from utils/security.js to escape html
 - fromArray: status=используется; callers: utils/security.js; Purpose: triggered from utils/security.js to from array
 - normalizeString: status=используется; callers: utils/security.js; Purpose: triggered from utils/security.js to normalize string
-- sanitizeInput: status=используется; callers: server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js, utils/logger/index.js; Purpose: triggered from server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js, utils/logger/index.js to sanitize input
+- sanitizeInput: status=используется; callers: server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/RagContextManager.js, utils/logger/index.js; Purpose: triggered from server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/RagContextManager.js, utils/logger/index.js to sanitize input
 - tryFastPath: status=используется; callers: utils/security.js; Purpose: triggered from utils/security.js to try fast path
 Outgoing Calls:
 - escapeHtml: count=7; defined_in=utils/security.js; Purpose: invokes escape html
