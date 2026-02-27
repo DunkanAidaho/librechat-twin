@@ -1622,6 +1622,8 @@ Graph hints: ${graphQueryHint}`;
           conversationId,
           graphLines: graphContextLines.length,
           vectorChunks: vectorChunks.length,
+          reason: 'multi_step_enabled',
+          multiStepEnabled: true,
         });
         setDeferredContext(req, {
           policyIntro,
@@ -1963,10 +1965,12 @@ Graph hints: ${graphQueryHint}`;
     if (!Array.isArray(intentAnalysis?.entities) || intentAnalysis.entities.length === 0) {
       if (fallbackEntities.length) {
         for (const entity of fallbackEntities) {
+          const truncatedName = (entity?.name || '').slice(0, 80);
           logger.info('rag.multiStep.fallback_entity', {
             conversationId: this.conversationId,
-            source: entity.hints?.[0],
-            name: entity.name.slice(0, 80),
+            source: entity?.hints?.[0] || 'unknown',
+            name: truncatedName,
+            truncatedLength: truncatedName.length,
           });
         }
         intentAnalysis = { ...(intentAnalysis || {}), entities: fallbackEntities };
