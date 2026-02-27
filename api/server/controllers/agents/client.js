@@ -1484,12 +1484,22 @@ Graph hints: ${graphQueryHint}`;
       const baseTimeoutMs = Number.isFinite(summarizationCfg?.timeoutMs) && summarizationCfg.timeoutMs > 0
         ? summarizationCfg.timeoutMs
         : defaults.timeoutMs;
+      const summarizationEnabled = summarizationCfg.enabled !== false;
+      const summarizationConfigSnapshot = {
+        budget: budgetChars,
+        budgetChars,
+        chunkChars,
+        provider: summarizationCfg.provider,
+        timeout: baseTimeoutMs,
+        timeoutMs: baseTimeoutMs,
+        enabled: summarizationEnabled,
+      };
 
       let vectorText = vectorChunks.join('\n\n');
       const rawVectorTextLength = vectorText.length;
       const shouldSummarize =
         !multiStepEnabled &&
-        summarizationCfg.enabled !== false &&
+        summarizationEnabled &&
         vectorText.length > budgetChars;
 
       if (shouldSummarize) {
@@ -1620,24 +1630,18 @@ Graph hints: ${graphQueryHint}`;
       if (multiStepEnabled && req) {
         logger.info('[rag.context.summarize.deferred]', {
           conversationId,
+          deferred: true,
           graphLines: graphContextLines.length,
           vectorChunks: vectorChunks.length,
           reason: 'multi_step_enabled',
-          multiStepEnabled: true,
         });
         setDeferredContext(req, {
           policyIntro,
           graphLines: graphContextLines,
           graphQueryHint,
           vectorText,
-          vectorChunks,
-          summarizationConfig: {
-            budgetChars,
-            chunkChars,
-            provider: summarizationCfg.provider,
-            timeoutMs: baseTimeoutMs,
-            enabled: summarizationCfg.enabled !== false,
-          },
+          vectorChunks: Array.isArray(vectorChunks) ? [...vectorChunks] : [],
+          summarizationConfig: summarizationConfigSnapshot,
           metrics: {
             graphTokens: metrics.graphTokens,
             vectorTokens: metrics.vectorTokens,
@@ -1691,6 +1695,11 @@ Graph hints: ${graphQueryHint}`;
     opts,
   ) {
     const runtimeCfg = runtimeMemoryConfig.getMemoryConfig();
+    const req = this.options?.req;
+    const res = this.options?.res;
+    if (!req) {
+      logger.warn('[AgentClient.buildMessages] Request object missing. Some features may be disabled.');
+    }
     let orderedMessages = this.constructor.getMessagesForConversation({
       messages,
       parentMessageId,
@@ -1714,8 +1723,8 @@ Graph hints: ${graphQueryHint}`;
       ? Math.max(historyCfg.dontShrinkLastN, 0)
       : 0;
     const MAX_MESSAGES_TO_PROCESS = historyCompressionCfg?.enabled ? Infinity : 25;
-    const conversationId = this.conversationId || this.options?.req?.body?.conversationId;
-    const requestUserId = this.options?.req?.user?.id || null;
+    const conversationId = this.conversationId || req?.body?.conversationId;
+    const requestUserId = req?.user?.id || null;
 
     let systemMessage = orderedMessages.find(m => m.role === 'system');
     let otherMessages = orderedMessages.filter(m => m.role !== 'system');
@@ -1747,7 +1756,7 @@ Graph hints: ${graphQueryHint}`;
     });
     ragCacheTtlMs = Math.max(Number(runtimeCfg?.ragCacheTtl) * 1000, 0);
     const shouldCompressHistory = Boolean(historyCompressionCfg?.enabled);
-    const endpointOption = this.options?.req?.body?.endpointOption ?? this.options?.endpointOption ?? {};
+    const endpointOption = req?.body?.endpointOption ?? this.options?.endpointOption ?? {};
     logger.debug({
       msg: '[AgentClient.buildMessages] start',
       conversationId: this.conversationId,
@@ -1793,7 +1802,7 @@ Graph hints: ${graphQueryHint}`;
     let historyTrimmer = null;
     let historyTokenBudget = 0;
     const headroom = Number(historyCompressionCfg?.contextHeadroom) || 0;
-    const ragTokens = Number(this.options?.req?.ragContextTokens) || 0;
+    const ragTokens = Number(req?.ragContextTokens) || 0;
     const instructionsTokensEstimate = tokenize(systemContent);
     const maxContextTokens =
       this.maxContextTokens ||
@@ -1977,14 +1986,12 @@ Graph hints: ${graphQueryHint}`;
       }
     }
 
-    if (this.options?.req) {
-      this.options.req.intentAnalysis = intentAnalysis;
+    if (req) {
+      req.intentAnalysis = intentAnalysis;
     }
 
     let ragContextLength = 0;
     let ragCacheStatus = 'skipped';
-    const req = this.options?.req;
-    const res = this.options?.res;
 
     if (req) {
       req.ragCacheStatus = ragCacheStatus;
@@ -3390,28 +3397,31 @@ Graph hints: ${graphQueryHint}`;
       const policyIntro = snapshot.policyIntro;
       const graphLines = Array.isArray(snapshot.graphLines) ? snapshot.graphLines : [];
       const graphQueryHint = snapshot.graphQueryHint;
+      const vectorChunks = Array.isArray(snapshot.vectorChunks) ? snapshot.vectorChunks : [];
       const summarizationDefaults = { budgetChars: 12000, chunkChars: 20000, timeoutMs: 125000 };
-      const summarizationConfig = Object.assign({}, summarizationDefaults, {
-        budgetChars:
-          Number.isFinite(snapshot?.summarizationConfig?.budgetChars) &&
-          snapshot.summarizationConfig.budgetChars > 0
-            ? snapshot.summarizationConfig.budgetChars
-            : summarizationDefaults.budgetChars,
-        chunkChars:
-          Number.isFinite(snapshot?.summarizationConfig?.chunkChars) &&
-          snapshot.summarizationConfig.chunkChars > 0
-            ? snapshot.summarizationConfig.chunkChars
-            : summarizationDefaults.chunkChars,
-        timeoutMs:
-          Number.isFinite(snapshot?.summarizationConfig?.timeoutMs) &&
-          snapshot.summarizationConfig.timeoutMs > 0
-            ? snapshot.summarizationConfig.timeoutMs
-            : summarizationDefaults.timeoutMs,
-        provider: snapshot?.summarizationConfig?.provider,
-        enabled: snapshot?.summarizationConfig?.enabled !== false,
-      });
+      const storedSummaries = snapshot?.summarizationConfig || {};
+      const resolvedBudget = Number.isFinite(storedSummaries.budget)
+        ? storedSummaries.budget
+        : Number.isFinite(storedSummaries.budgetChars)
+          ? storedSummaries.budgetChars
+          : summarizationDefaults.budgetChars;
+      const resolvedChunk = Number.isFinite(storedSummaries.chunkChars) && storedSummaries.chunkChars > 0
+        ? storedSummaries.chunkChars
+        : summarizationDefaults.chunkChars;
+      const resolvedTimeout = Number.isFinite(storedSummaries.timeoutMs) && storedSummaries.timeoutMs > 0
+        ? storedSummaries.timeoutMs
+        : summarizationDefaults.timeoutMs;
+      const summarizationConfig = {
+        budgetChars: resolvedBudget,
+        chunkChars: resolvedChunk,
+        timeoutMs: resolvedTimeout,
+        provider: storedSummaries.provider,
+        enabled: storedSummaries.enabled !== false,
+      };
 
-      let vectorText = typeof snapshot.vectorText === 'string' ? snapshot.vectorText : '';
+      let vectorText = typeof snapshot.vectorText === 'string' && snapshot.vectorText.length
+        ? snapshot.vectorText
+        : vectorChunks.join('\n\n');
       const shouldSummarize = summarizationConfig.enabled && vectorText.length > summarizationConfig.budgetChars;
 
       if (shouldSummarize) {
@@ -3458,7 +3468,8 @@ Graph hints: ${graphQueryHint}`;
       const contextTokens = ragBlock ? Tokenizer.getTokenCount(ragBlock, encoding) : graphTokens + vectorTokens;
 
       if (req) {
-        req.ragMetrics = Object.assign({}, req.ragMetrics, {
+        const existingMetrics = snapshot.metrics || {};
+        req.ragMetrics = Object.assign({}, req.ragMetrics, existingMetrics, {
           graphTokens,
           vectorTokens,
           contextTokens,
