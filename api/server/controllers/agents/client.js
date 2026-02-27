@@ -58,6 +58,13 @@ const { HistoryTrimmer } = require('~/server/services/agents/historyTrimmer');
 const { ContextCompressor, MessageCompressorBridge } = require('~/server/services/agents/ContextCompressor');
 const { analyzeIntent } = require('~/server/services/RAG/intentAnalyzer');
 const { runMultiStepRag } = require('~/server/services/RAG/multiStepOrchestrator');
+const {
+  buildRagBlock,
+  replaceRagBlock,
+  setDeferredContext,
+  getDeferredContext,
+  clearDeferredContext,
+} = require('~/server/services/RAG/RagContextManager');
 const { sanitizeInput } = require('~/utils/security');
 const {
   observeSegmentTokens,
@@ -1116,6 +1123,11 @@ class AgentClient extends BaseClient {
     const userMessage = orderedMessages.slice(-1)[0];
     const userQuery = userMessage?.text ?? '';
     const encoding = this.getEncoding ? this.getEncoding() : 'o200k_base';
+    const multiStepEnabled = Boolean(runtimeCfg?.multiStepRag?.enabled);
+
+    if (req) {
+      setDeferredContext(req, null);
+    }
 
     if (!runtimeCfg.useConversationMemory || !conversationId || !userQuery) {
       logger.debug('[rag.context.skip]', {
@@ -1141,6 +1153,9 @@ class AgentClient extends BaseClient {
     }
 
     const normalizedQuery = userQuery.slice(0, queryMaxChars);
+    if (req) {
+      req.ragUserQuery = normalizedQuery;
+    }
     const queryTokenCount = Tokenizer.getTokenCount(normalizedQuery, encoding);
     logger.debug(
       `[rag.context.query.tokens] conversation=${conversationId} length=${normalizedQuery.length} tokens=${queryTokenCount}`
@@ -1460,21 +1475,22 @@ Graph hints: ${graphQueryHint}`;
         Number.isFinite(summarizationCfg?.chunkChars) && summarizationCfg.chunkChars > 0
           ? summarizationCfg.chunkChars
           : defaults.chunkChars;
+      const baseTimeoutMs = Number.isFinite(summarizationCfg?.timeoutMs) && summarizationCfg.timeoutMs > 0
+        ? summarizationCfg.timeoutMs
+        : defaults.timeoutMs;
 
       let vectorText = vectorChunks.join('\n\n');
       const rawVectorTextLength = vectorText.length;
       const shouldSummarize =
-        summarizationCfg.enabled !== false && vectorText.length > budgetChars;
+        !multiStepEnabled &&
+        summarizationCfg.enabled !== false &&
+        vectorText.length > budgetChars;
 
       if (shouldSummarize) {
         logger.debug(
           `[rag.context.limit] conversation=${conversationId} param=memory.summarization.budgetChars limit=${budgetChars} original=${rawVectorTextLength}`
         );
         try {
-          const baseTimeoutMs = Number.isFinite(summarizationCfg?.timeoutMs) && summarizationCfg.timeoutMs > 0
-            ? summarizationCfg.timeoutMs
-            : defaults.timeoutMs;
-          
           const adaptiveTimeoutMs = calculateAdaptiveTimeout(rawVectorTextLength, baseTimeoutMs);
           
           logger.debug('[rag.context.summarize.timeout]', {
@@ -1523,17 +1539,15 @@ Graph hints: ${graphQueryHint}`;
         }
       }
 
-      const graphBlock = hasGraph
-        ? `### Graph context\n${graphContextLines.join('\n')}\n\n`
-        : '';
-      const vectorBlock = vectorText.length
-        ? `### Vector context\n${vectorText}\n\n`
-        : '';
-      const combined = `${policyIntro}${graphBlock}${vectorBlock}---\n\n`;
+      const ragBlock = buildRagBlock({
+        policyIntro,
+        graphLines: hasGraph ? graphContextLines : [],
+        vectorText,
+      });
 
-      let sanitizedBlock = combined;
+      let sanitizedBlock = ragBlock;
       try {
-        sanitizedBlock = sanitizeInput(combined);
+        sanitizedBlock = sanitizeInput(ragBlock);
       } catch (sanitizeError) {
         logger.error('[rag.context.sanitize.error]', {
           message: sanitizeError?.message,
@@ -1570,7 +1584,7 @@ Graph hints: ${graphQueryHint}`;
         );
       }
 
-      if (vectorBlock) {
+      if (vectorText.length) {
         metrics.vectorTokens = Tokenizer.getTokenCount(vectorText, encoding);
 
         if (metrics.vectorTokens) {
@@ -1596,6 +1610,33 @@ Graph hints: ${graphQueryHint}`;
       metrics.contextTokens = sanitizedBlock
         ? Tokenizer.getTokenCount(sanitizedBlock, encoding)
         : metrics.graphTokens + metrics.vectorTokens;
+
+      if (multiStepEnabled && req) {
+        logger.info('[rag.context.summarize.deferred]', {
+          conversationId,
+          graphLines: graphContextLines.length,
+          vectorChunks: vectorChunks.length,
+        });
+        setDeferredContext(req, {
+          policyIntro,
+          graphLines: graphContextLines,
+          graphQueryHint,
+          vectorText,
+          vectorChunks,
+          summarizationConfig: {
+            budgetChars,
+            chunkChars,
+            provider: summarizationCfg.provider,
+            timeoutMs: baseTimeoutMs,
+            enabled: summarizationCfg.enabled !== false,
+          },
+          metrics: {
+            graphTokens: metrics.graphTokens,
+            vectorTokens: metrics.vectorTokens,
+            contextTokens: metrics.contextTokens,
+          },
+        });
+      }
 
       logger.info(
         `[rag.context.tokens] conversation=${conversationId} graphTokens=${metrics.graphTokens} vectorTokens=${metrics.vectorTokens} contextTokens=${metrics.contextTokens}`
@@ -1890,7 +1931,22 @@ Graph hints: ${graphQueryHint}`;
           vectorTokens: ragResult?.metrics?.vectorTokens ?? 0,
         });
       }
+    } catch (ragError) {
+      logger.error('[rag.context.error]', {
+        conversationId: this.conversationId,
+        message: ragError?.message,
+        stack: ragError?.stack,
+      });
+      if (req) {
+        req.ragCacheStatus = 'error';
+      }
+    }
 
+    if (this.options?.req) {
+      this.options.req.ragContextLength = ragContextLength;
+    }
+
+    try {
       const toolsGatewayUrl = runtimeCfg?.toolsGateway?.url || this.options?.req?.config?.queues?.toolsGatewayUrl;
 
       const fetchGraphLinesForEntity = async ({ entity, relationHints, limit, signal, passIndex }) => {
@@ -1948,6 +2004,22 @@ Graph hints: ${graphQueryHint}`;
         : { globalContext: systemContent, entities: [], passesUsed: 0, queueStatus: {} };
 
       systemContent = multiStepResult.globalContext || systemContent;
+      const deferred = getDeferredContext(req);
+      if (deferred && deferred.vectorText?.length) {
+        await this.applyDeferredCondensation({
+          req,
+          res,
+          endpointOption,
+          runtimeCfg,
+          userQuery: req?.ragUserQuery || '',
+          systemContentRef: () => systemContent,
+          updateSystemContent: (next) => {
+            systemContent = next;
+          },
+          deferredContext: deferred,
+        });
+      }
+
       const ragContextObject = {
         global: multiStepResult.globalContextSummary || multiStepResult.globalContext || '',
         entities: multiStepResult.entities?.map((entity) => ({
@@ -1978,19 +2050,13 @@ Graph hints: ${graphQueryHint}`;
       } else if (this.options?.req) {
         this.options.req.ragMultiStep = { ragContext: ragContextObject };
       }
-    } catch (ragError) {
-      logger.error('[rag.context.error]', {
+    } catch (multiStepError) {
+      logger.error('[rag.multistep.error]', {
         conversationId: this.conversationId,
-        message: ragError?.message,
-        stack: ragError?.stack,
+        message: multiStepError?.message,
+        stack: multiStepError?.stack,
       });
-      if (req) {
-        req.ragCacheStatus = 'error';
-      }
-    }
-
-    if (this.options?.req) {
-      this.options.req.ragContextLength = ragContextLength;
+      clearDeferredContext(req);
     }
 
     let payload;
@@ -3193,6 +3259,126 @@ Graph hints: ${graphQueryHint}`;
         enabled: true,
         level: "info"
       }).level || "info");
+    }
+  }
+
+  async applyDeferredCondensation({
+    req,
+    res,
+    endpointOption,
+    runtimeCfg,
+    userQuery,
+    systemContentRef,
+    updateSystemContent,
+    deferredContext,
+  }) {
+    const snapshot = deferredContext || getDeferredContext(req);
+    if (!snapshot) {
+      return;
+    }
+
+    try {
+      const encoding = this.getEncoding();
+      const policyIntro = snapshot.policyIntro;
+      const graphLines = Array.isArray(snapshot.graphLines) ? snapshot.graphLines : [];
+      const graphQueryHint = snapshot.graphQueryHint;
+      const summarizationDefaults = { budgetChars: 12000, chunkChars: 20000, timeoutMs: 125000 };
+      const summarizationConfig = Object.assign({}, summarizationDefaults, {
+        budgetChars:
+          Number.isFinite(snapshot?.summarizationConfig?.budgetChars) &&
+          snapshot.summarizationConfig.budgetChars > 0
+            ? snapshot.summarizationConfig.budgetChars
+            : summarizationDefaults.budgetChars,
+        chunkChars:
+          Number.isFinite(snapshot?.summarizationConfig?.chunkChars) &&
+          snapshot.summarizationConfig.chunkChars > 0
+            ? snapshot.summarizationConfig.chunkChars
+            : summarizationDefaults.chunkChars,
+        timeoutMs:
+          Number.isFinite(snapshot?.summarizationConfig?.timeoutMs) &&
+          snapshot.summarizationConfig.timeoutMs > 0
+            ? snapshot.summarizationConfig.timeoutMs
+            : summarizationDefaults.timeoutMs,
+        provider: snapshot?.summarizationConfig?.provider,
+        enabled: snapshot?.summarizationConfig?.enabled !== false,
+      });
+
+      let vectorText = typeof snapshot.vectorText === 'string' ? snapshot.vectorText : '';
+      const shouldSummarize = summarizationConfig.enabled && vectorText.length > summarizationConfig.budgetChars;
+
+      if (shouldSummarize) {
+        const graphContext = graphLines.length ? { lines: graphLines, queryHint: graphQueryHint } : null;
+        try {
+          vectorText = await withTimeout(
+            mapReduceContext({
+              req,
+              res,
+              endpointOption,
+              contextText: vectorText,
+              userQuery,
+              graphContext,
+              summarizationConfig: {
+                budgetChars: summarizationConfig.budgetChars,
+                chunkChars: summarizationConfig.chunkChars,
+                provider: summarizationConfig.provider,
+                timeoutMs: summarizationConfig.timeoutMs,
+              },
+            }),
+            summarizationConfig.timeoutMs,
+            'RAG deferred summarization timed out',
+          );
+        } catch (error) {
+          logger.error('[rag.context.deferred.summarize.error]', {
+            conversationId: this.conversationId,
+            message: error?.message,
+            stack: error?.stack,
+          });
+        }
+      }
+
+      const ragBlock = buildRagBlock({
+        policyIntro,
+        graphLines,
+        vectorText,
+      });
+
+      const nextSystemContent = replaceRagBlock(systemContentRef(), ragBlock);
+      updateSystemContent(nextSystemContent);
+
+      const graphTokens = graphLines.length ? Tokenizer.getTokenCount(graphLines.join('\n'), encoding) : 0;
+      const vectorTokens = vectorText ? Tokenizer.getTokenCount(vectorText, encoding) : 0;
+      const contextTokens = ragBlock ? Tokenizer.getTokenCount(ragBlock, encoding) : graphTokens + vectorTokens;
+
+      if (req) {
+        req.ragMetrics = Object.assign({}, req.ragMetrics, {
+          graphTokens,
+          vectorTokens,
+          contextTokens,
+        });
+        req.ragContextTokens = contextTokens;
+      }
+
+      const maxPromptTokens =
+        runtimeCfg?.tokenLimits?.maxPromptTokens ||
+        runtimeCfg?.tokenLimits?.maxMessageTokens ||
+        this.maxContextTokens ||
+        0;
+
+      if (maxPromptTokens > 0 && contextTokens > maxPromptTokens) {
+        logger.warn('[rag.context.preoverflow]', {
+          conversationId: this.conversationId,
+          contextTokens,
+          maxPromptTokens,
+        });
+      }
+    } catch (error) {
+      logger.error('[rag.context.deferred.error]', {
+        conversationId: this.conversationId,
+        message: error?.message,
+        stack: error?.stack,
+      });
+    } finally {
+      clearDeferredContext(req);
     }
   }
 }
