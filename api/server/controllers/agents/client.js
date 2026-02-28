@@ -71,6 +71,7 @@ const {
   observeCache,
   observeCost,
   setContextLength,
+  observeEmptyEntities,
 } = require('~/utils/ragMetrics');
 const crypto = require('crypto');
 const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
@@ -1124,6 +1125,30 @@ class AgentClient extends BaseClient {
     const userQuery = userMessage?.text ?? '';
     const encoding = this.getEncoding ? this.getEncoding() : 'o200k_base';
     const multiStepEnabled = Boolean(runtimeCfg?.multiStepRag?.enabled);
+    const summarizationDefaults = { budgetChars: 12000, chunkChars: 20000, timeoutMs: 125000 };
+    const summarizationCfg = runtimeCfg.summarization || {};
+    const resolvedBudgetChars =
+      Number.isFinite(summarizationCfg?.budgetChars) && summarizationCfg.budgetChars > 0
+        ? summarizationCfg.budgetChars
+        : summarizationDefaults.budgetChars;
+    const resolvedChunkChars =
+      Number.isFinite(summarizationCfg?.chunkChars) && summarizationCfg.chunkChars > 0
+        ? summarizationCfg.chunkChars
+        : summarizationDefaults.chunkChars;
+    const resolvedTimeoutMs =
+      Number.isFinite(summarizationCfg?.timeoutMs) && summarizationCfg.timeoutMs > 0
+        ? summarizationCfg.timeoutMs
+        : summarizationDefaults.timeoutMs;
+    const summarizationEnabled = summarizationCfg.enabled !== false;
+    const summarizationConfigSnapshot = {
+      budget: resolvedBudgetChars,
+      budgetChars: resolvedBudgetChars,
+      chunkChars: resolvedChunkChars,
+      provider: summarizationCfg.provider,
+      timeout: resolvedTimeoutMs,
+      timeoutMs: resolvedTimeoutMs,
+      enabled: summarizationEnabled,
+    };
 
     if (req) {
       setDeferredContext(req, null);
@@ -1484,48 +1509,20 @@ Graph hints: ${graphQueryHint}`;
         `[rag.context.tokens] conversation=${conversationId} graphTokens=0 vectorTokens=0 contextTokens=0`
       );
     } else {
-      const summarizationCfg = runtimeCfg.summarization || {};
-      const defaults = { 
-        budgetChars: 12000, 
-        chunkChars: 20000,
-        timeoutMs: 125000,
-      };
-      const budgetChars =
-        Number.isFinite(summarizationCfg?.budgetChars) && summarizationCfg.budgetChars > 0
-          ? summarizationCfg.budgetChars
-          : defaults.budgetChars;
-      const chunkChars =
-        Number.isFinite(summarizationCfg?.chunkChars) && summarizationCfg.chunkChars > 0
-          ? summarizationCfg.chunkChars
-          : defaults.chunkChars;
-      const baseTimeoutMs = Number.isFinite(summarizationCfg?.timeoutMs) && summarizationCfg.timeoutMs > 0
-        ? summarizationCfg.timeoutMs
-        : defaults.timeoutMs;
-      const summarizationEnabled = summarizationCfg.enabled !== false;
-      const summarizationConfigSnapshot = {
-        budget: budgetChars,
-        budgetChars,
-        chunkChars,
-        provider: summarizationCfg.provider,
-        timeout: baseTimeoutMs,
-        timeoutMs: baseTimeoutMs,
-        enabled: summarizationEnabled,
-      };
-
       const vectorTextRaw = vectorSnapshot.vectorText;
       let vectorTextForPrompt = vectorTextRaw;
       const rawVectorTextLength = vectorTextRaw.length;
       const shouldSummarize =
         !multiStepEnabled &&
         summarizationEnabled &&
-        rawVectorTextLength > budgetChars;
+        rawVectorTextLength > resolvedBudgetChars;
 
       if (shouldSummarize) {
         logger.debug(
-          `[rag.context.limit] conversation=${conversationId} param=memory.summarization.budgetChars limit=${budgetChars} original=${rawVectorTextLength}`
+          `[rag.context.limit] conversation=${conversationId} param=memory.summarization.budgetChars limit=${resolvedBudgetChars} original=${rawVectorTextLength}`
         );
         try {
-          const adaptiveTimeoutMs = calculateAdaptiveTimeout(rawVectorTextLength, baseTimeoutMs);
+          const adaptiveTimeoutMs = calculateAdaptiveTimeout(rawVectorTextLength, resolvedTimeoutMs);
           
           logger.debug('[rag.context.summarize.timeout]', {
             conversationId,
@@ -1546,8 +1543,8 @@ Graph hints: ${graphQueryHint}`;
                 ? { lines: graphContextLines, queryHint: graphQueryHint }
                 : null,
               summarizationConfig: {
-                budgetChars,
-                chunkChars,
+                budgetChars: resolvedBudgetChars,
+                chunkChars: resolvedChunkChars,
                 provider: summarizationCfg.provider,
                 timeoutMs: adaptiveTimeoutMs,
               },
@@ -1564,7 +1561,7 @@ Graph hints: ${graphQueryHint}`;
           });
           
           if (summarizeError?.message?.includes('timed out')) {
-            const fallbackLength = Math.min(vectorTextRaw.length, budgetChars);
+            const fallbackLength = Math.min(vectorTextRaw.length, resolvedBudgetChars);
             vectorTextForPrompt = vectorTextRaw.slice(0, fallbackLength);
             logger.warn(
               `[rag.context.vector.summarize.fallback] Using truncated text (${fallbackLength} chars) due to timeout`
@@ -1646,7 +1643,7 @@ Graph hints: ${graphQueryHint}`;
         : metrics.graphTokens + metrics.vectorTokens;
 
       if (multiStepEnabled && req) {
-        logger.info('[rag.context.summarize.deferred]', {
+        logger.info('rag.context.summarize.deferred', {
           conversationId,
           deferred: true,
           graphLines: graphContextLines.length,
@@ -1910,8 +1907,8 @@ Graph hints: ${graphQueryHint}`;
     let intentWindow = [];
     if (orderedMessages.length) {
       const WINDOW_SIZE = Number(runtimeCfg?.multiStepRag?.intentWindowSize) || 6;
-      const rawSlice = orderedMessages.slice(-WINDOW_SIZE);
-      intentWindow = rawSlice
+      intentWindow = orderedMessages
+        .slice(-WINDOW_SIZE)
         .filter((msg) => msg?.role === 'user' || msg?.role === 'assistant')
         .map((msg) => ({
           role: msg.role,
@@ -1920,7 +1917,7 @@ Graph hints: ${graphQueryHint}`;
         .filter((entry) => entry.text);
     }
 
-    const intentAnalysis = runtimeCfg?.multiStepRag?.enabled
+    let intentAnalysis = runtimeCfg?.multiStepRag?.enabled
       ? await analyzeIntent({
           message: orderedMessages[orderedMessages.length - 1],
           context: intentWindow,
@@ -2013,6 +2010,8 @@ Graph hints: ${graphQueryHint}`;
       userMessage: orderedMessages[orderedMessages.length - 1],
     });
     if (!Array.isArray(intentAnalysis?.entities) || intentAnalysis.entities.length === 0) {
+      const reasonTag = fallbackEntities.length ? 'fallback_applied' : 'no_context';
+      observeEmptyEntities({ reason: reasonTag });
       if (fallbackEntities.length) {
         for (const entity of fallbackEntities) {
           const truncatedName = (entity?.name || '').slice(0, 80);

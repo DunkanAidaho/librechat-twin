@@ -72,6 +72,16 @@ const liveWindowGauge = reuseMetric(
     }),
 );
 
+const intentEmptyEntitiesCounter = reuseMetric(
+  'rag_intent_empty_entities_total',
+  () =>
+    new Counter({
+      name: 'rag_intent_empty_entities_total',
+      help: 'Счётчик ситуаций, когда анализ намерений не вернул сущностей.',
+      labelNames: ['reason'],
+    }),
+);
+
 function observeSegmentTokens({ segment, tokens, endpoint = 'unknown', model = 'unknown' }) {
   if (!segment || tokens == null) {
     return;
@@ -119,6 +129,10 @@ function observeLiveWindow({ mode = 'legacy', size = 0 } = {}) {
   liveWindowGauge.labels(mode).set(size);
 }
 
+function observeEmptyEntities({ reason = 'unknown' } = {}) {
+  intentEmptyEntitiesCounter.labels(reason).inc(1);
+}
+
 module.exports = {
   register,
   segmentCounter,
@@ -127,10 +141,12 @@ module.exports = {
   ragContextGauge,
   historyPassthroughGauge,
   liveWindowGauge,
+  intentEmptyEntitiesCounter,
   observeSegmentTokens,
   observeCache,
   observeCost,
   setContextLength,
   observeHistoryPassthrough,
   observeLiveWindow,
+  observeEmptyEntities,
 };

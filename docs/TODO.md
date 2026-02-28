@@ -155,6 +155,8 @@
 - Кэш (`RAG_CACHE_ENABLED`) переключается независимо от стратегии.
 - Оркестратор решает, какие кластеры из памяти попадают в prompt; placeholder не попадает напрямую к LLM.
 - Для `multiStepRag.enabled=true` конденсация переносится «на потом»: buildRagContext формирует полный блок (policy intro + graph/vector) без map-reduce, сохраняет сырьё в `req.deferredRagContext`, фиксирует метрики (`rag.context.summarize.deferred=true`), а финальная конденсация происходит после прохождения multi-step пайплайна (через `applyDeferredCondensation`).
+  - ✅ Реализовано: buildRagContext теперь всегда собирает сырой блок (policy intro + graph/vector) и, если multi-step включён, сохраняет в `req.deferredRagContext` структурированные данные (граф, vectorChunks, summarizationConfig, метрики). Суммаризация откладывается до стадии `applyDeferredCondensation`, при этом логируется `rag.context.summarize.deferred=true`.
+  - **Smoke-проверка**: включить `multiStepRag.enabled=true`, задать контекст > `summarization.budgetChars`, убедиться, что в логах есть `rag.context.summarize.deferred`, а конденсация происходит только после multi-step (trace `applyDeferredCondensation`).
 
 **Этап 3 — Расширенные метрики/трейсинг**
 - Для каждого этапа (`history_window`, `memory_ingest`, `rag_fetch`, `multi_step`, `prompt_build`) логируем `rag.pipeline.stage`.
