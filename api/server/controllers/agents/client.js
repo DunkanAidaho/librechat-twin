@@ -1135,6 +1135,9 @@ class AgentClient extends BaseClient {
         reason: 'disabled_or_empty_query',
         enableMemoryCache: runtimeCfg.enableMemoryCache,
       });
+      if (req) {
+        req.cachedGraphContext = { graphLines: [], graphQueryHint: '' };
+      }
       return {
         patchedSystemContent: systemContent,
         contextLength: 0,
@@ -1184,6 +1187,8 @@ class AgentClient extends BaseClient {
       vectorChunks: 0,
       queryTokens: queryTokenCount,
     };
+    const resetGraphSnapshot = () => ({ graphLines: [], graphQueryHint: '' });
+    let graphSnapshot = resetGraphSnapshot();
 
     let contextLength = 0;
     let finalSystemContent = systemContent;
@@ -1655,9 +1660,9 @@ Graph hints: ${graphQueryHint}`;
       );
     }
 
-    const cachedGraphSnapshot = {
-      graphLines: graphContextLines,
-      graphQueryHint,
+    graphSnapshot = {
+      graphLines: Array.isArray(graphContextLines) ? graphContextLines : [],
+      graphQueryHint: typeof graphQueryHint === 'string' ? graphQueryHint : '',
     };
 
     if (runtimeCfg.enableMemoryCache) {
@@ -1666,7 +1671,7 @@ Graph hints: ${graphQueryHint}`;
         contextLength,
         metrics,
         expiresAt: now + ragCacheTtlMs,
-        ...cachedGraphSnapshot,
+        ...graphSnapshot,
       });
       logger.debug(
         `[rag.context.cache.store] conversation=${conversationId} cacheKey=${cacheKey} contextTokens=${metrics.contextTokens} graphTokens=${metrics.graphTokens} vectorTokens=${metrics.vectorTokens} queryTokens=${metrics.queryTokens}`
@@ -1677,7 +1682,7 @@ Graph hints: ${graphQueryHint}`;
       req.ragCacheStatus = cacheStatus;
       req.ragMetrics = Object.assign({}, req.ragMetrics, metrics);
       req.ragContextTokens = metrics.contextTokens;
-      req.cachedGraphContext = cachedGraphSnapshot;
+      req.cachedGraphContext = graphSnapshot;
     }
 
     return {
@@ -1960,10 +1965,7 @@ Graph hints: ${graphQueryHint}`;
         }));
     };
 
-    const graphSnapshot = req?.cachedGraphContext || {
-      graphLines: graphContextLines,
-      graphQueryHint,
-    };
+    const graphSnapshot = req?.cachedGraphContext ?? { graphLines: [], graphQueryHint: '' };
 
     const fallbackEntities = collectFallbackEntities({
       graphHint: graphSnapshot.graphQueryHint,
@@ -2031,6 +2033,13 @@ Graph hints: ${graphQueryHint}`;
           if (ragResult.metrics && typeof ragResult.metrics === 'object') {
             req.ragMetrics = Object.assign({}, req.ragMetrics, ragResult.metrics);
           }
+          if (!req.cachedGraphContext) {
+            logger.warn('[rag.context.snapshot_missing]', {
+              conversationId: this.conversationId,
+              reason: 'missing_after_build',
+            });
+            req.cachedGraphContext = resetGraphSnapshot();
+          }
         }
       }
 
@@ -2050,6 +2059,13 @@ Graph hints: ${graphQueryHint}`;
         message: ragError?.message,
         stack: ragError?.stack,
       });
+      if (req) {
+        req.cachedGraphContext = resetGraphSnapshot();
+        logger.warn('[rag.context.snapshot_missing]', {
+          conversationId: this.conversationId,
+          reason: 'build_error',
+        });
+      }
       if (req) {
         req.ragCacheStatus = 'error';
       }
