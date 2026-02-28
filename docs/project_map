@@ -669,6 +669,7 @@ Inbound Links: none detected
 Exports: None
 Functions:
 - calculateAdaptiveTimeout: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to calculate adaptive timeout
+- NOTE: При `multiStepRag.enabled=true` buildRagContext формирует блок RAG без конденсации и сохраняет `graphLines/vectorChunks` вместе с `summarizationConfig` в `req.deferredRagContext`, а `applyDeferredCondensation` выполняет map-reduce после завершения multi-step пайплайна.
 - compressMessagesForRetry: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to compress messages for retry
 - computeImportanceScore: status=сирота; callers: —; Purpose: local helper to compute importance score
 - computeTokens: status=используется | опасность, дублируется в: app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js; callers: app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js; Purpose: triggered from app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js to compute tokens

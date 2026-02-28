@@ -1127,6 +1127,7 @@ class AgentClient extends BaseClient {
 
     if (req) {
       setDeferredContext(req, null);
+      req.cachedVectorContext = null;
     }
 
     if (!runtimeCfg.useConversationMemory || !conversationId || !userQuery) {
@@ -1188,7 +1189,9 @@ class AgentClient extends BaseClient {
       queryTokens: queryTokenCount,
     };
     const resetGraphSnapshot = () => ({ graphLines: [], graphQueryHint: '' });
+    const resetVectorSnapshot = () => ({ vectorText: '', vectorChunks: [] });
     let graphSnapshot = resetGraphSnapshot();
+    let vectorSnapshot = resetVectorSnapshot();
 
     let contextLength = 0;
     let finalSystemContent = systemContent;
@@ -1208,6 +1211,10 @@ class AgentClient extends BaseClient {
           req.cachedGraphContext = {
             graphLines: cached.graphLines || [],
             graphQueryHint: cached.graphQueryHint || '',
+          };
+          req.cachedVectorContext = {
+            vectorText: cached.vectorText || '',
+            vectorChunks: Array.isArray(cached.vectorChunks) ? cached.vectorChunks : [],
           };
         }
         return {
@@ -1457,10 +1464,15 @@ Graph hints: ${graphQueryHint}`;
       });
     }
 
-    metrics.vectorChunks = vectorChunks.length;
+    vectorSnapshot = {
+      vectorText: vectorChunks.join('\n\n'),
+      vectorChunks: Array.isArray(vectorChunks) ? [...vectorChunks] : [],
+    };
+
+    metrics.vectorChunks = vectorSnapshot.vectorChunks.length;
 
     const hasGraph = graphContextLines.length > 0;
-    const hasVector = vectorChunks.length > 0;
+    const hasVector = vectorSnapshot.vectorChunks.length > 0;
     const policyIntro =
       'Ниже предоставлен внутренний контекст для твоего сведения: граф знаний и выдержки из беседы. ' +
       'Используй эти данные для формирования точного и полного ответа. ' +
@@ -1500,7 +1512,7 @@ Graph hints: ${graphQueryHint}`;
         enabled: summarizationEnabled,
       };
 
-      let vectorText = vectorChunks.join('\n\n');
+      let vectorText = vectorSnapshot.vectorText;
       const rawVectorTextLength = vectorText.length;
       const shouldSummarize =
         !multiStepEnabled &&
@@ -1672,6 +1684,7 @@ Graph hints: ${graphQueryHint}`;
         metrics,
         expiresAt: now + ragCacheTtlMs,
         ...graphSnapshot,
+        ...vectorSnapshot,
       });
       logger.debug(
         `[rag.context.cache.store] conversation=${conversationId} cacheKey=${cacheKey} contextTokens=${metrics.contextTokens} graphTokens=${metrics.graphTokens} vectorTokens=${metrics.vectorTokens} queryTokens=${metrics.queryTokens}`
@@ -1683,6 +1696,7 @@ Graph hints: ${graphQueryHint}`;
       req.ragMetrics = Object.assign({}, req.ragMetrics, metrics);
       req.ragContextTokens = metrics.contextTokens;
       req.cachedGraphContext = graphSnapshot;
+      req.cachedVectorContext = vectorSnapshot;
     }
 
     return {
@@ -1966,11 +1980,12 @@ Graph hints: ${graphQueryHint}`;
     };
 
     const graphSnapshot = req?.cachedGraphContext ?? { graphLines: [], graphQueryHint: '' };
+    const vectorSnapshot = req?.cachedVectorContext ?? { vectorChunks: [], vectorText: '' };
 
     const fallbackEntities = collectFallbackEntities({
       graphHint: graphSnapshot.graphQueryHint,
       graphLines: graphSnapshot.graphLines,
-      vectorChunks,
+      vectorChunks: vectorSnapshot.vectorChunks,
       userMessage: orderedMessages[orderedMessages.length - 1],
     });
     if (!Array.isArray(intentAnalysis?.entities) || intentAnalysis.entities.length === 0) {

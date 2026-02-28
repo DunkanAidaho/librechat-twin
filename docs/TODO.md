@@ -28,7 +28,7 @@
    - Как нельзя: хранить ссылку навсегда, заставлять перезапускать процесс для обновления.
    - Как нужно: использовать TTL и refreshCache().
 
-5. **RAG logger и keep-alive агенты**
+1. **RAG logger и keep-alive агенты**
    - Что сделано: ragLogger для единых логов, httpAgents для axios keep-alive.
    - Как нельзя: логировать хаотично в разных форматах, открывать новые TCP на каждый запрос.
    - Как нужно: использовать ragLogger.* и httpAgents.getKeepAliveAgents().
@@ -154,6 +154,7 @@
   - cascade — multi-step + condense + кэш.
 - Кэш (`RAG_CACHE_ENABLED`) переключается независимо от стратегии.
 - Оркестратор решает, какие кластеры из памяти попадают в prompt; placeholder не попадает напрямую к LLM.
+- Для `multiStepRag.enabled=true` конденсация переносится «на потом»: buildRagContext формирует полный блок (policy intro + graph/vector) без map-reduce, сохраняет сырьё в `req.deferredRagContext`, фиксирует метрики (`rag.context.summarize.deferred=true`), а финальная конденсация происходит после прохождения multi-step пайплайна (через `applyDeferredCondensation`).
 
 **Этап 3 — Расширенные метрики/трейсинг**
 - Для каждого этапа (`history_window`, `memory_ingest`, `rag_fetch`, `multi_step`, `prompt_build`) логируем `rag.pipeline.stage`.
@@ -166,6 +167,7 @@
 - Graph/vector: таймауты завязаны на объём запроса (`timeoutMs = base + contextLength/50`).
 - Режимы управляются через ENV (не магические константы в коде).
 - Для отладки: включаем `TRACE_PIPELINE`, проверяем pipeline-stage.
+- Deferred condensation: если включён multi-step, в prompt попадает полный контекст, но map-reduce запускается позже; при выключенном multi-step суммаризация остаётся inline.
 
 ### 3. Size-aware RAG cache (Оптимизация #6)
 - **Что нужно сделать**
