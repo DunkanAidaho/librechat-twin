@@ -185,6 +185,8 @@ function accumulateTokens(entityState, segment, tokens, length, endpoint, model)
 }
 
 function collectGlobalGraphHints({ graphQueryHint, graphContextLines, maxHints = 6 }) {
+  const safeGraphLines = Array.isArray(graphContextLines) ? graphContextLines : [];
+  const safeHint = typeof graphQueryHint === 'string' ? graphQueryHint : '';
   const hints = [];
   const pushHint = (value) => {
     if (!value || hints.length >= maxHints) {
@@ -197,12 +199,13 @@ function collectGlobalGraphHints({ graphQueryHint, graphContextLines, maxHints =
     hints.push(trimmed.slice(0, 200));
   };
 
-  if (graphQueryHint) {
-    pushHint(graphQueryHint);
+  if (safeHint) {
+    pushHint(safeHint);
   }
 
-  for (const line of graphContextLines || []) {
-    const segments = String(line)
+  for (const rawLine of safeGraphLines) {
+    const line = typeof rawLine === 'string' ? rawLine : '';
+    const segments = line
       .split(/-->/)
       .map((segment) => segment.trim())
       .filter(Boolean);
@@ -240,6 +243,8 @@ async function runMultiStepRag({
     { conversationId, userId, requestId },
     { endpoint, model },
   );
+  const safeGraphLines = Array.isArray(graphContextLines) ? graphContextLines : [];
+  const safeGraphHint = typeof graphQueryHint === 'string' ? graphQueryHint : '';
   if (!config.enabled) {
     return {
       globalContext: baseContext,
@@ -247,6 +252,13 @@ async function runMultiStepRag({
       passesUsed: 0,
       queueStatus: { memory: 'skipped', graph: 'skipped' },
     };
+  }
+
+  if (!safeGraphLines.length && !safeGraphHint) {
+    logger.debug(
+      'rag.multiStep.graph_context.empty',
+      buildContext(baseLogContext, { reason: 'no_graph_data' }),
+    );
   }
 
   const entities = normalizeEntities(intentAnalysis, config.maxEntities);
@@ -258,8 +270,8 @@ async function runMultiStepRag({
 
   const entityStates = entities.map(createEntityState);
   const globalGraphHints = collectGlobalGraphHints({
-    graphQueryHint,
-    graphContextLines,
+    graphQueryHint: safeGraphHint,
+    graphContextLines: safeGraphLines,
     maxHints: config?.graph?.maxHints || 6,
   });
   const queueStatus = { memory: 'skipped', graph: 'skipped' };
