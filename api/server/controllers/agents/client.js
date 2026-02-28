@@ -1512,12 +1512,13 @@ Graph hints: ${graphQueryHint}`;
         enabled: summarizationEnabled,
       };
 
-      let vectorText = vectorSnapshot.vectorText;
-      const rawVectorTextLength = vectorText.length;
+      const vectorTextRaw = vectorSnapshot.vectorText;
+      let vectorTextForPrompt = vectorTextRaw;
+      const rawVectorTextLength = vectorTextRaw.length;
       const shouldSummarize =
         !multiStepEnabled &&
         summarizationEnabled &&
-        vectorText.length > budgetChars;
+        rawVectorTextLength > budgetChars;
 
       if (shouldSummarize) {
         logger.debug(
@@ -1534,12 +1535,12 @@ Graph hints: ${graphQueryHint}`;
             configuredTimeout: summarizationCfg?.timeoutMs,
           });
           
-          vectorText = await withTimeout(
+          vectorTextForPrompt = await withTimeout(
             mapReduceContext({
               req,
               res,
               endpointOption,
-              contextText: vectorText,
+              contextText: vectorTextRaw,
               userQuery: normalizedQuery,
               graphContext: hasGraph
                 ? { lines: graphContextLines, queryHint: graphQueryHint }
@@ -1563,8 +1564,8 @@ Graph hints: ${graphQueryHint}`;
           });
           
           if (summarizeError?.message?.includes('timed out')) {
-            const fallbackLength = Math.min(vectorText.length, budgetChars);
-            vectorText = vectorText.slice(0, fallbackLength);
+            const fallbackLength = Math.min(vectorTextRaw.length, budgetChars);
+            vectorTextForPrompt = vectorTextRaw.slice(0, fallbackLength);
             logger.warn(
               `[rag.context.vector.summarize.fallback] Using truncated text (${fallbackLength} chars) due to timeout`
             );
@@ -1575,7 +1576,7 @@ Graph hints: ${graphQueryHint}`;
       const ragBlock = buildRagBlock({
         policyIntro,
         graphLines: hasGraph ? graphContextLines : [],
-        vectorText,
+        vectorText: vectorTextForPrompt,
       });
 
       let sanitizedBlock = ragBlock;
@@ -1617,8 +1618,8 @@ Graph hints: ${graphQueryHint}`;
         );
       }
 
-      if (vectorText.length) {
-        metrics.vectorTokens = Tokenizer.getTokenCount(vectorText, encoding);
+      if (vectorTextForPrompt.length) {
+        metrics.vectorTokens = Tokenizer.getTokenCount(vectorTextForPrompt, encoding);
 
         if (metrics.vectorTokens) {
           observeSegmentTokens({
@@ -1629,7 +1630,7 @@ Graph hints: ${graphQueryHint}`;
           });
           setContextLength({
             segment: 'rag_vector',
-            length: vectorText.length,
+            length: vectorTextForPrompt.length,
             endpoint: endpointOption?.endpoint || this.options?.endpoint,
             model: endpointOption?.model || this.options?.model,
           });
@@ -1656,7 +1657,7 @@ Graph hints: ${graphQueryHint}`;
           policyIntro,
           graphLines: graphContextLines,
           graphQueryHint,
-          vectorText,
+          vectorText: vectorTextRaw,
           vectorChunks: Array.isArray(vectorChunks) ? [...vectorChunks] : [],
           summarizationConfig: summarizationConfigSnapshot,
           metrics: {
@@ -1979,8 +1980,31 @@ Graph hints: ${graphQueryHint}`;
         }));
     };
 
-    const graphSnapshot = req?.cachedGraphContext ?? { graphLines: [], graphQueryHint: '' };
-    const vectorSnapshot = req?.cachedVectorContext ?? { vectorChunks: [], vectorText: '' };
+    let graphSnapshot = req?.cachedGraphContext ?? { graphLines: [], graphQueryHint: '' };
+    let vectorSnapshot = req?.cachedVectorContext ?? { vectorChunks: [], vectorText: '' };
+
+    const ensureSnapshot = (snapshot, fallback) => {
+      const base = snapshot ?? fallback;
+      return {
+        graphLines: Array.isArray(base.graphLines) ? [...base.graphLines] : [],
+        graphQueryHint: base.graphQueryHint || ''
+      };
+    };
+
+    const ensureVectorSnapshot = (snapshot, fallback) => {
+      const base = snapshot ?? fallback;
+      return {
+        vectorChunks: Array.isArray(base.vectorChunks) ? [...base.vectorChunks] : [],
+        vectorText: base.vectorText || ''
+      };
+    };
+
+    graphSnapshot = ensureSnapshot(req?.cachedGraphContext, graphSnapshot);
+    vectorSnapshot = ensureVectorSnapshot(req?.cachedVectorContext, vectorSnapshot);
+    if (req) {
+      req.cachedGraphContext = graphSnapshot;
+      req.cachedVectorContext = vectorSnapshot;
+    }
 
     const fallbackEntities = collectFallbackEntities({
       graphHint: graphSnapshot.graphQueryHint,
