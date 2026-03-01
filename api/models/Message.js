@@ -1,7 +1,7 @@
 // /opt/open-webui/Message.js
 const { z } = require('zod');
 const { logger } = require('@librechat/data-schemas');
-const configService = require('~/server/services/Config/ConfigService');
+const { configService } = require('../server/services/Config/ConfigService');
 const { createTempChatExpirationDate } = require('@librechat/api');
 const { Message } = require('~/db/models');
 const branchLog = require('~/utils/branchLogger');
