@@ -57,6 +57,7 @@ const MessageHistoryManager = require('~/server/services/agents/MessageHistoryMa
 const { ContextCompressor, MessageCompressorBridge } = require('~/server/services/agents/ContextCompressor');
 const { analyzeIntent } = require('~/server/services/RAG/intentAnalyzer');
 const { runMultiStepRag } = require('~/server/services/RAG/multiStepOrchestrator');
+const { condenseContext: ragCondenseContext } = require('~/server/services/RAG/condense');
 const {
   buildRagBlock,
   replaceRagBlock,
