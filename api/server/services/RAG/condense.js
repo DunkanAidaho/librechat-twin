@@ -1,7 +1,7 @@
 'use strict';
 const crypto = require('crypto');
 const axios = require('axios');
-const { configService } = require('../../Config/ConfigService');
+const { configService } = require('../Config/ConfigService');
 const { getLogger } = require('~/utils/logger');
 const { buildContext } = require('~/utils/logContext');
 
@@ -19,9 +19,9 @@ async function getPLimit() {
 
 const { getRedisClient } = require('../../../utils/rag_redis');
 
-const ragConfig = config.getSection('rag');
-const featuresConfig = config.getSection('features');
-const coreConfig = config.getSection('core');
+const ragConfig = configService.getSection('rag');
+const featuresConfig = configService.getSection('features');
+const coreConfig = configService.getSection('core');
 
 const condenseConfig = ragConfig.condense;
 const ragContextConfig = ragConfig.context;
