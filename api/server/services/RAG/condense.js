@@ -1,7 +1,7 @@
 'use strict';
 const crypto = require('crypto');
 const axios = require('axios');
-const { configService } = require('../Config/ConfigService');
+const configService = require('../Config/ConfigService');
 const { getLogger } = require('~/utils/logger');
 const { buildContext } = require('~/utils/logContext');
 

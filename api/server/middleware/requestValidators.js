@@ -1,7 +1,7 @@
 'use strict';
 
 const { getLogger } = require('~/utils/logger');
-const { configService } = require('../services/Config/ConfigService');
+const configService = require('../services/Config/ConfigService');
 
 /**
  * @typedef {import('express').Request} Request

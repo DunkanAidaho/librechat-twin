@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 const EventEmitter = require("events");
 const { EventService } = require("../Events/EventService");
-const { configService } = require("../Config/ConfigService");
+const configService = require("../Config/ConfigService");
 const { enqueueMemoryTasks } = require("../RAG/memoryQueue");
 const { incLongTextGraphChunk } = require("../../../utils/metrics");
 const { runWithResilience } = require("../../utils/resilience");

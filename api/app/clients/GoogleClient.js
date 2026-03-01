@@ -32,7 +32,7 @@ const {
   truncateText,
 } = require('./prompts');
 const BaseClient = require('./BaseClient');
-const { configService } = require('../../server/services/Config/ConfigService');
+const configService = require('../../server/services/Config/ConfigService');
 const logger = getLogger('GoogleClient');
 
 // Загрузка конфигурации Google провайдера

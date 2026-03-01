@@ -1,6 +1,6 @@
 const { getLogger } = require('../../../utils/logger');
 const { buildContext, getRequestContext } = require('../../../utils/logContext');
-const { configService } = require('../Config/ConfigService');
+const configService = require('../Config/ConfigService');
 
 /**
  * Базовый класс для всех сервисов

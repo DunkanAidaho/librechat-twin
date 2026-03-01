@@ -6,7 +6,7 @@ const {
   incMemoryQueueSkipped,
   incMemoryQueueToolsGatewayFailure,
 } = require('~/utils/metrics');
-const { configService } = require('../Config/ConfigService');
+const configService = require('../Config/ConfigService');
 const { getLogger } = require('~/utils/logger');
 const { buildContext } = require('~/utils/logContext');
 
