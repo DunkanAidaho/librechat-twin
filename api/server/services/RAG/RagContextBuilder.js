@@ -3,7 +3,7 @@ const { ValidationError } = require('../Base/ErrorHandler');
 const { buildRagBlock, replaceRagBlock } = require('./RagContextManager');
 const { analyzeIntent } = require('./intentAnalyzer');
 const { runMultiStepRag } = require('./multiStepOrchestrator');
-const { fetchGraphContext } = require('./graphContext');
+const { fetchGraphContext } = require('../agents/context/helpers');
 
 /**
  * Сервис для построения RAG контекста
