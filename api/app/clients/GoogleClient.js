@@ -33,11 +33,29 @@ const {
 } = require('./prompts');
 const BaseClient = require('./BaseClient');
 const { configService } = require('../../server/services/Config/ConfigService');
+const logger = getLogger('GoogleClient');
 
-const loc = configService.get('providers.google.location', 'us-central1');
+// Загрузка конфигурации Google провайдера
+let loc;
+try {
+  loc = configService.get('providers.google.location', 'us-central1');
+  logger.debug('Loaded Google provider location', { location: loc });
+} catch (err) {
+  logger.error('Failed to load Google provider location, using default', {
+    error: err.message,
+    defaultLocation: 'us-central1'
+  });
+  loc = 'us-central1';
+}
+
 const publisher = 'google';
 const endpointPrefix =
   loc === 'global' ? 'aiplatform.googleapis.com' : `${loc}-aiplatform.googleapis.com`;
+
+logger.debug('Initialized Google API endpoint', {
+  location: loc,
+  endpointPrefix
+});
 
 const settings = endpointSettings[EModelEndpoint.google];
 const EXCLUDED_GENAI_MODELS = /gemini-(?:1\.0|1-0|pro)/;

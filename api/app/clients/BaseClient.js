@@ -3,7 +3,7 @@ const fetch = require('node-fetch');
 const { getLogger } = require('~/utils/logger');
 const { buildContext, getRequestContext } = require('~/utils/logContext');
 const { getBalanceConfig, Tokenizer, TextStream } = require('@librechat/api');
-const { configService } = require('../../server/services/Config/ConfigService');
+const { configService, ConfigService } = require('../../server/services/Config/ConfigService');
 const {
   supportsBalanceCheck,
   isAgentsEndpoint,
@@ -19,14 +19,68 @@ const { checkBalance } = require('~/models/balanceMethods');
 const { truncateToolCallOutputs } = require('./prompts');
 const { getFiles } = require('~/models/File');
 const { retryAsync, withTimeout } = require('../../utils/async');
-const baseClientConfig = configService.getSection('clients').base;
-const historyConfig = configService.get('memory.history', {});
-const DEFAULT_CLIENT_TIMEOUT_MS = baseClientConfig.timeoutMs;
-const DEFAULT_CLIENT_RETRY_COUNT = baseClientConfig.retryCount;
-const DEFAULT_CLIENT_RETRY_MIN_DELAY_MS = baseClientConfig.retryMinDelayMs;
-const DEFAULT_CLIENT_RETRY_MAX_DELAY_MS = baseClientConfig.retryMaxDelayMs;
-const DEFAULT_CLIENT_RETRY_FACTOR = baseClientConfig.retryFactor;
-const DEFAULT_CLIENT_RETRY_JITTER = baseClientConfig.retryJitter;
+
+// Инициализируем логгер для BaseClient
+const logger = getLogger('BaseClient');
+
+logger.debug('Initializing BaseClient configuration');
+
+// Загрузка базовой конфигурации клиента
+let baseClientConfig = {};
+try {
+  const clientsConfig = configService.getSection('clients');
+  logger.debug('Loaded clients config section', {
+    hasConfig: !!clientsConfig,
+    sections: Object.keys(clientsConfig || {})
+  });
+  
+  if (clientsConfig && clientsConfig.base) {
+    baseClientConfig = clientsConfig.base;
+    logger.debug('Loaded base client config', {
+      timeoutMs: baseClientConfig.timeoutMs,
+      retryCount: baseClientConfig.retryCount
+    });
+  } else {
+    logger.warn('Base client config not found in clients section, using defaults');
+  }
+} catch (err) {
+  logger.error('Failed to load base client config', {
+    error: err.message,
+    stack: err.stack
+  });
+}
+
+// Загрузка конфигурации истории
+let historyConfig = {};
+try {
+  historyConfig = configService.get('memory.history', {});
+  logger.debug('Loaded history config', {
+    hasConfig: !!historyConfig,
+    keys: Object.keys(historyConfig)
+  });
+} catch (err) {
+  logger.error('Failed to load history config', {
+    error: err.message,
+    stack: err.stack
+  });
+}
+
+// Установка значений по умолчанию с логированием
+const DEFAULT_CLIENT_TIMEOUT_MS = baseClientConfig.timeoutMs || 30000;
+const DEFAULT_CLIENT_RETRY_COUNT = baseClientConfig.retryCount || 3;
+const DEFAULT_CLIENT_RETRY_MIN_DELAY_MS = baseClientConfig.retryMinDelayMs || 1000;
+const DEFAULT_CLIENT_RETRY_MAX_DELAY_MS = baseClientConfig.retryMaxDelayMs || 5000;
+const DEFAULT_CLIENT_RETRY_FACTOR = baseClientConfig.retryFactor || 2;
+const DEFAULT_CLIENT_RETRY_JITTER = baseClientConfig.retryJitter || true;
+
+logger.debug('Initialized client defaults', {
+  timeoutMs: DEFAULT_CLIENT_TIMEOUT_MS,
+  retryCount: DEFAULT_CLIENT_RETRY_COUNT,
+  retryMinDelayMs: DEFAULT_CLIENT_RETRY_MIN_DELAY_MS,
+  retryMaxDelayMs: DEFAULT_CLIENT_RETRY_MAX_DELAY_MS,
+  retryFactor: DEFAULT_CLIENT_RETRY_FACTOR,
+  retryJitter: DEFAULT_CLIENT_RETRY_JITTER
+});
 
 /**
  * Возвращает положительное целочисленное значение, либо значение по умолчанию.

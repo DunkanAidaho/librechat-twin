@@ -5,8 +5,20 @@ const { getLogger } = require('~/utils/logger');
 const { buildContext } = require('~/utils/logContext');
 const { Tokenizer } = require('@librechat/api');
 
-const DEFAULT_ENCODING = configService.get('agents.encoding.defaultTokenizerEncoding', 'o200k_base');
+// Загрузка конфигурации кодировки
+let DEFAULT_ENCODING;
 const logger = getLogger('clients.instructions');
+
+try {
+  DEFAULT_ENCODING = configService.get('agents.encoding.defaultTokenizerEncoding', 'o200k_base');
+  logger.debug('Loaded default tokenizer encoding', { encoding: DEFAULT_ENCODING });
+} catch (err) {
+  logger.error('Failed to load default tokenizer encoding, using fallback', {
+    error: err.message,
+    fallbackEncoding: 'o200k_base'
+  });
+  DEFAULT_ENCODING = 'o200k_base';
+}
 
 /**
  * Преобразует произвольный формат инструкций в объект с содержимым и числом токенов.

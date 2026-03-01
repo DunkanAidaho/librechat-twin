@@ -55,7 +55,25 @@ function delayBeforeRetry(attempts, baseDelay = 1000) {
 
 const tokenEventTypes = new Set(['message_start', 'message_delta']);
 const { legacy } = anthropicSettings;
-const anthropicProviderConfig = configService.getSection('providers').anthropic;
+
+// Загрузка конфигурации Anthropic провайдера
+let anthropicProviderConfig = {};
+try {
+  const providers = configService.getSection('providers');
+  if (!providers || !providers.anthropic) {
+    throw new Error('Anthropic provider config not found');
+  }
+  anthropicProviderConfig = providers.anthropic;
+  logger.debug('Loaded Anthropic provider config', {
+    hasApiKey: !!anthropicProviderConfig.apiKey,
+    configKeys: Object.keys(anthropicProviderConfig)
+  });
+} catch (err) {
+  logger.error('Failed to load Anthropic provider config', {
+    error: err.message,
+    stack: err.stack
+  });
+}
 
 class AnthropicClient extends BaseClient {
   constructor(apiKey, options = {}) {

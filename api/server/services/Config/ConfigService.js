@@ -155,14 +155,39 @@ class ConfigService {
   }
 
   getValue(path) {
-    if (!path) return undefined;
+    if (!path) {
+      log.warn('[ConfigService.getValue] Called with empty path');
+      return undefined;
+    }
+    
+    log.debug('[ConfigService.getValue] Accessing config path', { path });
     const parts = path.split('.');
     let current = this.config;
+    
     for (const part of parts) {
-      if (current === undefined || current === null) return undefined;
+      if (current === undefined || current === null) {
+        log.warn('[ConfigService.getValue] Path resolution failed', { path, failedAt: part });
+        return undefined;
+      }
       current = current[part];
     }
+    
+    log.debug('[ConfigService.getValue] Resolved value', { path, value: current });
     return current;
+  }
+
+  /**
+   * Получает значение из конфигурации с возможностью указать значение по умолчанию
+   * @param {string} path - Путь к значению
+   * @param {any} defaultValue - Значение по умолчанию
+   * @returns {any} Значение из конфигурации или значение по умолчанию
+   */
+  get(path, defaultValue = undefined) {
+    log.debug('[ConfigService.get] Getting config value', { path, defaultValue });
+    const value = this.getValue(path);
+    const result = value === undefined ? defaultValue : value;
+    log.debug('[ConfigService.get] Resolved config value', { path, value: result });
+    return result;
   }
 
   validate(schema) {
@@ -181,11 +206,11 @@ class ConfigService {
   }
 }
 
-// Создаем и экспортируем единственный экземпляр ConfigService
+// Создаем единственный экземпляр ConfigService
 const configService = new ConfigService();
 
-// Экспортируем как объект для совместимости с другими сервисами
+// Экспортируем класс и инстанс
 module.exports = {
-  configService,
-  ConfigService
+  ConfigService,
+  configService
 };
