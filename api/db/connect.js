@@ -39,6 +39,7 @@ function buildMongoOptions(mongoConfig) {
 
 async function connectDb() {
   const mongoConfig = configService.getSection('mongo');
+  logger.info('[Mongo] ENV MONGO_URI present', { present: Boolean(process.env.MONGO_URI) });
   if (!mongoConfig.uri) {
     throw new Error('MONGO_URI is required but not configured.');
   }

@@ -68,6 +68,7 @@ class ConfigService {
     try {
       const path = require('path');
       const configPath = process.env.CONFIG_PATH || './config/librechat.yaml';
+      log.info(`[ConfigService] ENV CONFIG_PATH: ${process.env.CONFIG_PATH || '(not set)'}`);
       const resolvedPath = path.resolve(configPath);
       const projectRoot = path.resolve(__dirname, '../../../../');
       const rootConfigPath = path.join(projectRoot, 'config/librechat.yaml');
