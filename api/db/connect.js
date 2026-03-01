@@ -38,7 +38,7 @@ function buildMongoOptions(mongoConfig) {
 }
 
 async function connectDb() {
-  const mongoConfig = config.getSection('mongo');
+  const mongoConfig = configService.getSection('mongo');
   if (!mongoConfig.uri) {
     throw new Error('MONGO_URI is required but not configured.');
   }

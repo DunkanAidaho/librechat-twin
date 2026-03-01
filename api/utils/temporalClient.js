@@ -9,11 +9,11 @@ const { buildContext } = require('~/utils/logContext');
 const logger = getLogger('utils.temporalClient');
 
 function getQueueConfig() {
-  return config.getSection('queues');
+  return configService.getSection('queues');
 }
 
 function isNatsEnabled() {
-  return config.get('nats.enabled') === true;
+  return configService.get('nats.enabled') === true;
 }
 
 function resolveSubject(queueConfig, subjectKey) {

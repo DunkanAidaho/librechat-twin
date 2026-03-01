@@ -43,21 +43,21 @@ const { makeIngestKey } = require('~/server/utils/messageUtils');
 
 const featuresConfig = configService.getSection('features');
 const ragConfig = configService.getSection('rag');
-const ragContextConfig = ragConfig.context;
-const agentsConfig = configService.getSection('agents');
-const agentsResilienceConfig = agentsConfig.resilience;
-const agentsThresholdsConfig = agentsConfig.thresholds;
-const summariesConfig = configService.getSection('summaries');
-const memoryConfig = configService.getSection('memory');
+const ragContextConfig = ragConfig.context || {};
+const agentsConfig = configService.getSection('agents') || {};
+const agentsResilienceConfig = agentsConfig.resilience || {};
+const agentsThresholdsConfig = agentsConfig.thresholds || {};
+const summariesConfig = configService.getSection('summaries') || {};
+const memoryConfig = configService.getSection('memory') || {};
 
 const HEADLESS_STREAM = Boolean(featuresConfig.headlessStream);
-const MAX_USER_MSG_TO_MODEL_CHARS = agentsThresholdsConfig.maxUserMessageChars;
+const MAX_USER_MSG_TO_MODEL_CHARS = agentsThresholdsConfig.maxUserMessageChars || 0;
 const MAX_TEXT_SIZE = configService.getNumber('memory.longTextMaxChars', 500000);
-const GOOGLE_NOSTREAM_THRESHOLD = agentsThresholdsConfig.googleNoStreamThreshold;
+const GOOGLE_NOSTREAM_THRESHOLD = agentsThresholdsConfig.googleNoStreamThreshold || 0;
 
-const SUMMARIZATION_THRESHOLD = summariesConfig.threshold;
-const MAX_MESSAGES_PER_SUMMARY = summariesConfig.maxMessagesPerSummary;
-const SUMMARIZATION_LOCK_TTL = summariesConfig.lockTtlSeconds;
+const SUMMARIZATION_THRESHOLD = summariesConfig.threshold || 0;
+const MAX_MESSAGES_PER_SUMMARY = summariesConfig.maxMessagesPerSummary || 0;
+const SUMMARIZATION_LOCK_TTL = summariesConfig.lockTtlSeconds || 0;
 const TEMPORAL_SUMMARY_REASON = 'summary_queue';
 const TEMPORAL_GRAPH_REASON = 'graph_queue';
 
@@ -1339,7 +1339,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
  */
 async function triggerSummarization(req, conversationId) {
   const userId = req.user.id;
-  const summariesConfig = config.getSection('summaries');
+  const summariesConfig = configService.getSection('summaries') || {};
   const MAX_PAYLOAD_BYTES = summariesConfig.maxPayloadBytes || 900000;
 
   if (!acquireSummarizationLock(conversationId)) {

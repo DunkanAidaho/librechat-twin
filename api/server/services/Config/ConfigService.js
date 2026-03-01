@@ -67,9 +67,19 @@ class ConfigService {
   loadConfig() {
     try {
       const configPath = process.env.CONFIG_PATH || './config/librechat.yaml';
+      const resolvedPath = require('path').resolve(configPath);
+      log.debug(`[ConfigService] CWD: ${process.cwd()}`);
+      log.debug(`[ConfigService] Config path: ${configPath}`);
+      log.debug(`[ConfigService] Resolved path: ${resolvedPath}`);
+      log.debug(`[ConfigService] Exists (relative): ${fs.existsSync(configPath)}`);
+      log.debug(`[ConfigService] Exists (resolved): ${fs.existsSync(resolvedPath)}`);
+
       if (fs.existsSync(configPath)) {
         this.config = yaml.load(fs.readFileSync(configPath, 'utf8')) || {};
         log.info('Configuration loaded successfully');
+      } else if (fs.existsSync(resolvedPath)) {
+        this.config = yaml.load(fs.readFileSync(resolvedPath, 'utf8')) || {};
+        log.info('Configuration loaded successfully (resolved path)');
       } else {
         log.warn(`Config file not found at ${configPath}, using defaults`);
       }
