@@ -1,6 +1,6 @@
 'use strict';
 
-const { configService } = require('~/server/services/Config/ConfigService');
+const configService = require('~/server/services/Config/ConfigService');
 
 let memoized;
 let lastLoadedEnvSnapshot = null;

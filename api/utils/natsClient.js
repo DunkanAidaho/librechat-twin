@@ -3,7 +3,7 @@
 const { connect, StringCodec, StorageType } = require('nats');
 const { logger } = require('@librechat/data-schemas');
 const { retryAsync } = require('~/utils/async');
-const { configService } = require('~/server/services/Config/ConfigService');
+const configService = require('~/server/services/Config/ConfigService');
 
 const sc = StringCodec();
 

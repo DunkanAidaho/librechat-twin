@@ -1,6 +1,6 @@
 const { isEnabled } = require('@librechat/api');
 const { logger } = require('@librechat/data-schemas');
-const { configService } = require('~/server/services/Config/ConfigService');
+const configService = require('~/server/services/Config/ConfigService');
 const { EModelEndpoint, CacheKeys, Constants, googleSettings } = require('librechat-data-provider');
 const getLogStores = require('~/cache/getLogStores');
 const initializeClient = require('./initialize');

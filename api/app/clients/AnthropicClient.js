@@ -34,7 +34,7 @@ const {
 const { spendTokens, spendStructuredTokens } = require('~/models/spendTokens');
 const { encodeAndFormat } = require('~/server/services/Files/images/encode');
 const BaseClient = require('./BaseClient');
-const { configService } = require('~/server/services/Config/ConfigService');
+const configService = require('~/server/services/Config/ConfigService');
 
 const logger = getLogger('clients.anthropic');
 

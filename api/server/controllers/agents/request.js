@@ -15,7 +15,7 @@ const {
 const { EventService } = require('../../services/Events/EventService');
 const { getLogger } = require('~/utils/logger');
 const { buildContext, getRequestContext } = require('~/utils/logContext');
-const { configService } = require('~/server/services/Config/ConfigService');
+const configService = require('~/server/services/Config/ConfigService');
 const { clearDedupeKey } = require('~/server/services/Deduplication/clearDedupeKey');
 const { runWithResilience, normalizeLabelValue } = require('~/server/utils/resilience');
 const { canWrite, isResponseFinalized, makeDetachableRes } = require('~/server/utils/responseUtils');

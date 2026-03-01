@@ -1,5 +1,5 @@
 const { createLogger, format, transports } = require('winston');
-const { configService } = require('../server/services/Config/ConfigService');
+const configService = require('../server/services/Config/ConfigService');
 const { combine, timestamp, printf, colorize } = format;
 
 // Получаем конфигурацию логирования

@@ -1,7 +1,7 @@
 // /opt/open-webui/client.js - Финальная версия с исправленной логикой индексации и RAG через tools-gateway
 require('events').EventEmitter.defaultMaxListeners = 100;
 const { getLogger } = require('~/utils/logger');
-const { configService } = require('~/server/services/Config/ConfigService');
+const configService = require('~/server/services/Config/ConfigService');
 const axios = require('axios');
 const { getCondenseProvidersPreview } = require('~/server/services/RAG/condense');
 const { DynamicStructuredTool } = require('@langchain/core/tools');

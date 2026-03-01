@@ -3,7 +3,7 @@
 const LRU = require('lru-cache');
 const { StringCodec, KVOperation = {} } = require('nats');
 const { logger } = require('@librechat/data-schemas');
-const { configService } = require('~/server/services/Config/ConfigService');
+const configService = require('~/server/services/Config/ConfigService');
 const {
   getJetStream,
   getOrCreateKV,
