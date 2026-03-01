@@ -1034,7 +1034,7 @@ class AgentClient extends BaseClient {
     res,
     endpointOption,
   }) {
-    ragCacheTtlMs = Math.max(Number(runtimeCfg.ragCacheTtl) * 1000, 0);
+    const ragCacheTtlMs = Math.max(Number(runtimeCfg.ragCacheTtl) * 1000, 0);
     const conversationId = this.conversationId;
     const userMessage = orderedMessages.slice(-1)[0];
     const userQuery = userMessage?.text ?? '';
@@ -1646,7 +1646,7 @@ Graph hints: ${graphQueryHint}`;
       dontShrinkLastN: runtimeCfg?.history?.dontShrinkLastN,
       historyTokenBudget: runtimeCfg?.history?.tokenBudget ?? configService.getNumber('memory.history.tokenBudget', 0),
     });
-    ragCacheTtlMs = Math.max(Number(runtimeCfg?.ragCacheTtl) * 1000, 0);
+    const ragCacheTtlMs = Math.max(Number(runtimeCfg?.ragCacheTtl) * 1000, 0);
     const shouldCompressHistory = Boolean(historyCompressionCfg?.enabled);
     const endpointOption = this.options?.req?.body?.endpointOption ?? this.options?.endpointOption ?? {};
     logger.debug({
