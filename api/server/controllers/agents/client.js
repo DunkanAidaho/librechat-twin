@@ -54,8 +54,9 @@ const { loadAgent } = require('~/models/Agent');
 const { getMCPManager } = require('~/config');
 const runtimeMemoryConfig = require('~/utils/memoryConfig');
 const MessageHistoryManager = require('~/server/services/agents/MessageHistoryManager');
-const { HistoryTrimmer } = require('~/server/services/agents/historyTrimmer');
+const { HistoryTrimmer, ensureTokenCount } = require('~/server/services/agents/historyTrimmer');
 const { ContextCompressor, MessageCompressorBridge } = require('~/server/services/agents/ContextCompressor');
+const { PromptBudgetManager } = require('~/server/services/agents/PromptBudgetManager');
 const { analyzeIntent } = require('~/server/services/RAG/intentAnalyzer');
 const { runMultiStepRag } = require('~/server/services/RAG/multiStepOrchestrator');
 const {
@@ -954,6 +955,7 @@ class AgentClient extends BaseClient {
     this.usage;
     this.indexTokenCountMap = {};
     this.processMemory;
+    this.promptBudgetManager = new PromptBudgetManager();
     this.historyManager = new MessageHistoryManager({
       ingestedHistory: IngestedHistory,
       get config() {
@@ -1570,10 +1572,11 @@ Graph hints: ${graphQueryHint}`;
         }
       }
 
+      const blockVectorText = multiStepEnabled ? vectorTextRaw : vectorTextForPrompt;
       const ragBlock = buildRagBlock({
         policyIntro,
         graphLines: hasGraph ? graphContextLines : [],
-        vectorText: vectorTextForPrompt,
+        vectorText: blockVectorText,
       });
 
       let sanitizedBlock = ragBlock;
@@ -1643,26 +1646,29 @@ Graph hints: ${graphQueryHint}`;
         : metrics.graphTokens + metrics.vectorTokens;
 
       if (multiStepEnabled && req) {
-        logger.info('rag.context.summarize.deferred', {
+        logger.info('[rag.context]', {
           conversationId,
-          deferred: true,
+          'rag.context.summarize.deferred': true,
           graphLines: graphContextLines.length,
           vectorChunks: vectorChunks.length,
           reason: 'multi_step_enabled',
         });
-        setDeferredContext(req, {
+
+        const deferredSnapshot = {
           policyIntro,
-          graphLines: graphContextLines,
+          graphLines: Array.isArray(graphContextLines) ? [...graphContextLines] : [],
           graphQueryHint,
           vectorText: vectorTextRaw,
           vectorChunks: Array.isArray(vectorChunks) ? [...vectorChunks] : [],
-          summarizationConfig: summarizationConfigSnapshot,
+          summarizationConfig: { ...summarizationConfigSnapshot },
           metrics: {
             graphTokens: metrics.graphTokens,
             vectorTokens: metrics.vectorTokens,
             contextTokens: metrics.contextTokens,
           },
-        });
+        };
+
+        setDeferredContext(req, deferredSnapshot);
       }
 
       logger.info(
@@ -1705,6 +1711,185 @@ Graph hints: ${graphQueryHint}`;
     };
   }
 
+  estimateTextTokens(text) {
+    if (!text) {
+      return 0;
+    }
+    try {
+      return Tokenizer.getTokenCount(text, this.getEncoding());
+    } catch (error) {
+      logger.warn('[prompt.tokens.estimate]', {
+        conversationId: this.conversationId,
+        message: error?.message,
+      });
+      return String(text).length;
+    }
+  }
+
+  calculatePromptFootprint({ instructionsTokens = 0, ragTokens = 0, messages = [] } = {}) {
+    const encoding = this.getEncoding();
+    let messageTokens = 0;
+    for (const message of Array.isArray(messages) ? messages : []) {
+      messageTokens += ensureTokenCount(message, encoding) || 0;
+    }
+    const total = instructionsTokens + ragTokens + messageTokens;
+    return {
+      total,
+      messageTokens,
+    };
+  }
+
+  async trimHistoryForBudget({
+    orderedMessages = [],
+    tokenBudget = Infinity,
+    historyCompressionCfg = {},
+    dontShrinkLastN = 0,
+    computeImportanceScore,
+  } = {}) {
+    const encoding = this.getEncoding();
+    const compressor = historyCompressionCfg?.enabled
+      ? new MessageCompressorBridge({ reduction: historyCompressionCfg?.layer2Ratio ?? 0.25 })
+      : null;
+
+    const trimmer = new HistoryTrimmer({
+      tokenizerEncoding: encoding,
+      keepLastN: Math.max(1, dontShrinkLastN || 1),
+      layer1Ratio: historyCompressionCfg?.layer1Ratio,
+      layer2Ratio: historyCompressionCfg?.layer2Ratio,
+      contextHeadroom: 0,
+      importanceScorer: computeImportanceScore || ((msg) => msg?.importance ?? 0),
+      compressor,
+    });
+
+    const layers = trimmer.buildLayers(orderedMessages);
+    const compressedLayers = await trimmer.compressLayers(layers);
+    const selection = trimmer.selectWithinBudget(compressedLayers, Math.max(0, tokenBudget));
+    if (selection.keptMessages.length === 0 && orderedMessages.length) {
+      return [orderedMessages[orderedMessages.length - 1]];
+    }
+    return selection.keptMessages;
+  }
+
+  async enforcePromptBudget({
+    orderedMessages = [],
+    instructionsTokens = 0,
+    ragTokens = 0,
+    promptBudget = 0,
+    historyCompressionCfg = {},
+    dontShrinkLastN = 0,
+    computeImportanceScore,
+  } = {}) {
+    const budgetLimit = Number(promptBudget) || 0;
+    const rag = Math.max(0, Number(ragTokens) || 0);
+    const instr = Math.max(0, Number(instructionsTokens) || 0);
+
+    if (budgetLimit <= 0) {
+      const footprint = this.calculatePromptFootprint({
+        instructionsTokens: instr,
+        ragTokens: rag,
+        messages: orderedMessages,
+      });
+      return { messages: orderedMessages, totalTokens: footprint.total, applied: false, attempts: 0 };
+    }
+
+    let currentMessages = orderedMessages;
+    let preservedFinalUser = null;
+    if (currentMessages.length) {
+      const lastMessage = currentMessages[currentMessages.length - 1];
+      if (lastMessage?.role === 'user') {
+        preservedFinalUser = lastMessage;
+        currentMessages = currentMessages.slice(0, -1);
+      }
+    }
+    const buildFinalMessages = () => (preservedFinalUser ? currentMessages.concat(preservedFinalUser) : currentMessages);
+
+    const computeFootprintFor = (messages) =>
+      this.calculatePromptFootprint({
+        instructionsTokens: instr,
+        ragTokens: rag,
+        messages,
+      });
+
+    let footprint = computeFootprintFor(buildFinalMessages());
+
+    if (footprint.total <= budgetLimit) {
+      const finalMessages = buildFinalMessages();
+      return {
+        messages: finalMessages,
+        totalTokens: footprint.total,
+        applied: false,
+        attempts: 0,
+        finalUserPreserved: Boolean(preservedFinalUser),
+      };
+    }
+
+    const retryPolicy = this.promptBudgetManager.getRetryPolicy();
+    const reduction = Math.max(0, Math.min(1, Number(retryPolicy.maxReduction) || 0));
+    let attempts = 0;
+    let applied = false;
+    let historyBudget = Math.max(0, budgetLimit - instr - rag);
+
+    while (footprint.total > budgetLimit && attempts < retryPolicy.maxAttempts && currentMessages.length) {
+      attempts += 1;
+      applied = true;
+
+      let trimmed = await this.trimHistoryForBudget({
+        orderedMessages: currentMessages,
+        tokenBudget: historyBudget,
+        historyCompressionCfg,
+        dontShrinkLastN,
+        computeImportanceScore,
+      });
+
+      if (!trimmed.length && preservedFinalUser) {
+        logger.warn('[prompt.budget.guard]', {
+          conversationId: this.conversationId,
+          reason: 'trim_would_drop_final_user',
+          remainingBudget: historyBudget,
+        });
+      }
+
+      currentMessages = trimmed;
+      footprint = computeFootprintFor(buildFinalMessages());
+
+      if (footprint.total <= budgetLimit) {
+        break;
+      }
+
+      if (reduction <= 0) {
+        break;
+      }
+
+      historyBudget = Math.max(0, Math.floor(historyBudget * (1 - reduction)));
+      if (historyBudget === 0) {
+        break;
+      }
+    }
+
+    const finalMessages = buildFinalMessages();
+
+    if (footprint.total > budgetLimit) {
+      const error = new Error('Prompt budget exceeded after preserving final user message');
+      error.code = 'CONTEXT_BUDGET_EXCEEDED';
+      error.meta = {
+        conversationId: this.conversationId,
+        promptBudget: budgetLimit,
+        totalTokens: footprint.total,
+        attempts,
+        finalUserPreserved: Boolean(preservedFinalUser),
+      };
+      throw error;
+    }
+
+    return {
+      messages: finalMessages,
+      totalTokens: footprint.total,
+      applied,
+      attempts,
+      finalUserPreserved: Boolean(preservedFinalUser),
+    };
+  }
+
   async buildMessages(
     messages,
     parentMessageId,
@@ -1735,6 +1920,10 @@ Graph hints: ${graphQueryHint}`;
     });
 
     const historyCompressionCfg = runtimeCfg?.historyCompression ?? {};
+    const { headroom, rawLimit, promptBudget } = this.promptBudgetManager.resolveMaxPromptTokens(
+      this.maxContextTokens,
+      runtimeCfg?.tokenLimits?.maxPromptTokens,
+    );
     const historyCfg = runtimeCfg?.history ?? {};
     const dontShrinkLastN = Number.isFinite(historyCfg?.dontShrinkLastN)
       ? Math.max(historyCfg.dontShrinkLastN, 0)
@@ -1818,7 +2007,7 @@ Graph hints: ${graphQueryHint}`;
 
     let historyTrimmer = null;
     let historyTokenBudget = 0;
-    const headroom = Number(historyCompressionCfg?.contextHeadroom) || 0;
+    const historyHeadroom = Number(historyCompressionCfg?.contextHeadroom) || 0;
     const ragTokens = Number(req?.ragContextTokens) || 0;
     const instructionsTokensEstimate = tokenize(systemContent);
     const maxContextTokens =
@@ -1828,10 +2017,9 @@ Graph hints: ${graphQueryHint}`;
       0;
 
     if (historyCompressionCfg?.enabled) {
-      historyTokenBudget =
-        maxContextTokens - ragTokens - instructionsTokensEstimate;
+        historyTokenBudget = promptBudget - ragTokens - instructionsTokensEstimate;
 
-      const availableBudget = historyTokenBudget - headroom;
+      const availableBudget = historyTokenBudget - historyHeadroom;
 
       if (availableBudget > 0) {
         historyTrimmer = new HistoryTrimmer({
@@ -1839,14 +2027,14 @@ Graph hints: ${graphQueryHint}`;
           keepLastN: dontShrinkLastN || 6,
           layer1Ratio: historyCompressionCfg.layer1Ratio,
           layer2Ratio: historyCompressionCfg.layer2Ratio,
-          contextHeadroom: headroom,
+          contextHeadroom: historyHeadroom,
           importanceScorer: computeImportanceScore,
           compressor: new MessageCompressorBridge({ reduction: historyCompressionCfg.layer2Ratio ?? 0.25 }),
         });
         logger.info('[contextCompression.enabled]', {
           conversationId: this.conversationId,
           budgetTokens: availableBudget,
-          headroom,
+          headroom: historyHeadroom,
         });
       } else {
         logger.warn('[contextCompression.disabled.budget]', {
@@ -1854,7 +2042,7 @@ Graph hints: ${graphQueryHint}`;
           budgetTokens: availableBudget,
           ragTokens,
           instructionsTokens: instructionsTokensEstimate,
-          headroom,
+          headroom: historyHeadroom,
           maxContextTokens,
         });
       }
@@ -1875,7 +2063,7 @@ Graph hints: ${graphQueryHint}`;
         dontShrinkLastN,
         trimmer: historyTrimmer,
         tokenBudget: historyTokenBudget,
-        contextHeadroom: headroom,
+        contextHeadroom: historyHeadroom,
       });
 
       orderedMessages = modifiedMessages;
@@ -2231,6 +2419,51 @@ Graph hints: ${graphQueryHint}`;
     let payload;
     let promptTokens;
     let tokenCountMap = {};
+
+    let promptBudgetResult = null;
+    try {
+      const preliminaryInstructionsTokens = this.estimateTextTokens(systemContent);
+      promptBudgetResult = await this.enforcePromptBudget({
+        orderedMessages,
+        instructionsTokens: preliminaryInstructionsTokens,
+        ragTokens,
+        promptBudget,
+        historyCompressionCfg,
+        dontShrinkLastN,
+        computeImportanceScore,
+      });
+
+      if (promptBudgetResult?.applied) {
+        orderedMessages = promptBudgetResult.messages;
+        logger.info('[prompt.budget.trim]', {
+          conversationId: this.conversationId,
+          totalTokens: promptBudgetResult.totalTokens,
+          attempts: promptBudgetResult.attempts,
+          promptBudget,
+          finalUserPreserved: promptBudgetResult.finalUserPreserved,
+        });
+      } else {
+        logger.debug('[prompt.budget.ok]', {
+          conversationId: this.conversationId,
+          totalTokens: promptBudgetResult?.totalTokens,
+          promptBudget,
+          finalUserPreserved: promptBudgetResult?.finalUserPreserved,
+        });
+      }
+
+      if (req && promptBudgetResult) {
+        req.promptBudget = {
+          totalTokens: promptBudgetResult.totalTokens,
+          applied: promptBudgetResult.applied,
+          attempts: promptBudgetResult.attempts,
+        };
+      }
+    } catch (promptBudgetError) {
+      logger.error('[prompt.budget.enforce.error]', {
+        conversationId: this.conversationId,
+        message: promptBudgetError?.message,
+      });
+    }
 
     if (this.options.attachments) {
       const attachments = await this.options.attachments;

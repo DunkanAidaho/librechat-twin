@@ -334,6 +334,24 @@ class ConfigService {
       dontShrinkLastN: z.number().int().nonnegative().optional(),
     });
 
+    const promptSchema = z.object({
+      maxContextPercent: z.number().min(0).max(1).default(0.9),
+      maxPromptTokens: z.number().int().positive().optional(),
+      minHeadroomTokens: z.number().int().nonnegative().default(2000),
+      retry: z
+        .object({
+          maxAttempts: z.number().int().positive().default(2),
+          maxReduction: z.number().min(0).max(1).default(0.5),
+        })
+        .default({ maxAttempts: 2, maxReduction: 0.5 }),
+      vector: z
+        .object({
+          maxTokens: z.number().int().positive().default(50000),
+          maxTokensPerChunk: z.number().int().positive().default(6000),
+        })
+        .default({ maxTokens: 50000, maxTokensPerChunk: 6000 }),
+    });
+
     const historyCompressionSchema = z.object({
       enabled: z.boolean(),
       layer1Ratio: z.number().min(0).max(1),
@@ -1086,6 +1104,24 @@ class ConfigService {
           },
           titles: {
             enabled: parseOptionalBool(this.env.TITLE_CONVO) ?? true,
+          },
+        }),
+      },
+      prompt: {
+        schema: promptSchema,
+        loader: () => ({
+          maxContextPercent: parseOptionalFloat(this.env.PROMPT_MAX_CONTEXT_PERCENT) ?? 0.9,
+          maxPromptTokens: parseOptionalInt(this.env.PROMPT_MAX_TOKENS) ?? undefined,
+          minHeadroomTokens: parseOptionalInt(this.env.PROMPT_MIN_HEADROOM_TOKENS) ?? 2000,
+          retry: {
+            maxAttempts: parseOptionalInt(this.env.PROMPT_RETRY_MAX_ATTEMPTS) ?? 2,
+            maxReduction:
+              parseOptionalFloat(this.env.PROMPT_RETRY_MAX_REDUCTION) ?? 0.5,
+          },
+          vector: {
+            maxTokens: parseOptionalInt(this.env.PROMPT_VECTOR_MAX_TOKENS) ?? 50000,
+            maxTokensPerChunk:
+              parseOptionalInt(this.env.PROMPT_VECTOR_MAX_TOKENS_PER_CHUNK) ?? 6000,
           },
         }),
       },

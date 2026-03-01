@@ -53,14 +53,25 @@ function replaceRagBlock(systemContent = "", newBlock = "") {
 function setDeferredContext(req, context = null) {
   if (!req) return;
   if (context) {
-    req.deferredRagContext = context;
+    req.deferredRagContext = {
+      ...context,
+      createdAt: Date.now(),
+    };
   } else {
     delete req.deferredRagContext;
   }
 }
 
 function getDeferredContext(req) {
-  return req?.deferredRagContext || null;
+  const snapshot = req?.deferredRagContext;
+  if (!snapshot || typeof snapshot !== 'object') {
+    return null;
+  }
+  const { policyIntro, graphLines, vectorText, vectorChunks } = snapshot;
+  if (!Array.isArray(graphLines) || typeof vectorText !== 'string') {
+    return null;
+  }
+  return snapshot;
 }
 
 function consumeDeferredContext(req) {
