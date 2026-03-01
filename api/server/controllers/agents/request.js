@@ -24,6 +24,7 @@ const { handleAbortError, createAbortController } = require('~/server/middleware
 
 const logger = getLogger('routes.agents.request');
 const { disposeClient, clientRegistry, requestDataMap } = require('~/server/cleanup');
+const eventService = new EventService();
 
 const {
   saveMessage,
