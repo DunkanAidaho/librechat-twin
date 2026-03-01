@@ -34,6 +34,7 @@ COPY api/server/services/agents/   /app/api/server/services/agents/
 COPY api/server/services/Graph/    /app/api/server/services/Graph/
 COPY api/server/services/Endpoints/ /app/api/server/services/Endpoints/
 COPY api/server/services/Events/    /app/api/server/services/Events/
+COPY api/server/services/Base/    /app/api/server/services/Base/
 COPY api/manage_summaries.js       /app/api/manage_summaries.js
 COPY api/sync_history.js           /app/api/sync_history.js
 COPY api/server/utils/ /app/api/server/utils/
