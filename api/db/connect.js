@@ -2,7 +2,7 @@
 
 const mongoose = require('mongoose');
 const { logger } = require('@librechat/data-schemas');
-const config = require('~/server/services/Config/ConfigService');
+const { configService } = require('../server/services/Config/ConfigService');
 
 let cached = global.mongoose;
 if (!cached) {

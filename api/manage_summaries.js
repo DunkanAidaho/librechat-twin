@@ -8,7 +8,7 @@ require('module-alias/register');
 
 const mongoose = require('mongoose');
 const { getLogger } = require('~/utils/logger');
-const configService = require('~/server/services/Config/ConfigService');
+const { configService } = require('./server/services/Config/ConfigService');
 const { enqueueSummaryTask } = require('~/utils/temporalClient');
 
 const logger = getLogger('scripts.manageSummaries');

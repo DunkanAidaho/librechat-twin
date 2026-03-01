@@ -1,7 +1,7 @@
 'use strict';
 
 const fetch = require('node-fetch');
-const config = require('~/server/services/Config/ConfigService');
+const { configService } = require('../server/services/Config/ConfigService');
 const { publish } = require('./natsClient');
 const { getLogger } = require('~/utils/logger');
 const { buildContext } = require('~/utils/logContext');

@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { createLogger, format, transports, addColors } = require('winston');
 
-const configService = require('~/server/services/Config/ConfigService');
+const { configService } = require('../../server/services/Config/ConfigService');
 const { sanitizeInput } = require('../security');
 
 const LOG_LEVELS = {

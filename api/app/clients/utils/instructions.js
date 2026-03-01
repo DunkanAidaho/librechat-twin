@@ -1,6 +1,6 @@
 'use strict';
 
-const configService = require('~/server/services/Config/ConfigService');
+const { configService } = require('../../../server/services/Config/ConfigService');
 const { getLogger } = require('~/utils/logger');
 const { buildContext } = require('~/utils/logContext');
 const { Tokenizer } = require('@librechat/api');

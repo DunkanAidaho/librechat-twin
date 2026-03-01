@@ -5,7 +5,7 @@ const axios = require('axios');
 const FormData = require('form-data');
 const multer = require('multer'); // ВАЖНО: свой multer, не общий
 const { requireJwtAuth } = require('~/server/middleware');
-const configService = require('~/server/services/Config/ConfigService');
+const { configService } = require('../../services/Config/ConfigService');
 const { getLogger } = require('~/utils/logger');
 const { buildContext } = require('~/utils/logContext');
 

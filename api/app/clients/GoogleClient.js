@@ -32,7 +32,7 @@ const {
   truncateText,
 } = require('./prompts');
 const BaseClient = require('./BaseClient');
-const configService = require('~/server/services/Config/ConfigService');
+const { configService } = require('../../server/services/Config/ConfigService');
 
 const loc = configService.get('providers.google.location', 'us-central1');
 const publisher = 'google';

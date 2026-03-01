@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const { MeiliSearch } = require('meilisearch');
 const { logger } = require('@librechat/data-schemas');
 const { CacheKeys } = require('librechat-data-provider');
-const configService = require('~/server/services/Config/ConfigService');
+const { configService } = require('../server/services/Config/ConfigService');
 const { isEnabled, FlowStateManager } = require('@librechat/api');
 const { getLogStores } = require('~/cache');
 

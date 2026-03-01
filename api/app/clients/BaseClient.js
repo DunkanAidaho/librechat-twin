@@ -3,7 +3,7 @@ const fetch = require('node-fetch');
 const { getLogger } = require('~/utils/logger');
 const { buildContext, getRequestContext } = require('~/utils/logContext');
 const { getBalanceConfig, Tokenizer, TextStream } = require('@librechat/api');
-const configService = require('~/server/services/Config/ConfigService');
+const { configService } = require('../../server/services/Config/ConfigService');
 const {
   supportsBalanceCheck,
   isAgentsEndpoint,

@@ -5,7 +5,7 @@ const express = require('express');
 const { randomUUID } = require('crypto');
 const { sleep } = require('@librechat/agents');
 const { isEnabled } = require('@librechat/api');
-const configService = require('~/server/services/Config/ConfigService');
+const { configService } = require('../services/Config/ConfigService');
 const { getLogger } = require('~/utils/logger');
 const { CacheKeys, EModelEndpoint } = require('librechat-data-provider');
 const {
