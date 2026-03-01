@@ -103,6 +103,10 @@ class ConfigService {
   loadEnvVars() {
     this.config = {
       ...this.config,
+      mongo: {
+        ...this.config.mongo,
+        uri: process.env.MONGO_URI || process.env.MONGODB_URI || this.config.mongo?.uri
+      },
       logging: {
         ...this.config.logging,
         branch: {
