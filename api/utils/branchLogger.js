@@ -1,21 +1,23 @@
-// /app/api/utils/branchLogger.js
 const { createLogger, format, transports } = require('winston');
-const configService = require('~/server/services/Config/ConfigService');
+const { configService } = require('../server/services/Config/ConfigService');
 const { combine, timestamp, printf, colorize } = format;
 
-// Получаем конфигурацию логирования
-const loggingConfig = configService.getSection('logging');
-const branchConfig = loggingConfig.branch;
-const ENABLE_BRANCH_LOGGING = branchConfig.enabled;
-const BRANCH_LOG_LEVEL = branchConfig.level;
+// Получаем конфигурацию логирования с значениями по умолчанию
+const loggingConfig = configService.getSection('logging') || {};
+const branchConfig = loggingConfig.branch || {};
+
+// Значения по умолчанию для конфигурации
+const ENABLE_BRANCH_LOGGING = branchConfig.enabled || false;
+const BRANCH_LOG_LEVEL = branchConfig.level || 'info';
 
 // Кастомный формат лога
 const logFormat = printf(({ level, message, timestamp }) => {
   return `${timestamp} ${level}: ${message}`;
 });
 
+// Создаем логгер с настроенным форматом
 const branchLogger = createLogger({
-  level: BRANCH_LOG_LEVEL, // Устанавливаем уровень из переменной окружения
+  level: BRANCH_LOG_LEVEL,
   format: combine(
     timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     logFormat,
@@ -23,15 +25,21 @@ const branchLogger = createLogger({
   transports: [
     new transports.Console({
       format: combine(
-        colorize(), // Добавляем цвета для консоли
+        colorize(),
         logFormat,
       ),
     }),
-    // Можно добавить FileTransport для записи в файл
-    // new transports.File({ filename: 'branch.log' }),
   ],
-  silent: !ENABLE_BRANCH_LOGGING, // Отключаем логирование полностью, если ENABLE_BRANCH_LOGGING не true
+  silent: !ENABLE_BRANCH_LOGGING,
 });
 
-module.exports = branchLogger;
+// Добавляем метод для обновления конфигурации
+branchLogger.updateConfig = () => {
+  const newConfig = configService.getSection('logging') || {};
+  const newBranchConfig = newConfig.branch || {};
+  
+  branchLogger.level = newBranchConfig.level || 'info';
+  branchLogger.silent = !(newBranchConfig.enabled || false);
+};
 
+module.exports = branchLogger;
