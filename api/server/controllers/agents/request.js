@@ -34,10 +34,9 @@ const {
   updateMessage,
 } = require('~/models');
 
-const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
 const ingestDeduplicator = require('~/server/services/Deduplication/ingestDeduplicator');
 const { incLongTextTask } = require('~/utils/metrics');
-const { enqueueGraphTask, enqueueSummaryTask } = require('~/utils/temporalClient');
+const { queueGateway } = require('~/server/services/agents/queue');
 const { LongTextGraphWorker } = require('~/server/services/Graph/LongTextWorker');
 LongTextGraphWorker.start({ sendProgressEvents: true });
 const { makeIngestKey } = require('~/server/utils/messageUtils');
@@ -110,7 +109,7 @@ async function enqueueMemoryTasksWithResilience(tasks, meta = {}, options = {}) 
   try {
     const result = await runWithResilience(
       'enqueueMemoryTasks',
-      () => enqueueMemoryTasks(tasks, meta),
+      () => queueGateway.enqueueMemory(tasks, meta),
       mergedOptions,
     );
     observeMemoryQueueLatency({ reason: reasonLabel, status: 'success' }, Date.now() - startedAt);
@@ -136,7 +135,7 @@ async function enqueueSummaryTaskWithResilience(job, options = {}) {
   try {
     const result = await runWithResilience(
       'enqueueSummaryTask',
-      () => enqueueSummaryTask(job),
+      () => queueGateway.enqueueSummary(job),
       mergedOptions,
     );
     incSummaryEnqueueTotal();
@@ -165,7 +164,7 @@ async function enqueueGraphTaskWithResilience(payload, options = {}) {
   try {
     const result = await runWithResilience(
       'enqueueGraphTask',
-      () => enqueueGraphTask(payload),
+      () => queueGateway.enqueueGraph(payload),
       mergedOptions,
     );
     incGraphEnqueueTotal();

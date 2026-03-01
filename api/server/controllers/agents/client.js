@@ -54,7 +54,6 @@ const { loadAgent } = require('~/models/Agent');
 const { getMCPManager } = require('~/config');
 const runtimeMemoryConfig = require('~/utils/memoryConfig');
 const MessageHistoryManager = require('~/server/services/agents/MessageHistoryManager');
-const { HistoryTrimmer } = require('~/server/services/agents/historyTrimmer');
 const { ContextCompressor, MessageCompressorBridge } = require('~/server/services/agents/ContextCompressor');
 const { analyzeIntent } = require('~/server/services/RAG/intentAnalyzer');
 const { runMultiStepRag } = require('~/server/services/RAG/multiStepOrchestrator');
@@ -73,9 +72,19 @@ const {
   setContextLength,
 } = require('~/utils/ragMetrics');
 const crypto = require('crypto');
-const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
 const { writeTokenReport } = require('~/utils/tokenReport');
 const { updateMessage } = require('~/models');
+const { historyMemoryService } = require('~/server/services/agents/history');
+const { queueGateway } = require('~/server/services/agents/queue');
+const { usageReporter } = require('~/server/services/agents/usage');
+const {
+  sanitizeGraphContext: ctxSanitizeGraph,
+  sanitizeVectorChunks: ctxSanitizeVector,
+  condenseRagQuery: ctxCondenseQuery,
+  fetchGraphContext: ctxFetchGraph,
+  calculateAdaptiveTimeout: ctxCalcTimeout,
+  mapReduceContext: ctxMapReduce,
+} = require('~/server/services/agents/context');
 
 const {
   computePromptTokenBreakdown: computePromptTokenBreakdown,
