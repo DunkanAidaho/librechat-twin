@@ -1,6 +1,6 @@
 const { getLogger } = require('../../../utils/logger');
 const { buildContext, getRequestContext } = require('../../../utils/logContext');
-const configService = require('../Config/ConfigService');
+const { configService } = require('../Config/ConfigService');
 
 /**
  * Базовый класс для всех сервисов
@@ -12,7 +12,7 @@ class BaseService {
    * @param {Object} [options.config] - Дополнительная конфигурация
    */
   constructor(options = {}) {
-    const { serviceName, config = {} } = options;
+    const { serviceName, config = {}, skipConfig = false } = options;
     
     if (!serviceName) {
       throw new Error('Service name is required');
@@ -22,10 +22,14 @@ class BaseService {
     this.logger = getLogger(`services.${serviceName}`);
     
     // Загрузка конфигурации из ConfigService с возможностью переопределения
-    this.config = {
-      ...configService.getSection(serviceName),
-      ...config
-    };
+    if (!skipConfig) {
+      this.config = {
+        ...configService.getSection(serviceName),
+        ...config
+      };
+    } else {
+      this.config = config;
+    }
   }
 
   /**
@@ -65,4 +69,6 @@ class BaseService {
   }
 }
 
-module.exports = BaseService;
+module.exports = {
+  BaseService
+};

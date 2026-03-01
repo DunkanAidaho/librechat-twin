@@ -1,11 +1,14 @@
-const BaseService = require('../Base/BaseService');
+const { BaseService } = require('../Base/BaseService');
 
 /**
  * Сервис для отправки событий клиенту через SSE
  */
 class EventService extends BaseService {
   constructor() {
-    super({ serviceName: 'EventService' });
+    super({
+      serviceName: 'EventService',
+      skipConfig: true // EventService не требует конфигурации
+    });
   }
 
   /**

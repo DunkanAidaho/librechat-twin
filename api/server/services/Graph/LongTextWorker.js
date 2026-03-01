@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 const EventEmitter = require("events");
 const { EventService } = require("../Events/EventService");
-const configService = require("../Config/ConfigService");
+const { configService } = require("../Config/ConfigService");
 const { enqueueMemoryTasks } = require("../RAG/memoryQueue");
 const { incLongTextGraphChunk } = require("../../../utils/metrics");
 const { runWithResilience } = require("../../utils/resilience");
@@ -64,7 +64,7 @@ const GRAPH_DONE_FLAG = "graphProcessedAt";
 const workerEvents = new EventEmitter();
 const workerOptions = new WeakMap();
 const logger = getLogger("rag.longTextWorker");
-const eventService = new EventService();
+const eventService = new EventService(); // Создаем единственный экземпляр для всего воркера
 
 /**
  * Возвращает SHA1-хэш переданного текста.

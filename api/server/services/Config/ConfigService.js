@@ -1286,5 +1286,7 @@ class ConfigService {
 
 const configService = new ConfigService();
 
-module.exports = configService;
+module.exports = {
+  configService
+};
 module.exports.ConfigService = ConfigService;
