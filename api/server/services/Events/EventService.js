@@ -1,9 +1,11 @@
-const { BaseService } = require('../Base/BaseService');
-const logger = require('../../../utils/logger');
+const BaseService = require('../Base/BaseService');
 
+/**
+ * Сервис для отправки событий клиенту через SSE
+ */
 class EventService extends BaseService {
   constructor() {
-    super('EventService');
+    super({ serviceName: 'EventService' });
   }
 
   /**
@@ -13,16 +15,16 @@ class EventService extends BaseService {
    */
   sendEvent(res, event) {
     if (!res || !event) {
-      this.logError('Invalid event parameters', { event });
+      this.logger.error('Invalid event parameters', { event });
       return;
     }
 
     try {
       const formattedEvent = this.formatEvent(event);
       res.write(formattedEvent);
-      this.logDebug('Event sent successfully', { event });
+      this.logger.debug('Event sent successfully', { event });
     } catch (error) {
-      this.logError('Failed to send event', { error, event });
+      this.logger.error('Failed to send event', { error, event });
     }
   }
 
