@@ -8,7 +8,7 @@ const branchConfig = loggingConfig.branch || {};
 
 // Значения по умолчанию для конфигурации
 const ENABLE_BRANCH_LOGGING = configService.getBoolean('logging.branch.enabled', false);
-const BRANCH_LOG_LEVEL = configService.getString('logging.branch.level', 'info');
+const BRANCH_LOG_LEVEL = configService.get('logging.branch.level', 'info');
 
 // Кастомный формат лога
 const logFormat = printf(({ level, message, timestamp }) => {
@@ -36,7 +36,7 @@ const branchLogger = createLogger({
 // Добавляем метод для обновления конфигурации
 branchLogger.updateConfig = () => {
   const enabled = configService.getBoolean('logging.branch.enabled', false);
-  const level = configService.getString('logging.branch.level', 'info');
+  const level = configService.get('logging.branch.level', 'info');
   
   branchLogger.level = level;
   branchLogger.silent = !enabled;
