@@ -38,7 +38,7 @@ const TRANSIENT_ERROR_PATTERNS = [
 ];
 
 let temporalClient = null;
-let temporalEnabled = Boolean(config.get('memory.temporalEnabled', false));
+let temporalEnabled = Boolean(configService.get('memory.temporalEnabled', false));
 
 setTemporalStatus(TEMPORAL_STATUS_REASON, temporalEnabled);
 
@@ -62,8 +62,8 @@ function isTransientError(error) {
 }
 
 function getToolsGatewayConfig() {
-  const url = config.get('queues.toolsGatewayUrl', null);
-  const timeoutMs = config.getNumber('queues.httpTimeoutMs', 15000);
+  const url = configService.get('queues.toolsGatewayUrl', null);
+  const timeoutMs = configService.getNumber('queues.httpTimeoutMs', 15000);
   return { url, timeoutMs };
 }
 
@@ -265,7 +265,7 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
   }
 
   // Get batching configuration
-  const memoryConfig = config.getSection('memory');
+  const memoryConfig = configService.getSection('memory');
   const batchSize = Math.max(1, memoryConfig.queue?.enqueueBatchSize ?? 25);
   const maxTotalMs = memoryConfig.queue?.enqueueMaxTotalMs ?? 60000;
   const failOpen = memoryConfig.queue?.failOpen ?? true;
