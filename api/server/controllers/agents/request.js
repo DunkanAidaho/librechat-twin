@@ -12,7 +12,7 @@ const {
   setTemporalStatus,
 } = require('~/utils/metrics');
 
-const { sendEvent } = require('@librechat/api');
+const { EventService } = require('../../services/Events/EventService');
 const { getLogger } = require('~/utils/logger');
 const { buildContext, getRequestContext } = require('~/utils/logContext');
 const config = require('~/server/services/Config/ConfigService');
@@ -716,7 +716,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
           createdAt: new Date().toISOString(),
         };
 
-        sendEvent(res, {
+        eventService.sendEvent(res, {
           final: true,
           conversation: { id: initialConversationId },
           requestMessage: userMessage,
@@ -804,7 +804,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
               });
 
               try {
-                sendEvent(res, {
+                eventService.sendEvent(res, {
                   meta: {
                     longTextInfo: indexedEvent,
                   },
@@ -880,7 +880,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
         );
       }
 
-      sendEvent(res, {
+      eventService.sendEvent(res, {
         final: true,
         conversation: { id: ackConversationId },
         requestMessage: userMessage ?? baseUserMessage,
@@ -1134,7 +1134,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
         }
 
         if (response) {
-          sendEvent(res, {
+          eventService.sendEvent(res, {
             final: true,
             conversation,
             title: conversation.title,
@@ -1288,7 +1288,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
     }
 
     if (!detached && canWrite(dres) && response) {
-      sendEvent(dres, {
+      eventService.sendEvent(dres, {
         final: true,
         conversation: {},
         title: undefined,

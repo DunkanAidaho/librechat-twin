@@ -152,3 +152,11 @@ graph TD
 3. Usage Reporter логирует и тратит токены единым способом.
 4. README/plan содержит описание Iteration 2 и ссылки на новые API.
 5. Нет прямых импортов `enqueueMemoryTasks`, `spendTokens`, `computePromptTokenBreakdown` в контроллерах.
+
+### 8.4 Текущий прогресс
+
+- Создан модуль [`context/builder.js`](api/server/services/agents/context/builder.js) и вынесены хелперы в [`helpers.js`](api/server/services/agents/context/helpers.js:1).
+- Перенесена реализация `buildRagContext`: `buildContext` в [`context/builder.js`](api/server/services/agents/context/builder.js:1-400) покрывает кэш, граф/вектор и summarization.
+- Фасад [`context/index.js`](api/server/services/agents/context/index.js:1-270) теперь экспортирует готовый `buildContext`.
+- Следующий шаг — в [`client.js`](api/server/controllers/agents/client.js:1122-1952) заменить `this.buildRagContext` на фасад `context.buildContext`, удалить локальные хелперы и убедиться в корректной передаче метрик/кэша.
+- После переключения клиента продолжить миграцию history и usage (см. шаги 8.2.3–8.2.4).

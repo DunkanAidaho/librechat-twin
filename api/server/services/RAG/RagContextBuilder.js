@@ -1,648 +1,331 @@
-const { getLogger } = require('~/utils/logger');
-const { buildContext } = require('~/utils/logContext');
-const axios = require('axios');
-const { Tokenizer } = require('@librechat/api');
-const { sanitizeInput } = require('~/utils/security');
-const {
-  observeSegmentTokens,
-  observeCache,
-  setContextLength,
-} = require('~/utils/ragMetrics');
-const crypto = require('crypto');
-const logger = getLogger('rag.context');
+const BaseService = require('../Base/BaseService');
+const { ValidationError } = require('../Base/ErrorHandler');
+const { buildRagBlock, replaceRagBlock } = require('./RagContextManager');
+const { analyzeIntent } = require('./intentAnalyzer');
+const { runMultiStepRag } = require('./multiStepOrchestrator');
+const { fetchGraphContext } = require('./graphContext');
 
 /**
- * @typedef {Object} RagMetrics
- * @property {number} graphTokens
- * @property {number} vectorTokens
- * @property {number} contextTokens
- * @property {number} graphLines
- * @property {number} vectorChunks
- * @property {number} queryTokens
+ * Сервис для построения RAG контекста
  */
-
-/**
- * @typedef {Object} RagContextResult
- * @property {string} patchedSystemContent
- * @property {number} contextLength
- * @property {'hit'|'miss'|'skipped'} cacheStatus
- * @property {RagMetrics} metrics
- */
-
-/**
- * RAG Context Builder - handles graph and vector context retrieval and caching
- */
-class RagContextBuilder {
+class RagContextBuilder extends BaseService {
+  /**
+   * @param {Object} options
+   * @param {TokenManager} options.tokenManager - Менеджер токенов
+   * @param {RagCache} options.ragCache - Кэш RAG
+   * @param {MetricsCollector} options.metrics - Сборщик метрик
+   */
   constructor(options = {}) {
-    this.cache = options.cache || new Map();
-    this.cacheTtlMs = options.cacheTtlMs || 300000;
-    this.mapReduceContext = options.mapReduceContext;
-  }
+    super({ serviceName: 'rag.context', ...options });
 
-  /**
-   * Hashes payload for cache key generation
-   * @param {unknown} payload
-   * @returns {string}
-   */
-  hashPayload(payload) {
-    const normalized =
-      typeof payload === 'string'
-        ? payload
-        : JSON.stringify(
-            payload ?? '',
-            (_, value) => (typeof value === 'bigint' ? value.toString() : value),
-          );
-
-    return crypto.createHash('sha1').update(normalized ?? '').digest('hex');
-  }
-
-  /**
-   * Creates cache key from parameters
-   * @param {Object} params
-   * @returns {string}
-   */
-  createCacheKey({ conversationId, endpoint, model, queryHash, configHash }) {
-    return this.hashPayload({
-      conversationId,
-      endpoint,
-      model,
-      queryHash,
-      configHash,
-    });
-  }
-
-  /**
-   * Prunes expired cache entries
-   * @param {number} now
-   */
-  pruneExpiredCache(now = Date.now()) {
-    for (const [key, entry] of this.cache.entries()) {
-      if (!entry?.expiresAt || entry.expiresAt <= now) {
-        this.cache.delete(key);
-      }
+    if (!options.tokenManager) {
+      throw new ValidationError('TokenManager is required');
     }
-  }
-
-  /**
-   * Sanitizes graph context lines
-   * @param {string[]} lines
-   * @param {Object} config
-   * @returns {string[]}
-   */
-  sanitizeGraphContext(lines, config) {
-    if (!Array.isArray(lines) || lines.length === 0) {
-      return [];
+    if (!options.ragCache) {
+      throw new ValidationError('RagCache is required');
     }
 
-    const limited = lines.slice(0, config.maxLines);
-    return limited
-      .map((line) => (typeof line === 'string' ? line.trim() : ''))
-      .filter(Boolean)
-      .map((line) => {
-        if (line.length <= config.maxLineChars) {
-          return line;
-        }
-        return `${line.slice(0, config.maxLineChars)}…`;
-      });
+    this.tokenManager = options.tokenManager;
+    this.ragCache = options.ragCache;
+    this.metrics = options.metrics;
   }
 
   /**
-   * Sanitizes vector chunks
-   * @param {string[]} chunks
-   * @param {Object} config
-   * @returns {string[]}
-   */
-  sanitizeVectorChunks(chunks, config) {
-    if (!Array.isArray(chunks) || chunks.length === 0) {
-      return [];
-    }
-
-    const limited = chunks.slice(0, config.maxChunks);
-    return limited.map((chunk) => {
-      if (typeof chunk !== 'string') {
-        return '';
-      }
-      const trimmed = chunk.trim();
-      if (trimmed.length <= config.maxChars) {
-        return trimmed;
-      }
-      return `${trimmed.slice(0, config.maxChars)}…`;
-    });
-  }
-
-  /**
-   * Fetches graph context from tools-gateway
-   * @param {Object} params
-   * @returns {Promise<{lines: string[], queryHint: string}|null>}
-   */
-  async fetchGraphContext({ conversationId, toolsGatewayUrl, limit, timeoutMs, context }) {
-    const url = `${toolsGatewayUrl}/neo4j/graph_context`;
-    const requestPayload = { conversation_id: conversationId, limit };
-
-    const ctx = buildContext(context || { conversationId });
-    logger.info(
-      'rag.context.graph_fetch',
-      buildContext(ctx, {
-        toolsGatewayUrl,
-        limit,
-      }),
-    );
-
-    try {
-      const response = await axios.post(url, requestPayload, { timeout: timeoutMs });
-
-      const lines = Array.isArray(response?.data?.lines) ? response.data.lines : [];
-      const queryHint = response?.data?.query_hint ? String(response.data.query_hint) : '';
-
-      logger.info(
-        'rag.context.graph_fetch_done',
-        buildContext(ctx, {
-          url,
-          linesCount: lines.length,
-          hasHint: Boolean(queryHint),
-        }),
-      );
-
-      if (!lines.length && !queryHint) {
-        return null;
-      }
-
-      return {
-        lines: lines.slice(0, limit),
-        queryHint,
-      };
-    } catch (error) {
-      const serializedError = {
-        message: error?.message,
-        code: error?.code,
-        stack: error?.stack,
-        responseStatus: error?.response?.status,
-        responseData: error?.response?.data,
-      };
-
-      logger.error('rag.context.graph_fetch_error', buildContext(ctx, { err: serializedError }));
-      return null;
-    }
-  }
-
-  /**
-   * Fetches vector context from RAG API
-   * @param {Object} params
-   * @returns {Promise<string[]>}
-   */
-  async fetchVectorContext({
-    conversationId,
-    toolsGatewayUrl,
-    ragSearchQuery,
-    vectorTopK,
-    embeddingModel,
-    userId,
-    timeoutMs,
-    context,
-  }) {
-    try {
-      const response = await axios.post(
-        `${toolsGatewayUrl}/rag/search`,
-        {
-          query: ragSearchQuery,
-          top_k: vectorTopK,
-          embedding_model: embeddingModel,
-          conversation_id: conversationId,
-          user_id: userId,
-        },
-        { timeout: timeoutMs },
-      );
-
-      const rawChunks = Array.isArray(response?.data?.results)
-        ? response.data.results.map((item) => item?.content ?? '').filter(Boolean)
-        : [];
-
-      logger.info(
-        'rag.context.vector_fetch',
-        buildContext(context || { conversationId }, {
-          chunks: rawChunks.length,
-          vectorTopK,
-        }),
-      );
-
-      return rawChunks;
-    } catch (error) {
-      logger.error(
-        'rag.context.vector_fetch_error',
-        buildContext(context || { conversationId }, { err: error })
-      );
-      return [];
-    }
-  }
-
-  /**
-   * Fetches recent turns from RAG API
-   * @param {Object} params
-   * @returns {Promise<string[]>}
-   */
-  async fetchRecentTurns({
-    conversationId,
-    toolsGatewayUrl,
-    recentTurns,
-    userId,
-    timeoutMs,
-    context,
-  }) {
-    try {
-      const recentResp = await axios.post(
-        `${toolsGatewayUrl}/rag/recent`,
-        {
-          conversation_id: conversationId,
-          limit: recentTurns,
-          user_id: userId,
-        },
-        { timeout: timeoutMs },
-      );
-
-      const rawRecent = Array.isArray(recentResp?.data?.results)
-        ? recentResp.data.results.map((r) => r?.content ?? '').filter(Boolean)
-        : [];
-
-      return rawRecent;
-    } catch (e) {
-      const status = e?.response?.status;
-      const ctx = buildContext(context || { conversationId });
-      if (status === 404 || status === 501) {
-        logger.info('rag.context.recent_unavailable', buildContext(ctx, { status }));
-      } else {
-        logger.warn(
-          'rag.context.recent_skip',
-          buildContext(ctx, {
-            reason: e?.message,
-            status,
-          }),
-        );
-      }
-      return [];
-    }
-  }
-
-  /**
-   * Builds RAG context with caching
-   * @param {Object} params
-   * @returns {Promise<RagContextResult>}
+   * Строит контекст RAG
+   * @param {Object} options
+   * @param {Array<Object>} options.orderedMessages - Упорядоченные сообщения
+   * @param {string} options.systemContent - Системный контент
+   * @param {Object} options.runtimeCfg - Конфигурация выполнения
+   * @param {Object} options.req - Express request
+   * @param {Object} options.res - Express response
+   * @param {Object} options.endpointOption - Опции эндпоинта
+   * @returns {Promise<Object>} Результат построения контекста
    */
   async buildContext({
-    conversationId,
-    userQuery,
+    orderedMessages,
     systemContent,
     runtimeCfg,
     req,
     res,
-    endpointOption,
-    encoding = 'o200k_base',
+    endpointOption
   }) {
-    this.cacheTtlMs = Math.max(Number(runtimeCfg.ragCacheTtl) * 1000, 0);
+    const context = this.buildLogContext(req, {
+      conversationId: req?.body?.conversationId
+    });
 
-    const requestContext = buildContext(
-      {
-        conversationId,
-        requestId: req?.context?.requestId || req?.requestId,
-        userId: req?.user?.id,
-      },
-      {
+    this.log('debug', '[rag.context.build.start]', context);
+
+    try {
+      // Проверяем необходимость построения контекста
+      if (!runtimeCfg.useConversationMemory || !context.conversationId) {
+        this.log('debug', '[rag.context.skip]', {
+          ...context,
+          reason: 'disabled_or_no_conversation'
+        });
+        return this.emptyResult(systemContent);
+      }
+
+      // Получаем последнее сообщение пользователя
+      const userMessage = orderedMessages[orderedMessages.length - 1];
+      const userQuery = this.tokenManager.normalizeText(
+        userMessage?.text || ''
+      );
+
+      if (!userQuery) {
+        this.log('debug', '[rag.context.skip]', {
+          ...context,
+          reason: 'no_query'
+        });
+        return this.emptyResult(systemContent);
+      }
+
+      // Проверяем кэш
+      const cacheKey = this.buildCacheKey({
+        conversationId: context.conversationId,
         endpoint: endpointOption?.endpoint,
         model: endpointOption?.model,
-      },
-    );
+        query: userQuery,
+        config: runtimeCfg
+      });
 
-    if (!runtimeCfg.useConversationMemory || !conversationId || !userQuery) {
-      logger.info(
-        'rag.context.skip',
-        buildContext(requestContext, {
-          reason: 'disabled_or_empty_query',
-          enableMemoryCache: runtimeCfg.enableMemoryCache,
-        }),
-      );
-      return {
-        patchedSystemContent: systemContent,
-        contextLength: 0,
-        cacheStatus: 'skipped',
-        metrics: {},
-      };
+      const cached = this.ragCache.get(cacheKey);
+      if (cached) {
+        this.log('info', '[rag.context.cache.hit]', {
+          ...context,
+          cacheKey
+        });
+        if (this.metrics) {
+          this.metrics.observeCache('hit');
+        }
+        return cached;
+      }
+
+      // Анализируем intent для multi-step RAG
+      const intentAnalysis = runtimeCfg?.multiStepRag?.enabled
+        ? await analyzeIntent({
+            message: userMessage,
+            context: orderedMessages.slice(-8),
+            signal: req?.abortController?.signal,
+            timeoutMs: runtimeCfg.multiStepRag?.intentTimeoutMs || 2000
+          })
+        : { entities: [], needsFollowUps: false };
+
+      if (req) {
+        req.intentAnalysis = intentAnalysis;
+      }
+
+      // Получаем граф контекст
+      const graphContext = await this.getGraphContext({
+        conversationId: context.conversationId,
+        runtimeCfg,
+        userQuery
+      });
+
+      // Строим контекст через multi-step RAG если включен
+      let result;
+      if (runtimeCfg?.multiStepRag?.enabled) {
+        result = await this.buildMultiStepContext({
+          intentAnalysis,
+          runtimeCfg,
+          baseContext: systemContent,
+          graphContext,
+          req,
+          context
+        });
+      } else {
+        // Строим обычный контекст
+        result = await this.buildSimpleContext({
+          userQuery,
+          systemContent,
+          graphContext,
+          runtimeCfg,
+          req,
+          res,
+          endpointOption,
+          context
+        });
+      }
+
+      // Сохраняем в кэш
+      this.ragCache.set(cacheKey, result);
+      if (this.metrics) {
+        this.metrics.observeCache('miss');
+      }
+
+      this.log('info', '[rag.context.build.complete]', {
+        ...context,
+        contextLength: result.contextLength,
+        cacheStatus: 'miss'
+      });
+
+      return result;
+    } catch (error) {
+      this.handleError(error, context);
     }
+  }
 
-    this.pruneExpiredCache();
-
-    const queryMaxChars = runtimeCfg?.ragQuery?.maxChars || 6000;
-    const normalizedQuery = userQuery.slice(0, queryMaxChars);
-    const queryTokenCount = Tokenizer.getTokenCount(normalizedQuery, encoding);
-
-    logger.debug(
-      'rag.context.query_tokens',
-      buildContext(requestContext, {
-        length: normalizedQuery.length,
-        tokens: queryTokenCount,
-      }),
-    );
-
-    const queryHash = this.hashPayload(normalizedQuery);
-    const configHash = this.hashPayload({
-      graph: runtimeCfg.graphContext,
-      vector: runtimeCfg.vectorContext,
-      summarization: runtimeCfg.summarization,
-    });
-
-    const cacheKey = this.createCacheKey({
+  /**
+   * Строит ключ кэша
+   * @private
+   */
+  buildCacheKey({ conversationId, endpoint, model, query, config }) {
+    const components = [
       conversationId,
-      endpoint: endpointOption?.endpoint,
-      model: endpointOption?.model,
-      queryHash,
-      configHash,
-    });
+      endpoint || 'default',
+      model || 'default',
+      this.tokenManager.normalizeText(query),
+      JSON.stringify({
+        graph: config.graphContext,
+        vector: config.vectorContext,
+        summarization: config.summarization
+      })
+    ];
+    return components.join(':');
+  }
 
-    const metrics = {
-      graphTokens: 0,
-      vectorTokens: 0,
-      contextTokens: 0,
-      graphLines: 0,
-      vectorChunks: 0,
-      queryTokens: queryTokenCount,
-    };
-
-    const now = Date.now();
-    let cacheStatus = 'skipped';
-
-    if (runtimeCfg.enableMemoryCache) {
-      const cached = this.cache.get(cacheKey);
-      if (cached && cached.expiresAt > now) {
-        cacheStatus = 'hit';
-        observeCache('hit');
-        const cachedMetrics = cached.metrics || {};
-        logger.info(
-          'rag.context.cache_hit',
-          buildContext(requestContext, { cacheKey }),
-        );
-        return {
-          patchedSystemContent: cached.systemContent,
-          contextLength: cached.contextLength,
-          cacheStatus,
-          metrics: cachedMetrics,
-        };
-      }
-
-      cacheStatus = 'miss';
-      observeCache('miss');
-      logger.info(
-        'rag.context.cache_miss',
-        buildContext(requestContext, { cacheKey })
-      );
-    }
-
-    const toolsGatewayUrl = runtimeCfg?.toolsGateway?.url || '';
-    const toolsGatewayTimeout = runtimeCfg?.toolsGateway?.timeoutMs || 20000;
-    const graphLimits = runtimeCfg.graphContext || {};
-    const vectorLimits = runtimeCfg.vectorContext || {};
-
-    const graphMaxLines = Number(graphLimits.maxLines ?? 40);
-    const graphMaxLineChars = Number(graphLimits.maxLineChars ?? 200);
-    const graphSummaryHintMaxChars = Number(graphLimits.summaryHintMaxChars ?? 2000);
-
-    const vectorMaxChunks = Number(vectorLimits.maxChunks ?? 4);
-    const vectorMaxChars = Number(vectorLimits.maxChars ?? 70000);
-    const vectorTopK = Number(vectorLimits.topK ?? 12);
-    const embeddingModel = vectorLimits.embeddingModel;
-    const recentTurns = Number(vectorLimits.recentTurns ?? 6);
-
-    let graphContextLines = [];
-    let graphQueryHint = '';
-
-    if (toolsGatewayUrl) {
-      const graphContext = await this.fetchGraphContext({
-        conversationId,
-        toolsGatewayUrl,
-        limit: graphMaxLines,
-        timeoutMs: toolsGatewayTimeout,
-        context: requestContext,
-      });
-
-      if (graphContext?.lines?.length) {
-        graphContextLines = this.sanitizeGraphContext(graphContext.lines, {
-          maxLines: graphMaxLines,
-          maxLineChars: graphMaxLineChars,
-        });
-      }
-
-      if (typeof graphContext?.queryHint === 'string') {
-        const trimmedHint = graphContext.queryHint.trim();
-        if (trimmedHint) {
-          graphQueryHint = trimmedHint.slice(0, graphSummaryHintMaxChars || trimmedHint.length);
-        }
-      }
-    }
-
-    metrics.graphLines = graphContextLines.length;
-
-    let ragSearchQuery = normalizedQuery;
-    if (graphQueryHint) {
-      ragSearchQuery = `${normalizedQuery}\n\nGraph hints: ${graphQueryHint}`;
-    }
-
-    const condensedQuery = this.condenseRagQuery(ragSearchQuery, queryMaxChars);
-    ragSearchQuery = condensedQuery;
-
-    let vectorChunks = [];
-
-    if (toolsGatewayUrl) {
-      const rawChunks = await this.fetchVectorContext({
-        conversationId,
-        toolsGatewayUrl,
-        ragSearchQuery,
-        vectorTopK,
-        embeddingModel,
-        userId: req?.user?.id,
-        timeoutMs: toolsGatewayTimeout,
-        context: requestContext,
-      });
-
-      vectorChunks = this.sanitizeVectorChunks(rawChunks, {
-        maxChunks: vectorMaxChunks,
-        maxChars: vectorMaxChars,
-      });
-
-      if (recentTurns > 0) {
-        const rawRecent = await this.fetchRecentTurns({
-          conversationId,
-          toolsGatewayUrl,
-          recentTurns,
-          userId: req?.user?.id,
-          timeoutMs: toolsGatewayTimeout,
-          context: requestContext,
-        });
-
-        const recentChunks = this.sanitizeVectorChunks(rawRecent, {
-          maxChunks: recentTurns,
-          maxChars: vectorMaxChars,
-        });
-
-        const merged = [];
-        const seen = new Set();
-
-        for (const c of [...recentChunks, ...vectorChunks]) {
-          const key = c.trim();
-          if (!key || seen.has(key)) continue;
-          seen.add(key);
-          merged.push(c);
-        }
-
-        vectorChunks = merged.slice(0, vectorMaxChunks);
-      }
-    }
-
-    metrics.vectorChunks = vectorChunks.length;
-
-    const hasGraph = graphContextLines.length > 0;
-    const policyIntro =
-      'Ниже предоставлен внутренний контекст для твоего сведения: граф знаний и выдержки из беседы. ' +
-      'Используй эти данные для формирования точного и полного ответа. ' +
-      'Категорически запрещается цитировать или пересказывать этот контекст, особенно строки, содержащие "-->". ' +
-      'Эта информация предназначена только для твоего внутреннего анализа.\n\n';
-
-    let finalSystemContent = systemContent;
-    let contextLength = 0;
-
-    if (hasGraph || vectorChunks.length > 0) {
-      const summarizationCfg = runtimeCfg.summarization || {};
-      const budgetChars = Number.isFinite(summarizationCfg?.budgetChars)
-        ? summarizationCfg.budgetChars
-        : 12000;
-
-      let vectorText = vectorChunks.join('\n\n');
-      const shouldSummarize =
-        summarizationCfg.enabled !== false && vectorText.length > budgetChars;
-
-      if (shouldSummarize && this.mapReduceContext) {
-        try {
-          vectorText = await this.mapReduceContext({
-            req,
-            res,
-            endpointOption,
-            contextText: vectorText,
-            userQuery: normalizedQuery,
-            graphContext: hasGraph
-              ? { lines: graphContextLines, queryHint: graphQueryHint }
-              : null,
-            summarizationConfig: summarizationCfg,
-          });
-        } catch (error) {
-          logger.error('rag.context.summarize_error', buildContext(requestContext, { err: error }));
-        }
-      }
-
-      const graphBlock = hasGraph
-        ? `### Graph context\n${graphContextLines.join('\n')}\n\n`
-        : '';
-      const vectorBlock = vectorText.length ? `### Vector context\n${vectorText}\n\n` : '';
-      const combined = `${policyIntro}${graphBlock}${vectorBlock}---\n\n`;
-
-      let sanitizedBlock = combined;
-      try {
-        sanitizedBlock = sanitizeInput(combined);
-      } catch (error) {
-        logger.error('rag.context.sanitize_error', buildContext(requestContext, { err: error }));
-      }
-
-      finalSystemContent = sanitizedBlock + systemContent;
-      contextLength = sanitizedBlock.length;
-
-      if (hasGraph) {
-        const graphText = graphContextLines.join('\n');
-        metrics.graphTokens = Tokenizer.getTokenCount(graphText, encoding);
-
-        if (metrics.graphTokens) {
-          observeSegmentTokens({
-            segment: 'rag_graph',
-            tokens: metrics.graphTokens,
-            endpoint: endpointOption?.endpoint,
-            model: endpointOption?.model,
-          });
-          setContextLength({
-            segment: 'rag_graph',
-            length: graphText.length,
-            endpoint: endpointOption?.endpoint,
-            model: endpointOption?.model,
-          });
-        }
-      }
-
-      if (vectorBlock) {
-        metrics.vectorTokens = Tokenizer.getTokenCount(vectorText, encoding);
-
-        if (metrics.vectorTokens) {
-          observeSegmentTokens({
-            segment: 'rag_vector',
-            tokens: metrics.vectorTokens,
-            endpoint: endpointOption?.endpoint,
-            model: endpointOption?.model,
-          });
-        }
-      }
-
-      metrics.contextTokens = Tokenizer.getTokenCount(sanitizedBlock, encoding);
-    }
-
-    if (runtimeCfg.enableMemoryCache) {
-      this.cache.set(cacheKey, {
-        systemContent: finalSystemContent,
-        contextLength,
-        metrics,
-        expiresAt: now + this.cacheTtlMs,
-      });
-      logger.info(
-        'rag.context.cache_store',
-        buildContext(requestContext, { cacheKey, ttlMs: this.cacheTtlMs })
-      );
-    }
-
-    if (req) {
-      req.ragCacheStatus = cacheStatus;
-      req.ragMetrics = Object.assign({}, req.ragMetrics, metrics);
-      req.ragContextTokens = metrics.contextTokens;
-    }
-
+  /**
+   * Возвращает пустой результат
+   * @private
+   */
+  emptyResult(systemContent) {
     return {
-      patchedSystemContent: finalSystemContent,
-      contextLength,
-      cacheStatus,
-      metrics,
+      patchedSystemContent: systemContent,
+      contextLength: 0,
+      cacheStatus: 'skipped',
+      metrics: {}
     };
   }
 
   /**
-   * Condenses RAG query text
-   * @param {string} text
-   * @param {number} limit
-   * @returns {string}
+   * Получает контекст из графа
+   * @private
    */
-  condenseRagQuery(text, limit = 6000) {
-    if (!text) return '';
+  async getGraphContext({ conversationId, runtimeCfg, userQuery }) {
+    if (!runtimeCfg?.useGraphContext) {
+      return null;
+    }
 
-    const normalized = text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-    if (!normalized) return '';
+    const graphContext = await fetchGraphContext({
+      conversationId,
+      toolsGatewayUrl: runtimeCfg?.toolsGateway?.url,
+      limit: runtimeCfg?.graphContext?.maxLines,
+      timeoutMs: runtimeCfg?.graphContext?.requestTimeoutMs
+    });
 
-    const lines = normalized.split('\n').map((line) => line.trim()).filter(Boolean);
-    const deduped = [];
-    const seen = new Set();
+    if (graphContext?.lines?.length) {
+      const normalizedLines = graphContext.lines.map(line =>
+        this.tokenManager.normalizeText(line)
+      );
 
-    for (const line of lines) {
-      if (!seen.has(line)) {
-        deduped.push(line);
-        seen.add(line);
+      if (this.metrics) {
+        const tokens = this.tokenManager.getTokenCount(
+          normalizedLines.join('\n')
+        );
+        this.metrics.observeTokens({
+          segment: 'rag_graph',
+          tokens,
+          type: 'raw'
+        });
+      }
+
+      return {
+        lines: normalizedLines,
+        queryHint: graphContext.queryHint
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Строит контекст через multi-step RAG
+   * @private
+   */
+  async buildMultiStepContext({
+    intentAnalysis,
+    runtimeCfg,
+    baseContext,
+    graphContext,
+    req,
+    context
+  }) {
+    const result = await runMultiStepRag({
+      intentAnalysis,
+      runtimeCfg,
+      baseContext,
+      graphContext,
+      conversationId: context.conversationId,
+      userId: req?.user?.id,
+      endpoint: req?.body?.endpointOption?.endpoint,
+      model: req?.body?.endpointOption?.model,
+      signal: req?.abortController?.signal
+    });
+
+    if (this.metrics && result.entities) {
+      for (const entity of result.entities) {
+        if (entity.tokens) {
+          this.metrics.observeTokens({
+            segment: 'rag_entity',
+            tokens: entity.tokens,
+            type: entity.type
+          });
+        }
       }
     }
 
-    let condensed = deduped.join('\n').trim();
-    if (condensed.length <= limit) return condensed;
+    return {
+      patchedSystemContent: result.globalContext,
+      contextLength: result.globalContext.length,
+      cacheStatus: 'miss',
+      metrics: {
+        entityCount: result.entities?.length || 0,
+        passesUsed: result.passesUsed
+      }
+    };
+  }
 
-    const half = Math.max(1, Math.floor(limit / 2));
-    const head = condensed.slice(0, half);
-    const tail = condensed.slice(-half);
-    return `${head}\n...\n${tail}`;
+  /**
+   * Строит обычный контекст
+   * @private
+   */
+  async buildSimpleContext({
+    userQuery,
+    systemContent,
+    graphContext,
+    runtimeCfg,
+    req,
+    res,
+    endpointOption,
+    context
+  }) {
+    // Здесь должна быть логика построения обычного контекста
+    // Включая работу с vector store и т.д.
+    
+    const ragBlock = buildRagBlock({
+      policyIntro: 'RAG context:',
+      graphLines: graphContext?.lines || [],
+      vectorText: '' // TODO: добавить работу с vector store
+    });
+
+    const patchedSystemContent = ragBlock + systemContent;
+
+    if (this.metrics) {
+      const contextTokens = this.tokenManager.getTokenCount(ragBlock);
+      this.metrics.observeTokens({
+        segment: 'rag_context',
+        tokens: contextTokens,
+        type: 'simple'
+      });
+    }
+
+    return {
+      patchedSystemContent,
+      contextLength: ragBlock.length,
+      cacheStatus: 'miss',
+      metrics: {
+        graphLines: graphContext?.lines?.length || 0
+      }
+    };
   }
 }
 

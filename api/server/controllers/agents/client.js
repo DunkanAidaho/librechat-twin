@@ -3,11 +3,11 @@ require('events').EventEmitter.defaultMaxListeners = 100;
 const { getLogger } = require('~/utils/logger');
 const configService = require('~/server/services/Config/ConfigService');
 const axios = require('axios');
-const { condenseContext: ragCondenseContext, getCondenseProvidersPreview } = require('~/server/services/RAG/condense');
+const { getCondenseProvidersPreview } = require('~/server/services/RAG/condense');
 const { DynamicStructuredTool } = require('@langchain/core/tools');
 const { getBufferString, HumanMessage, SystemMessage } = require('@langchain/core/messages');
+const { EventService } = require('../../services/Events/EventService');
 const {
-  sendEvent,
   createRun,
   Tokenizer,
   checkAccess,
@@ -71,20 +71,12 @@ const {
   observeCost,
   setContextLength,
 } = require('~/utils/ragMetrics');
-const crypto = require('crypto');
 const { writeTokenReport } = require('~/utils/tokenReport');
 const { updateMessage } = require('~/models');
 const { historyMemoryService } = require('~/server/services/agents/history');
 const { queueGateway } = require('~/server/services/agents/queue');
 const { usageReporter } = require('~/server/services/agents/usage');
-const {
-  sanitizeGraphContext: ctxSanitizeGraph,
-  sanitizeVectorChunks: ctxSanitizeVector,
-  condenseRagQuery: ctxCondenseQuery,
-  fetchGraphContext: ctxFetchGraph,
-  calculateAdaptiveTimeout: ctxCalcTimeout,
-  mapReduceContext: ctxMapReduce,
-} = require('~/server/services/agents/context');
+const { buildContext: contextBuild } = require('~/server/services/agents/context');
 
 const {
   computePromptTokenBreakdown: computePromptTokenBreakdown,
@@ -92,91 +84,6 @@ const {
 } = require("~/server/utils/tokenBreakdown");
 
 /** @type {Map<string, { expiresAt: number, payload: object }>} */
-const ragCache = new Map();
-
-/** @type {number} */
-let ragCacheTtlMs = runtimeMemoryConfig.getMemoryConfig().ragCacheTtl * 1000;
-
-/**
- * Очищает истёкшие записи RAG-кэша.
- */
-function pruneExpiredRagCache(now = Date.now()) {
-  for (const [key, entry] of ragCache.entries()) {
-    if (!entry?.expiresAt || entry.expiresAt <= now) {
-      ragCache.delete(key);
-    }
-  }
-}
-
-/**
- * Хэширует произвольные данные в SHA1.
- */
-function hashPayload(payload) {
-  const normalized =
-    typeof payload === 'string'
-      ? payload
-      : JSON.stringify(
-          payload ?? '',
-          (_, value) => (typeof value === 'bigint' ? value.toString() : value),
-        );
-
-  return crypto.createHash('sha1').update(normalized ?? '').digest('hex');
-}
-
-/**
- * Формирует ключ для RAG-кэша.
- */
-function createCacheKey({ conversationId, endpoint, model, queryHash, configHash }) {
-  return hashPayload({
-    conversationId,
-    endpoint,
-    model,
-    queryHash,
-    configHash,
-  });
-}
-
-/**
- * Обрезает и нормализует граф-контекст по лимитам.
- */
-function sanitizeGraphContext(lines, config) {
-  if (!Array.isArray(lines) || lines.length === 0) {
-    return [];
-  }
-
-  const limited = lines.slice(0, config.maxLines);
-  return limited
-    .map((line) => (typeof line === 'string' ? line.trim() : ''))
-    .filter(Boolean)
-    .map((line) => {
-      if (line.length <= config.maxLineChars) {
-        return line;
-      }
-      return `${line.slice(0, config.maxLineChars)}…`;
-    });
-}
-
-/**
- * Ограничивает массив фрагментов (vector context).
- */
-function sanitizeVectorChunks(chunks, config) {
-  if (!Array.isArray(chunks) || chunks.length === 0) {
-    return [];
-  }
-
-  const limited = chunks.slice(0, config.maxChunks);
-  return limited.map((chunk) => {
-    if (typeof chunk !== 'string') {
-      return '';
-    }
-    const trimmed = chunk.trim();
-    if (trimmed.length <= config.maxChars) {
-      return trimmed;
-    }
-    return `${trimmed.slice(0, config.maxChars)}…`;
-  });
-}
-
 
 /**
  * Безопасно приводит значение к тарифу (USD за 1000 токенов).
@@ -1907,13 +1814,14 @@ Graph hints: ${graphQueryHint}`;
     }
 
     try {
-      const ragResult = await this.buildRagContext({
+const ragResult = await contextBuild({
         orderedMessages,
         systemContent,
         runtimeCfg,
         req,
         res,
         endpointOption,
+        logger,
       });
 
       if (ragResult && typeof ragResult === 'object') {
@@ -2857,7 +2765,7 @@ Graph hints: ${graphQueryHint}`;
             data: agentUpdate,
           };
           this.options.aggregateContent(streamData);
-          sendEvent(this.options.res, streamData);
+          this.eventService.sendEvent(this.options.res, streamData);
           contentData.push(agentUpdate);
           run.Graph.contentData = contentData;
         }

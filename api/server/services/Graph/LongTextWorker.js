@@ -2,7 +2,7 @@
 
 const crypto = require("crypto");
 const EventEmitter = require("events");
-const { sendEvent } = require("@librechat/api");
+const { EventService } = require("../Events/EventService");
 const configService = require("~/server/services/Config/ConfigService");
 const { enqueueMemoryTasks } = require("~/server/services/RAG/memoryQueue");
 const { incLongTextGraphChunk } = require("~/utils/metrics");
@@ -66,6 +66,7 @@ const GRAPH_DONE_FLAG = "graphProcessedAt";
 const workerEvents = new EventEmitter();
 const workerOptions = new WeakMap();
 const logger = getLogger("rag.longTextWorker");
+const eventService = new EventService();
 
 /**
  * Возвращает SHA1-хэш переданного текста.

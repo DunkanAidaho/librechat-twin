@@ -1,5 +1,6 @@
 const axios = require('axios');
-const { buildContext } = require('./builder');
+const { Tokenizer } = require('@librechat/api');
+const { condenseContext: ragCondenseContext } = require('~/server/services/RAG/condense');
 
 function sanitizeGraphContext(lines, config) {
   if (!Array.isArray(lines) || lines.length === 0) {
@@ -269,5 +270,6 @@ module.exports = {
   fetchGraphContext,
   calculateAdaptiveTimeout,
   mapReduceContext,
-  buildContext,
+  ragCondenseContext,
+  Tokenizer,
 };
