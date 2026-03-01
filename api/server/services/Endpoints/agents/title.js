@@ -1,7 +1,7 @@
 const { observeAgentTitle, incAgentTitleFailure } = require('~/utils/metrics');
 const { isEnabled } = require('@librechat/api');
 const { logger } = require('@librechat/data-schemas');
-const configService = require('~/server/services/Config/ConfigService');
+const { configService } = require('~/server/services/Config/ConfigService');
 const { CacheKeys } = require('librechat-data-provider');
 const getLogStores = require('~/cache/getLogStores');
 const { saveConvo } = require('~/models');

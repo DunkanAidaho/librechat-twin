@@ -15,7 +15,7 @@ const {
 const { EventService } = require('../../services/Events/EventService');
 const { getLogger } = require('~/utils/logger');
 const { buildContext, getRequestContext } = require('~/utils/logContext');
-const config = require('~/server/services/Config/ConfigService');
+const { configService } = require('~/server/services/Config/ConfigService');
 const { clearDedupeKey } = require('~/server/services/Deduplication/clearDedupeKey');
 const { runWithResilience, normalizeLabelValue } = require('~/server/utils/resilience');
 const { canWrite, isResponseFinalized, makeDetachableRes } = require('~/server/utils/responseUtils');
@@ -41,18 +41,18 @@ const { LongTextGraphWorker } = require('~/server/services/Graph/LongTextWorker'
 LongTextGraphWorker.start({ sendProgressEvents: true });
 const { makeIngestKey } = require('~/server/utils/messageUtils');
 
-const featuresConfig = config.getSection('features');
-const ragConfig = config.getSection('rag');
+const featuresConfig = configService.getSection('features');
+const ragConfig = configService.getSection('rag');
 const ragContextConfig = ragConfig.context;
-const agentsConfig = config.getSection('agents');
+const agentsConfig = configService.getSection('agents');
 const agentsResilienceConfig = agentsConfig.resilience;
 const agentsThresholdsConfig = agentsConfig.thresholds;
-const summariesConfig = config.getSection('summaries');
-const memoryConfig = config.getSection('memory');
+const summariesConfig = configService.getSection('summaries');
+const memoryConfig = configService.getSection('memory');
 
 const HEADLESS_STREAM = Boolean(featuresConfig.headlessStream);
 const MAX_USER_MSG_TO_MODEL_CHARS = agentsThresholdsConfig.maxUserMessageChars;
-const MAX_TEXT_SIZE = config.getNumber('memory.longTextMaxChars', 500000);
+const MAX_TEXT_SIZE = configService.getNumber('memory.longTextMaxChars', 500000);
 const GOOGLE_NOSTREAM_THRESHOLD = agentsThresholdsConfig.googleNoStreamThreshold;
 
 const SUMMARIZATION_THRESHOLD = summariesConfig.threshold;

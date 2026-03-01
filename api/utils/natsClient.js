@@ -3,7 +3,7 @@
 const { connect, StringCodec, StorageType } = require('nats');
 const { logger } = require('@librechat/data-schemas');
 const { retryAsync } = require('~/utils/async');
-const config = require('~/server/services/Config/ConfigService');
+const { configService } = require('~/server/services/Config/ConfigService');
 
 const sc = StringCodec();
 
@@ -14,7 +14,7 @@ let jsm = null;
 let shuttingDown = false;
 
 function getNatsConfig() {
-  return config.getSection('nats');
+  return configService.getSection('nats');
 }
 
 function getRetrySettings(runtimeConfig = getNatsConfig()) {

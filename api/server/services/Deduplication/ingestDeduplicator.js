@@ -3,7 +3,7 @@
 const LRU = require('lru-cache');
 const { StringCodec, KVOperation = {} } = require('nats');
 const { logger } = require('@librechat/data-schemas');
-const config = require('~/server/services/Config/ConfigService');
+const { configService } = require('~/server/services/Config/ConfigService');
 const {
   getJetStream,
   getOrCreateKV,
@@ -18,7 +18,7 @@ const sc = StringCodec();
 const KV_OP_DELETE = KVOperation.DELETE ?? 'DEL';
 const KV_OP_PURGE = KVOperation.PURGE ?? 'PURGE';
 
-const ingestionConfig = config.getSection('ingestion');
+const ingestionConfig = configService.getSection('ingestion');
 
 const FILE_DEDUPE_BUCKET = ingestionConfig.dedupeBucket;
 const TEXT_DEDUPE_BUCKET = ingestionConfig.textDedupeBucket;
