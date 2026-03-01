@@ -13,6 +13,8 @@ const log = {
 
 const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on', 'y']);
 const FALSE_VALUES = new Set(['0', 'false', 'no', 'off', 'n']);
+const warnedMissingPaths = new Set();
+const warnedMissingSections = new Set();
 
 function parseOptionalBool(value) {
   if (value == null || value === '') {
@@ -68,18 +70,18 @@ class ConfigService {
     try {
       const path = require('path');
       const configPath = process.env.CONFIG_PATH || './config/librechat.yaml';
-      log.info(`[ConfigService] ENV CONFIG_PATH: ${process.env.CONFIG_PATH || '(not set)'}`);
+      log.debug(`[ConfigService] ENV CONFIG_PATH: ${process.env.CONFIG_PATH || '(not set)'}`);
       const resolvedPath = path.resolve(configPath);
       const projectRoot = path.resolve(__dirname, '../../../../');
       const rootConfigPath = path.join(projectRoot, 'config/librechat.yaml');
 
-      log.info(`[ConfigService] CWD: ${process.cwd()}`);
-      log.info(`[ConfigService] Config path: ${configPath}`);
-      log.info(`[ConfigService] Resolved path: ${resolvedPath}`);
-      log.info(`[ConfigService] Root config path: ${rootConfigPath}`);
-      log.info(`[ConfigService] Exists (relative): ${fs.existsSync(configPath)}`);
-      log.info(`[ConfigService] Exists (resolved): ${fs.existsSync(resolvedPath)}`);
-      log.info(`[ConfigService] Exists (root): ${fs.existsSync(rootConfigPath)}`);
+      log.debug(`[ConfigService] CWD: ${process.cwd()}`);
+      log.debug(`[ConfigService] Config path: ${configPath}`);
+      log.debug(`[ConfigService] Resolved path: ${resolvedPath}`);
+      log.debug(`[ConfigService] Root config path: ${rootConfigPath}`);
+      log.debug(`[ConfigService] Exists (relative): ${fs.existsSync(configPath)}`);
+      log.debug(`[ConfigService] Exists (resolved): ${fs.existsSync(resolvedPath)}`);
+      log.debug(`[ConfigService] Exists (root): ${fs.existsSync(rootConfigPath)}`);
 
       if (fs.existsSync(configPath)) {
         this.config = yaml.load(fs.readFileSync(configPath, 'utf8')) || {};
@@ -139,7 +141,12 @@ class ConfigService {
 
     const section = this.config[name];
     if (!section) {
-      log.debug(`Config section "${name}" not found, returning empty object`);
+      if (!warnedMissingSections.has(name)) {
+        warnedMissingSections.add(name);
+        log.warn(`Config section "${name}" not found, returning empty object`);
+      } else {
+        log.debug(`Config section "${name}" not found, returning empty object`);
+      }
       return {};
     }
 
@@ -190,7 +197,13 @@ class ConfigService {
     
     for (const part of parts) {
       if (current === undefined || current === null) {
-        log.warn('[ConfigService.getValue] Path resolution failed', { path, failedAt: part });
+        const key = `${path}::${part}`;
+        if (!warnedMissingPaths.has(key)) {
+          warnedMissingPaths.add(key);
+          log.warn('[ConfigService.getValue] Path resolution failed', { path, failedAt: part });
+        } else {
+          log.debug('[ConfigService.getValue] Path resolution failed', { path, failedAt: part });
+        }
         return undefined;
       }
       current = current[part];

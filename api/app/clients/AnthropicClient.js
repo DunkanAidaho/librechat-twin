@@ -71,9 +71,8 @@ try {
     configKeys: Object.keys(anthropicProviderConfig)
   });
 } catch (err) {
-  logger.error('Failed to load Anthropic provider config', {
-    error: err.message,
-    stack: err.stack
+  logger.debug('Anthropic provider config not found, skipping initialization', {
+    error: err.message
   });
 }
 
