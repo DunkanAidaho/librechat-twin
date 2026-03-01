@@ -19,12 +19,12 @@ async function getPLimit() {
 
 const { getRedisClient } = require('../../../utils/rag_redis');
 
-const ragConfig = configService.getSection('rag');
-const featuresConfig = configService.getSection('features');
-const coreConfig = configService.getSection('core');
+const ragConfig = configService.getSection('rag') || {};
+const featuresConfig = configService.getSection('features') || {};
+const coreConfig = configService.getSection('core') || {};
 
-const condenseConfig = ragConfig.condense;
-const ragContextConfig = ragConfig.context;
+const condenseConfig = ragConfig.condense || {};
+const ragContextConfig = ragConfig.context || {};
 const providersConfig = ragConfig.providers || {};
 const openrouterConfig = providersConfig.openrouter || {};
 const ollamaConfig = providersConfig.ollama || {};
@@ -35,9 +35,9 @@ const allowLocalFallbackConfig =
     : Boolean(providersConfig.allowLocalFallback);
 
 const DEBUG_CONDENSE = Boolean(condenseConfig.debug || featuresConfig.debugCondense);
-const GRAPH_CONTEXT_SUMMARY_LINE_LIMIT = ragContextConfig.summaryLineLimit;
-const GRAPH_CONTEXT_SUMMARY_HINT_MAX_CHARS = ragContextConfig.summaryHintMaxChars;
-const GRAPH_CONTEXT_INCLUDE_IN_SUMMARY = ragContextConfig.includeGraphInSummary;
+const GRAPH_CONTEXT_SUMMARY_LINE_LIMIT = ragContextConfig.summaryLineLimit || 0;
+const GRAPH_CONTEXT_SUMMARY_HINT_MAX_CHARS = ragContextConfig.summaryHintMaxChars || 0;
+const GRAPH_CONTEXT_INCLUDE_IN_SUMMARY = Boolean(ragContextConfig.includeGraphInSummary);
 
 // ИСПРАВЛЕНО: Читаем таймаут из конфигурации с увеличенным дефолтом
 const CONDENSE_TIMEOUT_MS = condenseConfig.timeoutMs || 125000;
