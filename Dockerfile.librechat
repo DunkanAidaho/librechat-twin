@@ -39,6 +39,7 @@ COPY api/manage_summaries.js       /app/api/manage_summaries.js
 COPY api/sync_history.js           /app/api/sync_history.js
 COPY api/server/utils/ /app/api/server/utils/
 COPY api/server/services/Deduplication/ /app/api/server/services/Deduplication/
+COPY config/ /app/config/
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD curl -fsS http://127.0.0.1:3080/api/status || exit 1
