@@ -3229,6 +3229,10 @@ const ragResult = await contextBuild({
       if (shouldSummarize) {
         const graphContext = graphLines.length ? { lines: graphLines, queryHint: graphQueryHint } : null;
         try {
+          const adaptiveTimeoutMs = Math.min(
+            calculateAdaptiveTimeout(vectorText.length, summarizationConfig.timeoutMs),
+            300000,
+          );
           vectorText = await withTimeout(
             mapReduceContext({
               req,
@@ -3241,10 +3245,10 @@ const ragResult = await contextBuild({
                 budgetChars: summarizationConfig.budgetChars,
                 chunkChars: summarizationConfig.chunkChars,
                 provider: summarizationConfig.provider,
-                timeoutMs: summarizationConfig.timeoutMs,
+                timeoutMs: adaptiveTimeoutMs,
               },
             }),
-            summarizationConfig.timeoutMs,
+            adaptiveTimeoutMs,
             'RAG deferred summarization timed out',
           );
         } catch (error) {
