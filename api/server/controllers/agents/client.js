@@ -75,6 +75,7 @@ const { writeTokenReport } = require('~/utils/tokenReport');
 const { updateMessage } = require('~/models');
 const { historyMemoryService } = require('~/server/services/agents/history');
 const { HistoryTrimmer } = require('~/server/services/agents/historyTrimmer');
+const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
 const { queueGateway } = require('~/server/services/agents/queue');
 const { usageReporter } = require('~/server/services/agents/usage');
 const { buildContext: contextBuild } = require('~/server/services/agents/context');
