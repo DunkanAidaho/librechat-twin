@@ -43,7 +43,6 @@ const {
 const { addCacheControl, createContextHandlers } = require('~/app/clients/prompts');
 const { normalizeInstructionsPayload } = require('~/app/clients/utils/instructions');
 const { initializeAgent } = require('~/server/services/Endpoints/agents/agent');
-const { spendStructuredTokens } = require('~/models/spendTokens');
 const { getFormattedMemories, deleteMemory, setMemory } = require('~/models');
 const { encodeAndFormat } = require('~/server/services/Files/images/encode');
 const { getProviderConfig } = require('~/server/services/Endpoints');
@@ -65,12 +64,11 @@ const {
   getDeferredContext,
   clearDeferredContext,
 } = require('~/server/services/RAG/RagContextManager');
-const { writeTokenReport } = require('~/utils/tokenReport');
 const { updateMessage } = require('~/models');
 const { historyMemoryService } = require('~/server/services/agents/history');
 const { HistoryTrimmer } = require('~/server/services/agents/historyTrimmer');
 const { queueGateway } = require('~/server/services/agents/queue');
-const { usageReporter } = require('~/server/services/agents/usage');
+const { agentUsageService } = require('~/server/services/agents/usage');
 const {
   compressMessagesForRetry,
   detectContextOverflow,
@@ -89,120 +87,6 @@ const {
 
 /** @type {Map<string, { expiresAt: number, payload: object }>} */
 
-/**
- * Безопасно приводит значение к тарифу (USD за 1000 токенов).
- */
-function parseUsdRate(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-/**
- * Определяет тарифы (prompt/completion) для расчёта стоимости токенов.
- */
-function resolvePricingRates(modelName, overrideConfig) {
-  const sources = new Set();
-  let promptUsdPer1k = null;
-  let completionUsdPer1k = null;
-
-  if (overrideConfig && typeof overrideConfig === 'object') {
-    const modelsConfig = overrideConfig.models;
-    if (modelsConfig && typeof modelsConfig === 'object') {
-      const modelPricing = modelsConfig[modelName] || modelsConfig.default;
-      if (modelPricing && typeof modelPricing === 'object') {
-        const promptCandidate = parseUsdRate(
-          modelPricing.prompt ?? modelPricing.input ?? modelPricing.promptUsdPer1k,
-        );
-        if (promptCandidate != null) {
-          promptUsdPer1k = promptCandidate;
-          sources.add('request.models.prompt');
-        }
-
-        const completionCandidate = parseUsdRate(
-          modelPricing.completion ?? modelPricing.output ?? modelPricing.completionUsdPer1k,
-        );
-        if (completionCandidate != null) {
-          completionUsdPer1k = completionCandidate;
-          sources.add('request.models.completion');
-        }
-      }
-    }
-
-    const rootPrompt = parseUsdRate(overrideConfig.promptUsdPer1k);
-    if (promptUsdPer1k == null && rootPrompt != null) {
-      promptUsdPer1k = rootPrompt;
-      sources.add('request.promptUsdPer1k');
-    }
-
-    const rootCompletion = parseUsdRate(overrideConfig.completionUsdPer1k);
-    if (completionUsdPer1k == null && rootCompletion != null) {
-      completionUsdPer1k = rootCompletion;
-      sources.add('request.completionUsdPer1k');
-    }
-  }
-
-  const globalConfig = pricingConfig && typeof pricingConfig === 'object' ? pricingConfig : {};
-  const globalModels = globalConfig.models;
-  if (globalModels && typeof globalModels === 'object' && (promptUsdPer1k == null || completionUsdPer1k == null)) {
-    const modelPricing = globalModels[modelName] || globalModels.default;
-    if (modelPricing && typeof modelPricing === 'object') {
-      if (promptUsdPer1k == null) {
-        const promptCandidate = parseUsdRate(
-          modelPricing.prompt ?? modelPricing.input ?? modelPricing.promptUsdPer1k,
-        );
-        if (promptCandidate != null) {
-          promptUsdPer1k = promptCandidate;
-          sources.add('config.models.prompt');
-        }
-      }
-
-      if (completionUsdPer1k == null) {
-        const completionCandidate = parseUsdRate(
-          modelPricing.completion ?? modelPricing.output ?? modelPricing.completionUsdPer1k,
-        );
-        if (completionCandidate != null) {
-          completionUsdPer1k = completionCandidate;
-          sources.add('config.models.completion');
-        }
-      }
-    }
-  }
-
-  if (promptUsdPer1k == null) {
-    const rootPrompt = parseUsdRate(globalConfig.promptUsdPer1k);
-    if (rootPrompt != null) {
-      promptUsdPer1k = rootPrompt;
-      sources.add('config.promptUsdPer1k');
-    }
-  }
-
-  if (completionUsdPer1k == null) {
-    const rootCompletion = parseUsdRate(globalConfig.completionUsdPer1k);
-    if (rootCompletion != null) {
-      completionUsdPer1k = rootCompletion;
-      sources.add('config.completionUsdPer1k');
-    }
-  }
-
-  if (promptUsdPer1k == null) {
-    const envPrompt = parseUsdRate(process.env.DEFAULT_PROMPT_USD_PER_1K);
-    if (envPrompt != null) {
-      promptUsdPer1k = envPrompt;
-      sources.add('env.DEFAULT_PROMPT_USD_PER_1K');
-    }
-  }
-
-  if (completionUsdPer1k == null) {
-    const envCompletion = parseUsdRate(process.env.DEFAULT_COMPLETION_USD_PER_1K);
-    if (envCompletion != null) {
-      completionUsdPer1k = envCompletion;
-      sources.add('env.DEFAULT_COMPLETION_USD_PER_1K');
-    }
-  }
-
-  const source = sources.size ? Array.from(sources).join(',') : 'unknown';
-  return { promptUsdPer1k, completionUsdPer1k, source };
-}
 
 const omitTitleOptions = new Set([
   'stream',
@@ -219,7 +103,6 @@ const omitTitleOptions = new Set([
 const featuresConfig = configService.getSection('features');
 const memoryStaticConfig = configService.getSection('memory');
 const agentsConfig = configService.getSection('agents');
-const pricingConfig = configService.getSection('pricing');
 
 const getBoolean = (path, fallback) => configService.getBoolean(path, fallback);
 const getNumber = (path, fallback) => configService.getNumber(path, fallback);
@@ -1314,159 +1197,24 @@ const ragResult = await contextBuild({
     context = 'message',
     collectedUsage = this.collectedUsage,
   }) {
-    if (!collectedUsage || !collectedUsage.length) {
-      return;
-    }
-
     const modelName = this.options.agent.model_parameters?.model ?? this.model;
-    const firstUsage = collectedUsage[0] ?? {};
-    const initialInputTokens = Number(firstUsage?.input_tokens) || 0;
-    const initialCacheCreation = Number(firstUsage?.input_token_details?.cache_creation) || 0;
-    const initialCacheRead =
-      Number(firstUsage?.input_token_details?.cache_token_details?.cache_read) || 0;
-    const input_tokens = initialInputTokens + initialCacheCreation + initialCacheRead;
 
-    let output_tokens = 0;
-    let previousTokens = input_tokens;
-    let totalCacheCreation = 0;
-    let totalCacheRead = 0;
-    let totalReasoningTokens = 0;
+    const { usage } = await agentUsageService.recordCollectedUsage({
+      model: model ?? modelName,
+      balance,
+      transactions,
+      context,
+      collectedUsage,
+      conversationId: this.conversationId,
+      user: this.user ?? this.options.req.user?.id,
+      endpointTokenConfig: this.options.endpointTokenConfig,
+      currentMessages: Array.isArray(this.currentMessages) ? this.currentMessages : [],
+      ragCacheStatus: this.options.req?.ragCacheStatus,
+      pricingOverride: this.options?.req?.pricing,
+    });
 
-    for (let i = 0; i < collectedUsage.length; i++) {
-      const usage = collectedUsage[i];
-      if (!usage) {
-        continue;
-      }
-
-      const cacheCreation = Number(usage?.input_token_details?.cache_creation) || 0;
-      const cacheRead =
-        Number(usage?.input_token_details?.cache_token_details?.cache_read) || 0;
-      totalCacheCreation += cacheCreation;
-      totalCacheRead += cacheRead;
-
-      const reasoningDirect = Number(usage?.reasoning_tokens);
-      const reasoningDetailed =
-        Number(usage?.completion_tokens_details?.reasoning_tokens);
-      if (Number.isFinite(reasoningDirect)) {
-        totalReasoningTokens += reasoningDirect;
-      } else if (Number.isFinite(reasoningDetailed)) {
-        totalReasoningTokens += reasoningDetailed;
-      }
-
-      const txMetadata = {
-        context,
-        balance,
-        transactions,
-        conversationId: this.conversationId,
-        user: this.user ?? this.options.req.user?.id,
-        endpointTokenConfig: this.options.endpointTokenConfig,
-        model: usage.model ?? model ?? modelName,
-      };
-
-      if (i > 0) {
-        output_tokens +=
-          (Number(usage.input_tokens) || 0) + cacheCreation + cacheRead - previousTokens;
-      }
-
-      output_tokens += Number(usage.output_tokens) || 0;
-      previousTokens += Number(usage.output_tokens) || 0;
-
-      if (cacheCreation > 0 || cacheRead > 0) {
-        spendStructuredTokens(
-          txMetadata,
-          {
-            promptTokens: {
-              input: usage.input_tokens,
-              write: cacheCreation,
-              read: cacheRead,
-            },
-            completionTokens: usage.output_tokens,
-          },
-        ).catch((err) => {
-          logger.error(
-            '[api/server/controllers/agents/client.js #recordCollectedUsage] Error spending structured tokens',
-            err,
-          );
-        });
-        continue;
-      }
-
-      usageReporter.spendTokens(txMetadata, {
-        promptTokens: usage.input_tokens,
-        completionTokens: usage.output_tokens,
-      }).catch((err) => {
-        logger.error(
-          '[api/server/controllers/agents/client.js #recordCollectedUsage] Error spending tokens',
-          err,
-        );
-      });
-    }
-
-    this.usage = {
-      input_tokens,
-      output_tokens,
-    };
-
-    const totalTokensBilled = input_tokens + output_tokens + totalReasoningTokens;
-    const pricingRates = resolvePricingRates(modelName, this.options?.req?.pricing);
-    const promptRate = pricingRates.promptUsdPer1k;
-    const completionRate = pricingRates.completionUsdPer1k;
-
-    let costUsd = null;
-    if (promptRate != null || completionRate != null) {
-      costUsd = 0;
-      if (promptRate != null) {
-        costUsd += (input_tokens / 1000) * promptRate;
-      }
-      if (completionRate != null) {
-        costUsd += ((output_tokens + totalReasoningTokens) / 1000) * completionRate;
-      }
-      costUsd = Math.round(costUsd * 1_000_000) / 1_000_000;
-
-      if (typeof usageReporter.observeCost === 'function' && costUsd != null) {
-        usageReporter.observeCost(
-          {
-            model: modelName,
-            endpoint:
-              this.options?.endpoint || this.options?.agent?.provider || 'unknown',
-          },
-          costUsd,
-        );
-      }
-    }
-
-    const promptRateLog = promptRate != null ? promptRate : 'n/a';
-    const completionRateLog = completionRate != null ? completionRate : 'n/a';
-    const costLog = costUsd != null ? costUsd.toFixed(6) : 'n/a';
-
-    logger.info(
-      `[pricing.tokens.detail] conversation=${
-        this.conversationId ?? 'unknown'
-      } model=${modelName} prompt=${input_tokens} completion=${output_tokens} reasoning=${totalReasoningTokens} cache_write=${totalCacheCreation} cache_read=${totalCacheRead} promptUsdPer1k=${promptRateLog} completionUsdPer1k=${completionRateLog} pricingSource=${pricingRates.source}`
-    );
-    logger.info(
-      `[pricing.tokens.total] conversation=${this.conversationId ?? 'unknown'} totalTokens=${totalTokensBilled} costUsd=${costLog}`
-    );
-
-    try {
-      const messages = Array.isArray(this.currentMessages) ? this.currentMessages : [];
-      writeTokenReport({
-        sessionId: this.conversationId ?? 'unknown-session',
-        totalTokens: totalTokensBilled,
-        promptTokens: input_tokens,
-        completionTokens: output_tokens,
-        reasoningTokens: totalReasoningTokens,
-        costUsd,
-        pricingSource: pricingRates.source,
-        ragReuseCount: this.options.req?.ragCacheStatus === 'hit' ? 1 : 0,
-        perMessage: messages.map((msg) => ({
-          messageId: msg?.messageId ?? 'unknown-message',
-          tokens: Number(msg?.tokenCount) || 0,
-          isRagContext: msg?.metadata?.isRagContext === true,
-        })),
-      });
-    } catch (reportError) {
-      logger.warn('[token.report] failed', { message: reportError?.message });
+    if (usage) {
+      this.usage = usage;
     }
   }
 
@@ -2064,35 +1812,17 @@ const ragResult = await contextBuild({
     completionTokens,
     context = 'message',
   }) {
-    try {
-      await usageReporter.spendTokens(
-        {
-          model,
-          context,
-          balance,
-          conversationId: this.conversationId,
-          user: this.user ?? this.options.req.user?.id,
-          endpointTokenConfig: this.options.endpointTokenConfig,
-        },
-        { promptTokens, completionTokens },
-      );
-
-      if (usage && typeof usage === 'object' && 'reasoning_tokens' in usage && typeof usage.reasoning_tokens === 'number') {
-        await usageReporter.spendTokens(
-          {
-            model,
-            balance,
-            context: 'reasoning',
-            conversationId: this.conversationId,
-            user: this.user ?? this.options.req.user?.id,
-            endpointTokenConfig: this.options.endpointTokenConfig,
-          },
-          { completionTokens: usage.reasoning_tokens },
-        );
-      }
-    } catch (error) {
-      logger.error('[api/server/controllers/agents/client.js #recordTokenUsage] Error recording token usage', error);
-    }
+    await agentUsageService.recordTokenUsage({
+      model,
+      usage,
+      balance,
+      promptTokens,
+      completionTokens,
+      context,
+      conversationId: this.conversationId,
+      user: this.user ?? this.options.req.user?.id,
+      endpointTokenConfig: this.options.endpointTokenConfig,
+    });
   }
 
   getEncoding() {
@@ -2122,37 +1852,15 @@ const ragResult = await contextBuild({
       return;
     }
 
-    const breakdown = usageReporter.computePromptTokenBreakdown({
-      conversationId: this.promptTokenContext.conversationId,
-      promptTokens: promptTokens ?? (this.promptTokenContext.promptTokensEstimate ?? 0),
-      instructionsTokens: this.promptTokenContext.instructionsTokens,
-      ragGraphTokens: this.promptTokenContext.ragGraphTokens,
-      ragVectorTokens: this.promptTokenContext.ragVectorTokens,
-      messages: this.promptTokenContext.messages,
-
-      cache: {
-        read: cacheRead,
-        write: cacheWrite
-      },
-
-      reasoningTokens: reasoningTokens
+    const breakdown = agentUsageService.emitPromptTokenBreakdown({
+      promptTokenContext: this.promptTokenContext,
+      promptTokens,
+      cacheRead,
+      cacheWrite,
+      reasoningTokens,
     });
 
     this.promptTokenBreakdown = breakdown;
-
-    if (this.options) {
-      this.options.req = this.options && this.options;
-    }
-
-    if (configService.get("logging.tokenBreakdown", {
-      enabled: true,
-      level: "info"
-    }).enabled) {
-      usageReporter.logPromptTokenBreakdown(logger, breakdown, configService.get("logging.tokenBreakdown", {
-        enabled: true,
-        level: "info"
-      }).level || "info");
-    }
   }
 
   async applyDeferredCondensation({

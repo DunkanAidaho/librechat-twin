@@ -1,6 +1,9 @@
 const { spendTokens, spendStructuredTokens } = require('~/models/spendTokens');
 const { writeTokenReport } = require('~/utils/tokenReport');
 const { observeCost } = require('~/utils/ragMetrics');
+const { createAgentUsageService } = require('~/server/services/agents/usage/agentUsageService');
+const { getLogger } = require('~/utils/logger');
+const configService = require('~/server/services/Config/ConfigService');
 const {
   computePromptTokenBreakdown,
   logPromptTokenBreakdown,
@@ -32,7 +35,17 @@ function createUsageReporter(overrides = {}) {
 
 const usageReporter = createUsageReporter();
 
+const agentUsageService = createAgentUsageService({
+  pricingConfig: configService.getSection('pricing') ?? null,
+  usageReporter,
+  writeTokenReport,
+  logger: getLogger('agents.usage'),
+  configService,
+});
+
 module.exports = {
   createUsageReporter,
   usageReporter,
+  createAgentUsageService,
+  agentUsageService,
 };

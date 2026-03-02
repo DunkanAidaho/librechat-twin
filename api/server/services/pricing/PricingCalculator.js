@@ -207,6 +207,8 @@ class PricingCalculator {
    * @param {Object} params
    */
   logPricing({
+    logger: scopedLogger = logger,
+    overrideConfig,
     conversationId,
     modelName,
     inputTokens,
@@ -217,12 +219,12 @@ class PricingCalculator {
     costUsd,
     source,
   }) {
-    const rates = this.resolvePricingRates(modelName);
+    const rates = this.resolvePricingRates(modelName, overrideConfig);
     const promptRateLog = rates.promptUsdPer1k != null ? rates.promptUsdPer1k : 'n/a';
     const completionRateLog = rates.completionUsdPer1k != null ? rates.completionUsdPer1k : 'n/a';
     const costLog = PricingCalculator.formatCost(costUsd);
 
-    logger.info(
+    scopedLogger.info(
       `[pricing.tokens.detail] conversation=${conversationId ?? 'unknown'} model=${modelName} ` +
         `prompt=${inputTokens} completion=${outputTokens} reasoning=${reasoningTokens} ` +
         `cache_write=${cacheCreation} cache_read=${cacheRead} ` +
@@ -231,7 +233,7 @@ class PricingCalculator {
     );
 
     const totalTokens = inputTokens + outputTokens + reasoningTokens;
-    logger.info(
+    scopedLogger.info(
       `[pricing.tokens.total] conversation=${conversationId ?? 'unknown'} ` +
         `totalTokens=${totalTokens} costUsd=${costLog}`,
     );

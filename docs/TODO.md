@@ -116,6 +116,7 @@
   - Увязать с существующими сервисами (`server/services/agents/*`, `server/services/pricing/*`, `server/services/RAG/*`).
 - **Статус**
   - ✅ utils-хелперы вынесены: `normalizeInstructionsPayload` → `app/clients/utils/instructions.js`, `extractMessageText/normalizeMemoryText/makeIngestKey` → `server/utils/messageUtils.js`, `detectContextOverflow/compressMessagesForRetry` → `server/services/agents/utils.js`.
+  - ✅ pricing/usage: `recordCollectedUsage` + `emitPromptTokenBreakdown` переключены на `server/services/agents/usage`, pricing config подключён в usage service.
 - **Ссылки**
   - План: [`docs/refactoring/client_refactoring.md`](docs/refactoring/client_refactoring.md)
 
