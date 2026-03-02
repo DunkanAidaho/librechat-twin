@@ -117,6 +117,10 @@
 - **Статус**
   - ✅ utils-хелперы вынесены: `normalizeInstructionsPayload` → `app/clients/utils/instructions.js`, `extractMessageText/normalizeMemoryText/makeIngestKey` → `server/utils/messageUtils.js`, `detectContextOverflow/compressMessagesForRetry` → `server/services/agents/utils.js`.
   - ✅ pricing/usage: `recordCollectedUsage` + `emitPromptTokenBreakdown` переключены на `server/services/agents/usage`, pricing config подключён в usage service.
+  - ✅ tokens: `createTokenCounter` и `calculateCurrentTokenCount` переведены на `server/services/tokens/TokenCounter`.
+  - ✅ memory: `useMemory`/`enrichContextWithMemoryAgent` вынесены в `server/services/agents/memory/agentMemoryService`, очередь используется через `queueGateway`.
+  - ✅ prompt: deferred condense перенесён в `server/services/agents/context` (applyDeferredCondensation), RAG-сборка остаётся в `context`.
+  - ✅ tools: обработка `tool errors` и prompt context handlers вынесены в `server/services/agents/tools`.
 - **Ссылки**
   - План: [`docs/refactoring/client_refactoring.md`](docs/refactoring/client_refactoring.md)
 

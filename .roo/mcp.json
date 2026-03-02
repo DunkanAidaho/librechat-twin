@@ -6,6 +6,17 @@
         "-y",
         "@modelcontextprotocol/server-filesystem",
         "~/git"
+      ],
+      "alwaysAllow": [
+        "edit_file"
+      ]
+    },
+    "git": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-git",
+        "--repository",
+        "~/git"
       ]
     }
   }

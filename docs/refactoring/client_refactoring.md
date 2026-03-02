@@ -56,11 +56,12 @@
 | pricing | pricing rates, cost calc | `server/services/pricing/PricingCalculator.js` | `api/server/services/pricing/PricingCalculator.js` |
 | memory | memory agent + queue | `server/services/agents/history`, `server/services/RAG/memoryQueue` | `api/server/services/agents/history/index.js`, `api/server/services/RAG/memoryQueue.js` |
 | prompt | buildMessages, deferred condense | `server/services/agents/context`, `server/services/RAG/RagContextManager` | `api/server/services/agents/context/index.js`, `api/server/services/RAG/RagContextManager.js` |
-| tools | tool errors/context handlers | `server/services/agents/tools` (новый фасад) | — |
+| tools | tool errors/context handlers | `server/services/agents/tools` (новый фасад) | `api/server/services/agents/tools/index.js` |
 | usage | usage reporting & breakdown | `server/services/agents/usage` | `api/server/services/agents/usage/index.js` |
 
 ## Следующие шаги
 
 1. ✅ Вынести утилиты из `client.js` и обновить импорты (instructions/messageUtils/agents/utils).
-2. Разделить pricing/usage/memory в сервисы с единым интерфейсом.
-3. Обновить `docs/TODO.md` и `docs/project_map` после первых переносов.
+2. ✅ Разделить pricing/usage/memory в сервисы с единым интерфейсом.
+3. ✅ Разнести prompt/tools/usage и зафиксировать новые фасады.
+4. Обновить `docs/TODO.md` и `docs/project_map` после первых переносов.

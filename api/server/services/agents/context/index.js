@@ -1,4 +1,12 @@
 const axios = require('axios');
+const { Tokenizer } = require('@librechat/api');
+const { condenseContext: ragCondenseContext } = require('~/server/services/RAG/condense');
+const {
+  buildRagBlock,
+  replaceRagBlock,
+  getDeferredContext,
+  clearDeferredContext,
+} = require('~/server/services/RAG/RagContextManager');
 const { buildContext } = require('./builder');
 
 function sanitizeGraphContext(lines, config) {
@@ -191,6 +199,161 @@ function calculateAdaptiveTimeout(contextLength, baseTimeoutMs) {
   return adaptiveTimeout;
 }
 
+function withTimeout(promise, timeoutMs, timeoutMessage = 'Operation timed out') {
+  if (!timeoutMs || timeoutMs <= 0) {
+    return promise;
+  }
+
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`${timeoutMessage} after ${timeoutMs} ms`)),
+        timeoutMs,
+      );
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+async function applyDeferredCondensation({
+  req,
+  res,
+  endpointOption,
+  runtimeCfg,
+  userQuery,
+  systemContentRef,
+  updateSystemContent,
+  deferredContext,
+  encoding = 'o200k_base',
+  logger,
+  conversationId,
+  maxContextTokens,
+}) {
+  const snapshot = deferredContext || getDeferredContext(req);
+  if (!snapshot) {
+    return;
+  }
+
+  try {
+    const policyIntro = snapshot.policyIntro;
+    const graphLines = Array.isArray(snapshot.graphLines) ? snapshot.graphLines : [];
+    const graphQueryHint = snapshot.graphQueryHint;
+    const summarizationDefaults = { budgetChars: 12000, chunkChars: 20000, timeoutMs: 125000 };
+    const summarizationConfig = Object.assign({}, summarizationDefaults, {
+      budgetChars:
+        Number.isFinite(snapshot?.summarizationConfig?.budgetChars) &&
+        snapshot.summarizationConfig.budgetChars > 0
+          ? snapshot.summarizationConfig.budgetChars
+          : summarizationDefaults.budgetChars,
+      chunkChars:
+        Number.isFinite(snapshot?.summarizationConfig?.chunkChars) &&
+        snapshot.summarizationConfig.chunkChars > 0
+          ? snapshot.summarizationConfig.chunkChars
+          : summarizationDefaults.chunkChars,
+      timeoutMs:
+        Number.isFinite(snapshot?.summarizationConfig?.timeoutMs) &&
+        snapshot.summarizationConfig.timeoutMs > 0
+          ? snapshot.summarizationConfig.timeoutMs
+          : summarizationDefaults.timeoutMs,
+      provider: snapshot?.summarizationConfig?.provider,
+      enabled: snapshot?.summarizationConfig?.enabled !== false,
+    });
+
+    let vectorText = typeof snapshot.vectorText === 'string' ? snapshot.vectorText : '';
+    const shouldSummarize =
+      summarizationConfig.enabled && vectorText.length > summarizationConfig.budgetChars;
+
+    if (shouldSummarize) {
+      const graphContext = graphLines.length
+        ? { lines: graphLines, queryHint: graphQueryHint }
+        : null;
+      try {
+        const adaptiveTimeoutMs = Math.min(
+          calculateAdaptiveTimeout(vectorText.length, summarizationConfig.timeoutMs),
+          300000,
+        );
+        vectorText = await withTimeout(
+          mapReduceContext({
+            ragCondenseContext,
+            logger,
+            req,
+            res,
+            endpointOption,
+            contextText: vectorText,
+            userQuery,
+            graphContext,
+            summarizationConfig: {
+              budgetChars: summarizationConfig.budgetChars,
+              chunkChars: summarizationConfig.chunkChars,
+              provider: summarizationConfig.provider,
+              timeoutMs: adaptiveTimeoutMs,
+            },
+          }),
+          adaptiveTimeoutMs,
+          'RAG deferred summarization timed out',
+        );
+      } catch (error) {
+        logger?.error?.('[rag.context.deferred.summarize.error]', {
+          conversationId,
+          message: error?.message,
+          stack: error?.stack,
+        });
+      }
+    }
+
+    const ragBlock = buildRagBlock({
+      policyIntro,
+      graphLines,
+      vectorText,
+    });
+
+    const nextSystemContent = replaceRagBlock(systemContentRef(), ragBlock);
+    updateSystemContent(nextSystemContent);
+
+    const graphTokens = graphLines.length
+      ? Tokenizer.getTokenCount(graphLines.join('\n'), encoding)
+      : 0;
+    const vectorTokens = vectorText
+      ? Tokenizer.getTokenCount(vectorText, encoding)
+      : 0;
+    const contextTokens = ragBlock
+      ? Tokenizer.getTokenCount(ragBlock, encoding)
+      : graphTokens + vectorTokens;
+
+    if (req) {
+      req.ragMetrics = Object.assign({}, req.ragMetrics, {
+        graphTokens,
+        vectorTokens,
+        contextTokens,
+      });
+      req.ragContextTokens = contextTokens;
+    }
+
+    const maxPromptTokens =
+      runtimeCfg?.tokenLimits?.maxPromptTokens ||
+      runtimeCfg?.tokenLimits?.maxMessageTokens ||
+      maxContextTokens ||
+      0;
+
+    if (maxPromptTokens > 0 && contextTokens > maxPromptTokens) {
+      logger?.warn?.('[rag.context.preoverflow]', {
+        conversationId,
+        contextTokens,
+        maxPromptTokens,
+      });
+    }
+  } catch (error) {
+    logger?.error?.('[rag.context.deferred.error]', {
+      conversationId,
+      message: error?.message,
+      stack: error?.stack,
+    });
+  } finally {
+    clearDeferredContext(req);
+  }
+}
+
 async function mapReduceContext({
   ragCondenseContext,
   logger,
@@ -270,4 +433,5 @@ module.exports = {
   calculateAdaptiveTimeout,
   mapReduceContext,
   buildContext,
+  applyDeferredCondensation,
 };

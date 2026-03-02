@@ -9,14 +9,11 @@ const { EventService } = require('../../services/Events/EventService');
 const {
   createRun,
   Tokenizer,
-  checkAccess,
-  logAxiosError,
   resolveHeaders,
   getBalanceConfig,
   memoryInstructions,
   formatContentStrings,
   getTransactionsConfig,
-  createMemoryProcessor,
 } = require('@librechat/api');
 const {
   Callback,
@@ -30,44 +27,31 @@ const {
 } = require('@librechat/agents');
 const {
   Constants,
-  Permissions,
   VisionModes,
   ContentTypes,
   EModelEndpoint,
-  PermissionTypes,
   isAgentsEndpoint,
   AgentCapabilities,
   bedrockInputSchema,
   removeNullishValues,
 } = require('librechat-data-provider');
-const { addCacheControl, createContextHandlers } = require('~/app/clients/prompts');
+const { addCacheControl } = require('~/app/clients/prompts');
 const { normalizeInstructionsPayload } = require('~/app/clients/utils/instructions');
-const { initializeAgent } = require('~/server/services/Endpoints/agents/agent');
-const { getFormattedMemories, deleteMemory, setMemory } = require('~/models');
 const { encodeAndFormat } = require('~/server/services/Files/images/encode');
 const { getProviderConfig } = require('~/server/services/Endpoints');
 const { checkCapability } = require('~/server/services/Config');
 const BaseClient = require('~/app/clients/BaseClient');
-const { getRoleByName } = require('~/models/Role');
-const { loadAgent } = require('~/models/Agent');
 const { getMCPManager } = require('~/config');
 const runtimeMemoryConfig = require('~/utils/memoryConfig');
 const MessageHistoryManager = require('~/server/services/agents/MessageHistoryManager');
 const { ContextCompressor, MessageCompressorBridge } = require('~/server/services/agents/ContextCompressor');
 const { analyzeIntent } = require('~/server/services/RAG/intentAnalyzer');
 const { runMultiStepRag } = require('~/server/services/RAG/multiStepOrchestrator');
-const { condenseContext: ragCondenseContext } = require('~/server/services/RAG/condense');
-const {
-  buildRagBlock,
-  replaceRagBlock,
-  setDeferredContext,
-  getDeferredContext,
-  clearDeferredContext,
-} = require('~/server/services/RAG/RagContextManager');
-const { updateMessage } = require('~/models');
-const { historyMemoryService } = require('~/server/services/agents/history');
+const { setDeferredContext } = require('~/server/services/RAG/RagContextManager');
 const { HistoryTrimmer } = require('~/server/services/agents/historyTrimmer');
 const { queueGateway } = require('~/server/services/agents/queue');
+const { createAgentMemoryService } = require('~/server/services/agents/memory/agentMemoryService');
+const { createAgentToolsService } = require('~/server/services/agents/tools');
 const { agentUsageService } = require('~/server/services/agents/usage');
 const {
   compressMessagesForRetry,
@@ -78,12 +62,15 @@ const {
   fetchGraphContext,
   calculateAdaptiveTimeout,
   mapReduceContext,
+  applyDeferredCondensation,
+  withTimeout,
 } = require('~/server/services/agents/context');
 const {
   extractMessageText,
   normalizeMemoryText,
   makeIngestKey,
 } = require('~/server/utils/messageUtils');
+const TokenCounter = require('~/server/services/tokens/TokenCounter');
 
 /** @type {Map<string, { expiresAt: number, payload: object }>} */
 
@@ -139,6 +126,8 @@ const MEMORY_TASK_TIMEOUT_MS = configService.getNumber('memory.queue.taskTimeout
 const DEFAULT_SYSTEM_PROMPT = 'Ты самый полезный ИИ-помощник. Всегда в приоритете используй русский язык для ответов.';
 
 const logger = getLogger('agents.client');
+const memoryService = createAgentMemoryService();
+const toolsService = createAgentToolsService({ logger });
 
 /**
  * Provides safe logger methods with environment-aware fallbacks.
@@ -150,26 +139,6 @@ const createSafeLogger = () => ({
 });
 
 const { error: safeError } = createSafeLogger();
-
-/**
- * Wraps a promise with a timeout.
- */
-function withTimeout(promise, timeoutMs, timeoutMessage = 'Operation timed out') {
-  if (!timeoutMs || timeoutMs <= 0) {
-    return promise;
-  }
-
-  let timer;
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      timer = setTimeout(
-        () => reject(new Error(`${timeoutMessage} after ${timeoutMs} ms`)),
-        timeoutMs,
-      );
-    }),
-  ]).finally(() => clearTimeout(timer));
-}
 
 /**
  * Checks if the agent uses a Google/Gemini model.
@@ -196,26 +165,6 @@ const payloadParser = ({ req, agent, endpoint }) => {
 };
 
 const noSystemModelRegex = [/\b(o1-preview|o1-mini|amazon\.titan-text)\b/gi];
-
-/**
- * Creates a token counter function for messages.
- */
-function createTokenCounter(encoding) {
-  return function (message) {
-    const countTokens = (text) => Tokenizer.getTokenCount(text, encoding);
-    return getTokenCountForMessage(message, countTokens);
-  };
-}
-
-/**
- * Logs tool errors with structured details.
- */
-function logToolError(graph, error, toolId) {
-  logAxiosError({
-    error,
-    message: `[api/server/controllers/agents/client.js #chatCompletion] Tool Error "${toolId}"`,
-  });
-}
 
 
 /**
@@ -859,7 +808,7 @@ const ragResult = await contextBuild({
     }
 
     if (this.message_file_map && !isAgentsEndpoint(this.options.endpoint)) {
-      this.contextHandlers = createContextHandlers(
+      this.contextHandlers = toolsService.createPromptContextHandlers(
         this.options.req,
         orderedMessages[orderedMessages.length - 1].text,
       );
@@ -993,191 +942,30 @@ const ragResult = await contextBuild({
   }
 
   async awaitMemoryWithTimeout(memoryPromise, timeoutMs = 3000) {
-    if (!memoryPromise) {
-      return;
-    }
-
-    try {
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Memory processing timeout')), timeoutMs),
-      );
-
-      const attachments = await Promise.race([memoryPromise, timeoutPromise]);
-      return attachments;
-    } catch (error) {
-      if (error.message === 'Memory processing timed out') {
-        logger.warn('[AgentClient] Memory processing timed out after 3 seconds');
-      } else {
-        logger.error('[AgentClient] Error processing memory:', error);
-      }
-      return;
-    }
+    return memoryService.awaitMemoryWithTimeout(memoryPromise, timeoutMs, logger);
   }
 
   async useMemory() {
-    const user = this.options.req.user;
-    if (user.personalization?.memories === false) {
-      return;
-    }
-    const hasAccess = await checkAccess({
-      user,
-      permissionType: PermissionTypes.MEMORIES,
-      permissions: [Permissions.USE],
-      getRoleByName,
-    });
-
-    if (!hasAccess) {
-      logger.debug(
-        `[api/server/controllers/agents/client.js #useMemory] User ${user.id} does not have USE permission for memories`,
-      );
-      return;
-    }
-    const appConfig = this.options.req.config;
-    const memoryConfig = appConfig.memory;
-    if (!memoryConfig || memoryConfig.disabled === true) {
-      return;
-    }
-
-    let prelimAgent;
-    const allowedProviders = new Set(
-      appConfig?.endpoints?.[EModelEndpoint.agents]?.allowedProviders,
-    );
-    try {
-      if (memoryConfig.agent?.id != null && memoryConfig.agent.id !== this.options.agent.id) {
-        prelimAgent = await loadAgent({
-          req: this.options.req,
-          agent_id: memoryConfig.agent.id,
-          endpoint: EModelEndpoint.agents,
-        });
-      } else if (
-        memoryConfig.agent?.id == null &&
-        memoryConfig.agent?.model != null &&
-        memoryConfig.agent?.provider != null
-      ) {
-        prelimAgent = { id: Constants.EPHEMERAL_AGENT_ID, ...memoryConfig.agent };
-      }
-    } catch (error) {
-      logger.error(
-        '[api/server/controllers/agents/client.js #useMemory] Error loading agent for memory',
-        error,
-      );
-    }
-
-    const agent = await initializeAgent({
+    const { withoutKeys, processMemory } = await memoryService.useMemory({
       req: this.options.req,
       res: this.options.res,
-      agent: prelimAgent,
-      allowedProviders,
-      endpointOption: {
-        endpoint:
-          prelimAgent.id !== Constants.EPHEMERAL_AGENT_ID
-            ? EModelEndpoint.agents
-            : memoryConfig.agent?.provider,
-      },
-    });
-
-    if (!agent) {
-      logger.warn(
-        '[api/server/controllers/agents/client.js #useMemory] No agent found for memory',
-        memoryConfig,
-      );
-      return;
-    }
-
-    const llmConfig = Object.assign(
-      {
-        provider: agent.provider,
-        model: agent.model,
-      },
-      agent.model_parameters,
-    );
-
-    const config = {
-      validKeys: memoryConfig.validKeys,
-      instructions: agent.instructions,
-      llmConfig,
-      tokenLimit: memoryConfig.tokenLimit,
-    };
-
-    const userId = this.options.req.user.id + '';
-    const messageId = this.responseMessageId + '';
-    const conversationId = this.conversationId + '';
-    const [withoutKeys, processMemory] = await createMemoryProcessor({
-      userId,
-      config,
-      messageId,
-      conversationId,
-      memoryMethods: {
-        setMemory,
-        deleteMemory,
-        getFormattedMemories,
-      },
-      res: this.options.res,
+      agent: this.options.agent,
+      responseMessageId: this.responseMessageId,
+      conversationId: this.conversationId,
+      logger,
     });
 
     this.processMemory = processMemory;
     return withoutKeys;
   }
 
-  removeImageContentFromMessage(message) {
-    if (!message.content || typeof message.content === 'string') {
-      return message;
-    }
-
-    if (Array.isArray(message.content)) {
-      const filteredContent = message.content.filter(
-        (part) => part.type !== ContentTypes.IMAGE_URL,
-      );
-
-      if (filteredContent.length === 1 && filteredContent[0].type === ContentTypes.TEXT) {
-        const MessageClass = message.constructor;
-        return new MessageClass({
-          content: filteredContent[0].text,
-          additional_kwargs: message.additional_kwargs,
-        });
-      }
-
-      const MessageClass = message.constructor;
-      return new MessageClass({
-        content: filteredContent,
-        additional_kwargs: message.additional_kwargs,
-      });
-    }
-
-    return message;
-  }
-
   async enrichContextWithMemoryAgent(messages) {
-    try {
-      if (this.processMemory == null) {
-        return;
-      }
-      const appConfig = this.options.req.config;
-      const memoryConfig = appConfig.memory;
-      const messageWindowSize = memoryConfig?.messageWindowSize ?? 5;
-
-      let messagesToProcess = [...messages];
-      if (messages.length > messageWindowSize) {
-        for (let i = messages.length - messageWindowSize; i >= 0; i--) {
-          const potentialWindow = messages.slice(i, i + messageWindowSize);
-          if (potentialWindow[0]?.role === 'user') {
-            messagesToProcess = [...potentialWindow];
-            break;
-          }
-        }
-
-        if (messagesToProcess.length === messages.length) {
-          messagesToProcess = [...messages.slice(-messageWindowSize)];
-        }
-      }
-
-      const filteredMessages = messagesToProcess.map((msg) => this.removeImageContentFromMessage(msg));
-      const bufferString = getBufferString(filteredMessages);
-      const bufferMessage = new HumanMessage(`# Current Chat:\n\n${bufferString}`);
-      return await this.processMemory([bufferMessage]);
-    } catch (error) {
-      logger.error('Memory Agent failed to process memory', error);
-    }
+    return memoryService.enrichContextWithMemoryAgent({
+      messages,
+      processMemory: this.processMemory,
+      req: this.options.req,
+      logger,
+    });
   }
 
   async sendCompletion(payload, opts = {}) {
@@ -1230,21 +1018,12 @@ const ragResult = await contextBuild({
   }
 
   calculateCurrentTokenCount({ tokenCountMap, currentMessageId, usage }) {
-    const originalEstimate = tokenCountMap[currentMessageId] || 0;
-
-    if (!usage || typeof usage[this.inputTokensKey] !== 'number') {
-      return originalEstimate;
-    }
-
-    tokenCountMap[currentMessageId] = 0;
-    const totalTokensFromMap = Object.values(tokenCountMap).reduce((sum, count) => {
-      const numCount = Number(count);
-      return sum + (isNaN(numCount) ? 0 : numCount);
-    }, 0);
-    const totalInputTokens = usage[this.inputTokensKey] ?? 0;
-
-    const currentMessageTokens = totalInputTokens - totalTokensFromMap;
-    return currentMessageTokens > 0 ? currentMessageTokens : originalEstimate;
+    return TokenCounter.calculateCurrentTokenCount({
+      tokenCountMap,
+      currentMessageId,
+      usage,
+      inputTokensKey: this.inputTokensKey,
+    });
   }
 
   async chatCompletion({ payload, userMCPAuthMap, abortController = null }) {
@@ -1349,9 +1128,7 @@ const ragResult = await contextBuild({
         config.configurable.agent_index = i;
         const noSystemMessages = noSystemModelRegex.some((regex) => agent.model_parameters.model.match(regex));
 
-        const systemMessage = Object.values(agent.toolContextMap ?? {})
-          .join('\n')
-          .trim();
+        const systemMessage = toolsService.buildToolSystemMessage(agent.toolContextMap);
 
         let instructionsForLangChain = null;
         if (typeof agent.instructions === 'string' && agent.instructions.length > 0) {
@@ -1507,11 +1284,11 @@ const ragResult = await contextBuild({
         
         await run.processStream({ messages }, config, {
           keepContent: i !== 0,
-          tokenCounter: createTokenCounter(this.getEncoding()),
+          tokenCounter: TokenCounter.createCounter(this.getEncoding()),
           indexTokenCountMap: currentIndexCountMap,
           maxContextTokens: agent.maxContextTokens,
           callbacks: {
-            [Callback.TOOL_ERROR]: logToolError,
+            [Callback.TOOL_ERROR]: toolsService.logToolError,
           },
         });
 
@@ -1576,7 +1353,7 @@ const ragResult = await contextBuild({
           }
         }
         const encoding = this.getEncoding();
-        const tokenCounter = createTokenCounter(encoding);
+        const tokenCounter = TokenCounter.createCounter(encoding);
         for (const [agentId, agent] of this.agentConfigs) {
           if (abortController.signal.aborted === true) {
             break;
@@ -1873,120 +1650,20 @@ const ragResult = await contextBuild({
     updateSystemContent,
     deferredContext,
   }) {
-    const snapshot = deferredContext || getDeferredContext(req);
-    if (!snapshot) {
-      return;
-    }
-
-    try {
-      const encoding = this.getEncoding();
-      const policyIntro = snapshot.policyIntro;
-      const graphLines = Array.isArray(snapshot.graphLines) ? snapshot.graphLines : [];
-      const graphQueryHint = snapshot.graphQueryHint;
-      const summarizationDefaults = { budgetChars: 12000, chunkChars: 20000, timeoutMs: 125000 };
-      const summarizationConfig = Object.assign({}, summarizationDefaults, {
-        budgetChars:
-          Number.isFinite(snapshot?.summarizationConfig?.budgetChars) &&
-          snapshot.summarizationConfig.budgetChars > 0
-            ? snapshot.summarizationConfig.budgetChars
-            : summarizationDefaults.budgetChars,
-        chunkChars:
-          Number.isFinite(snapshot?.summarizationConfig?.chunkChars) &&
-          snapshot.summarizationConfig.chunkChars > 0
-            ? snapshot.summarizationConfig.chunkChars
-            : summarizationDefaults.chunkChars,
-        timeoutMs:
-          Number.isFinite(snapshot?.summarizationConfig?.timeoutMs) &&
-          snapshot.summarizationConfig.timeoutMs > 0
-            ? snapshot.summarizationConfig.timeoutMs
-            : summarizationDefaults.timeoutMs,
-        provider: snapshot?.summarizationConfig?.provider,
-        enabled: snapshot?.summarizationConfig?.enabled !== false,
-      });
-
-      let vectorText = typeof snapshot.vectorText === 'string' ? snapshot.vectorText : '';
-      const shouldSummarize = summarizationConfig.enabled && vectorText.length > summarizationConfig.budgetChars;
-
-      if (shouldSummarize) {
-        const graphContext = graphLines.length ? { lines: graphLines, queryHint: graphQueryHint } : null;
-        try {
-          const adaptiveTimeoutMs = Math.min(
-            calculateAdaptiveTimeout(vectorText.length, summarizationConfig.timeoutMs),
-            300000,
-          );
-          vectorText = await withTimeout(
-            mapReduceContext({
-              ragCondenseContext,
-              logger,
-              req,
-              res,
-              endpointOption,
-              contextText: vectorText,
-              userQuery,
-              graphContext,
-              summarizationConfig: {
-                budgetChars: summarizationConfig.budgetChars,
-                chunkChars: summarizationConfig.chunkChars,
-                provider: summarizationConfig.provider,
-                timeoutMs: adaptiveTimeoutMs,
-              },
-            }),
-            adaptiveTimeoutMs,
-            'RAG deferred summarization timed out',
-          );
-        } catch (error) {
-          logger.error('[rag.context.deferred.summarize.error]', {
-            conversationId: this.conversationId,
-            message: error?.message,
-            stack: error?.stack,
-          });
-        }
-      }
-
-      const ragBlock = buildRagBlock({
-        policyIntro,
-        graphLines,
-        vectorText,
-      });
-
-      const nextSystemContent = replaceRagBlock(systemContentRef(), ragBlock);
-      updateSystemContent(nextSystemContent);
-
-      const graphTokens = graphLines.length ? Tokenizer.getTokenCount(graphLines.join('\n'), encoding) : 0;
-      const vectorTokens = vectorText ? Tokenizer.getTokenCount(vectorText, encoding) : 0;
-      const contextTokens = ragBlock ? Tokenizer.getTokenCount(ragBlock, encoding) : graphTokens + vectorTokens;
-
-      if (req) {
-        req.ragMetrics = Object.assign({}, req.ragMetrics, {
-          graphTokens,
-          vectorTokens,
-          contextTokens,
-        });
-        req.ragContextTokens = contextTokens;
-      }
-
-      const maxPromptTokens =
-        runtimeCfg?.tokenLimits?.maxPromptTokens ||
-        runtimeCfg?.tokenLimits?.maxMessageTokens ||
-        this.maxContextTokens ||
-        0;
-
-      if (maxPromptTokens > 0 && contextTokens > maxPromptTokens) {
-        logger.warn('[rag.context.preoverflow]', {
-          conversationId: this.conversationId,
-          contextTokens,
-          maxPromptTokens,
-        });
-      }
-    } catch (error) {
-      logger.error('[rag.context.deferred.error]', {
-        conversationId: this.conversationId,
-        message: error?.message,
-        stack: error?.stack,
-      });
-    } finally {
-      clearDeferredContext(req);
-    }
+    return applyDeferredCondensation({
+      req,
+      res,
+      endpointOption,
+      runtimeCfg,
+      userQuery,
+      systemContentRef,
+      updateSystemContent,
+      deferredContext,
+      encoding: this.getEncoding(),
+      logger,
+      conversationId: this.conversationId,
+      maxContextTokens: this.maxContextTokens,
+    });
   }
 }
 

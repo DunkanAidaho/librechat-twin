@@ -1520,6 +1520,25 @@ Outgoing Calls:
 - createAgentUsageService: count=1; defined_in=server/services/agents/usage/agentUsageService.js; Purpose: invokes create agent usage service
 - getLogger: count=1; defined_in=utils/logger/index.js; Purpose: invokes get logger
 
+## server/services/agents/memory/agentMemoryService.js
+Purpose: Agent memory helpers (SRP split from AgentClient)
+Inbound Links: server/controllers/agents/client.js
+Exports: createAgentMemoryService
+Functions:
+- createAgentMemoryService: status=используется; callers: server/controllers/agents/client.js; Purpose: factory for memory facade
+- awaitMemoryWithTimeout: status=используется; callers: server/controllers/agents/client.js; Purpose: await memory promise with timeout
+- useMemory: status=используется; callers: server/controllers/agents/client.js; Purpose: initialize memory agent + processor
+- enrichContextWithMemoryAgent: status=используется; callers: server/controllers/agents/client.js; Purpose: run memory agent over message window
+Outgoing Calls:
+- createMemoryProcessor: count=1; defined_in=external/unknown; Purpose: create memory processor
+- checkAccess: count=1; defined_in=external/unknown; Purpose: check access
+- initializeAgent: count=1; defined_in=server/services/Endpoints/agents/agent.js; Purpose: init memory agent
+- loadAgent: count=1; defined_in=models/Agent.js; Purpose: load agent config
+- getRoleByName: count=1; defined_in=models/Role.js; Purpose: get role
+- setMemory: count=1; defined_in=models/index.js; Purpose: set memory
+- deleteMemory: count=1; defined_in=models/index.js; Purpose: delete memory
+- getFormattedMemories: count=1; defined_in=models/index.js; Purpose: get memories
+
 ## server/services/agents/utils.js
 Purpose: Agent orchestration helpers
 Inbound Links: none detected
