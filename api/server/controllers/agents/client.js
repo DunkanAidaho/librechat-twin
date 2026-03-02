@@ -3,7 +3,6 @@ require('events').EventEmitter.defaultMaxListeners = 100;
 const { getLogger } = require('~/utils/logger');
 const configService = require('~/server/services/Config/ConfigService');
 const axios = require('axios');
-const { getCondenseProvidersPreview } = require('~/server/services/RAG/condense');
 const { DynamicStructuredTool } = require('@langchain/core/tools');
 const { getBufferString, HumanMessage, SystemMessage } = require('@langchain/core/messages');
 const { EventService } = require('../../services/Events/EventService');
@@ -43,7 +42,7 @@ const {
 } = require('librechat-data-provider');
 const { addCacheControl, createContextHandlers } = require('~/app/clients/prompts');
 const { initializeAgent } = require('~/server/services/Endpoints/agents/agent');
-const { spendTokens, spendStructuredTokens } = require('~/models/spendTokens');
+const { spendStructuredTokens } = require('~/models/spendTokens');
 const { getFormattedMemories, deleteMemory, setMemory } = require('~/models');
 const { encodeAndFormat } = require('~/server/services/Files/images/encode');
 const { getProviderConfig } = require('~/server/services/Endpoints');
@@ -65,26 +64,18 @@ const {
   getDeferredContext,
   clearDeferredContext,
 } = require('~/server/services/RAG/RagContextManager');
-const { sanitizeInput } = require('~/utils/security');
-const {
-  observeSegmentTokens,
-  observeCache,
-  observeCost,
-  setContextLength,
-} = require('~/utils/ragMetrics');
 const { writeTokenReport } = require('~/utils/tokenReport');
 const { updateMessage } = require('~/models');
 const { historyMemoryService } = require('~/server/services/agents/history');
 const { HistoryTrimmer } = require('~/server/services/agents/historyTrimmer');
-const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
 const { queueGateway } = require('~/server/services/agents/queue');
 const { usageReporter } = require('~/server/services/agents/usage');
-const { buildContext: contextBuild } = require('~/server/services/agents/context');
-
 const {
-  computePromptTokenBreakdown: computePromptTokenBreakdown,
-  logPromptTokenBreakdown: logPromptTokenBreakdown
-} = require("~/server/utils/tokenBreakdown");
+  buildContext: contextBuild,
+  fetchGraphContext,
+  calculateAdaptiveTimeout,
+  mapReduceContext,
+} = require('~/server/services/agents/context');
 
 /** @type {Map<string, { expiresAt: number, payload: object }>} */
 
@@ -201,205 +192,6 @@ function resolvePricingRates(modelName, overrideConfig) {
 
   const source = sources.size ? Array.from(sources).join(',') : 'unknown';
   return { promptUsdPer1k, completionUsdPer1k, source };
-}
-
-/**
- * Fetches graph context from tools-gateway for RAG enhancement in agent conversations.
- */
-async function fetchGraphContext({ conversationId, toolsGatewayUrl, limit = GRAPH_RELATIONS_LIMIT, timeoutMs = GRAPH_REQUEST_TIMEOUT_MS, entity = null, relationHints = [], passIndex = null, signal = null }) {
-  if (!USE_GRAPH_CONTEXT || !conversationId) {
-    logger.debug('[rag.graph] Graph context skipped', {
-      useGraphContext: USE_GRAPH_CONTEXT,
-      conversationId,
-    });
-    return null;
-  }
-
-  const url = `${toolsGatewayUrl}/neo4j/graph_context`;
-  const requestPayload = {
-    conversation_id: conversationId,
-    limit,
-    entity: entity?.name || entity || null,
-    relation_hints: Array.isArray(relationHints) ? relationHints : undefined,
-    pass_index: passIndex,
-  };
-  if (requestPayload.relation_hints == null) {
-    delete requestPayload.relation_hints;
-  }
-  if (requestPayload.pass_index == null) {
-    delete requestPayload.pass_index;
-  }
-
-  if (entity?.type) {
-    requestPayload.entity_type = entity.type;
-  }
-
-  if (typeof requestPayload.entity === 'string' && requestPayload.entity.trim().length === 0) {
-    requestPayload.entity = null;
-  }
-
-  logger.debug('[rag.graph] Fetching graph context', {
-    conversationId,
-    toolsGatewayUrl,
-    limit,
-  });
-
-  try {
-    const response = await axios.post(url, requestPayload, { timeout: timeoutMs });
-
-    const lines = Array.isArray(response?.data?.lines) ? response.data.lines : [];
-    const queryHint = response?.data?.query_hint ? String(response.data.query_hint) : '';
-
-    logger.debug('[rag.graph] Graph context response', {
-      conversationId,
-      url,
-      linesCount: lines.length,
-      hasHint: Boolean(queryHint),
-    });
-
-    if (!lines.length && !queryHint) {
-      return null;
-    }
-
-    return {
-      lines: lines.slice(0, limit),
-      queryHint,
-    };
-  } catch (error) {
-    const serializedError = {
-      message: error?.message,
-      code: error?.code,
-      stack: error?.stack,
-      responseStatus: error?.response?.status,
-      responseData: error?.response?.data,
-      requestConfig: error?.config
-        ? {
-            url: error.config.url,
-            method: error.config.method,
-            timeout: error.config.timeout,
-            data: error.config.data,
-          }
-        : null,
-    };
-
-    logger.error('[rag.graph] Failed to fetch graph context', serializedError);
-
-    try {
-      if (typeof error?.toJSON === 'function') {
-        logger.error('[rag.graph] Axios error JSON', error.toJSON());
-      }
-    } catch (jsonErr) {
-        logger.warn('[rag.graph] Failed to serialize axios error', {
-          message: jsonErr?.message,
-          stack: jsonErr?.stack,
-        });
-      }
-
-    return null;
-  }
-}
-
-/**
- * Вычисляет адаптивный таймаут для суммаризации на основе размера контекста.
- */
-function calculateAdaptiveTimeout(contextLength, baseTimeoutMs) {
-  const BASE_CONTEXT_SIZE = 50000;
-  
-  if (contextLength <= BASE_CONTEXT_SIZE) {
-    return baseTimeoutMs;
-  }
-
-  const extraChunks = Math.ceil((contextLength - BASE_CONTEXT_SIZE) / BASE_CONTEXT_SIZE);
-  const additionalTimeout = extraChunks * 20000;
-  
-  const MAX_TIMEOUT = 300000;
-  const adaptiveTimeout = Math.min(baseTimeoutMs + additionalTimeout, MAX_TIMEOUT);
-  
-  logger.debug('[rag.timeout.adaptive]', {
-    contextLength,
-    baseTimeoutMs,
-    adaptiveTimeout,
-    extraChunks,
-    additionalTimeout,
-  });
-  
-  return adaptiveTimeout;
-}
-
-/**
- * Performs map-reduce condensation on context text for RAG using configured providers.
- */
-async function mapReduceContext({
-  req,
-  res,
-  endpointOption,
-  contextText,
-  userQuery,
-  graphContext = null,
-  summarizationConfig = null,
-}) {
-  const providersPreview = getCondenseProvidersPreview();
-  logger.info('[rag.context.summarize.start]', {
-    contextLength: contextText.length,
-    providersPreview,
-  });
-
-  const defaults = {
-    budgetChars: 50000,
-    chunkChars: 30000,
-    timeoutMs: 125000,
-  };
-
-  const {
-    budgetChars: cfgBudget,
-    chunkChars: cfgChunk,
-    provider: cfgProvider,
-    timeoutMs: cfgTimeout,
-  } = summarizationConfig ?? defaults;
-
-  const budgetChars =
-    Number.isFinite(cfgBudget) && cfgBudget > 0 ? Number(cfgBudget) : defaults.budgetChars;
-  const chunkChars =
-    Number.isFinite(cfgChunk) && cfgChunk > 0 ? Number(cfgChunk) : defaults.chunkChars;
-  const provider = cfgProvider && typeof cfgProvider === 'string' ? cfgProvider : undefined;
-  
-  const baseTimeout = Number.isFinite(cfgTimeout) && cfgTimeout > 0 ? Number(cfgTimeout) : defaults.timeoutMs;
-  const adaptiveTimeout = calculateAdaptiveTimeout(contextText.length, baseTimeout);
-
-  try {
-    const finalContext = await ragCondenseContext({
-      req,
-      res,
-      endpointOption,
-      contextText,
-      userQuery,
-      graphContext,
-      budgetChars,
-      chunkChars,
-      provider,
-      timeoutMs: adaptiveTimeout,
-    });
-
-    logger.info('[rag.context.summarize.complete]', {
-      initialLength: contextText.length,
-      finalLength: finalContext.length,
-      budgetChars,
-      chunkChars,
-      provider,
-      timeoutMs: adaptiveTimeout,
-    });
-
-    return finalContext;
-  } catch (error) {
-    logger.error('[rag.context.summarize.error]', {
-      message: error?.message,
-      stack: error?.stack,
-      contextLength: contextText.length,
-      timeoutMs: adaptiveTimeout,
-    });
-
-    return contextText;
-  }
 }
 
 const omitTitleOptions = new Set([
@@ -635,44 +427,6 @@ function makeIngestKey(convId, msgId, raw) {
   if (msgId) return `ing:${convId}:${msgId}`;
   const hash = crypto.createHash('md5').update(String(raw || '')).digest('hex');
   return `ing:${convId}:${hash}`;
-}
-
-/**
- * Condenses RAG query text by deduplicating and truncating.
- */
-function condenseRagQuery(text, limit = RAG_QUERY_MAX_CHARS) {
-  if (!text) {
-    return '';
-  }
-
-  const normalized = text
-    .replace(/\r\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-
-  if (!normalized) {
-    return '';
-  }
-
-  const lines = normalized.split('\n').map((line) => line.trim()).filter(Boolean);
-  const deduped = [];
-  const seen = new Set();
-  for (const line of lines) {
-    if (!seen.has(line)) {
-      deduped.push(line);
-      seen.add(line);
-    }
-  }
-
-  let condensed = deduped.join('\n').trim();
-  if (condensed.length <= limit) {
-    return condensed;
-  }
-
-  const half = Math.max(1, Math.floor(limit / 2));
-  const head = condensed.slice(0, half);
-  const tail = condensed.slice(-half);
-  return `${head}\n...\n${tail}`;
 }
 
 /**
@@ -996,7 +750,7 @@ class AgentClient extends BaseClient {
 
         try {
           const result = await withTimeout(
-            enqueueMemoryTasks(
+            queueGateway.enqueueMemory(
               [task],
               {
                 reason: 'index_file',
@@ -1028,565 +782,6 @@ class AgentClient extends BaseClient {
     return files;
   }
 
-
-  async buildRagContext({
-    orderedMessages,
-    systemContent,
-    runtimeCfg,
-    req,
-    res,
-    endpointOption,
-  }) {
-    const ragCacheTtlMs = Math.max(Number(runtimeCfg.ragCacheTtl) * 1000, 0);
-    const conversationId = this.conversationId;
-    const userMessage = orderedMessages.slice(-1)[0];
-    const userQuery = userMessage?.text ?? '';
-    const encoding = this.getEncoding ? this.getEncoding() : 'o200k_base';
-    const multiStepEnabled = Boolean(runtimeCfg?.multiStepRag?.enabled);
-
-    if (req) {
-      setDeferredContext(req, null);
-    }
-
-    if (!runtimeCfg.useConversationMemory || !conversationId || !userQuery) {
-      logger.debug('[rag.context.skip]', {
-        conversationId,
-        reason: 'disabled_or_empty_query',
-        enableMemoryCache: runtimeCfg.enableMemoryCache,
-      });
-      return {
-        patchedSystemContent: systemContent,
-        contextLength: 0,
-        cacheStatus: 'skipped',
-        metrics: {},
-      };
-    }
-
-    pruneExpiredRagCache();
-
-    const queryMaxChars = runtimeCfg?.ragQuery?.maxChars || 6000;
-    if (userQuery.length > queryMaxChars) {
-      logger.debug(
-        `[rag.context.limit] conversation=${conversationId} param=memory.ragQuery.maxChars limit=${queryMaxChars} original=${userQuery.length}`
-      );
-    }
-
-    const normalizedQuery = userQuery.slice(0, queryMaxChars);
-    if (req) {
-      req.ragUserQuery = normalizedQuery;
-    }
-    const queryTokenCount = Tokenizer.getTokenCount(normalizedQuery, encoding);
-    logger.debug(
-      `[rag.context.query.tokens] conversation=${conversationId} length=${normalizedQuery.length} tokens=${queryTokenCount}`
-    );
-
-    const queryHash = hashPayload(normalizedQuery);
-    const configHash = hashPayload({
-      graph: runtimeCfg.graphContext,
-      vector: runtimeCfg.vectorContext,
-      summarization: runtimeCfg.summarization,
-    });
-
-    const cacheKey = createCacheKey({
-      conversationId,
-      endpoint: endpointOption?.endpoint || this.options?.endpoint,
-      model: endpointOption?.model || this.options?.model,
-      queryHash,
-      configHash,
-    });
-
-    const metrics = {
-      graphTokens: 0,
-      vectorTokens: 0,
-      contextTokens: 0,
-      graphLines: 0,
-      vectorChunks: 0,
-      queryTokens: queryTokenCount,
-    };
-
-    let contextLength = 0;
-    let finalSystemContent = systemContent;
-    const now = Date.now();
-    let cacheStatus = 'skipped';
-
-    if (runtimeCfg.enableMemoryCache) {
-      const cached = ragCache.get(cacheKey);
-      if (cached && cached.expiresAt > now) {
-        cacheStatus = 'hit';
-        observeCache('hit');
-        const cachedMetrics = cached.metrics || {};
-        logger.info(
-          `[rag.context.cache.hit] conversation=${conversationId} cacheKey=${cacheKey} contextTokens=${cachedMetrics.contextTokens ?? 0} graphTokens=${cachedMetrics.graphTokens ?? 0} vectorTokens=${cachedMetrics.vectorTokens ?? 0} queryTokens=${cachedMetrics.queryTokens ?? 0}`
-        );
-        return {
-          patchedSystemContent: cached.systemContent,
-          contextLength: cached.contextLength,
-          cacheStatus,
-          metrics: cachedMetrics,
-        };
-      }
-
-      cacheStatus = 'miss';
-      observeCache('miss');
-      logger.debug(
-        `[rag.context.cache.miss] conversation=${conversationId} cacheKey=${cacheKey}`
-      );
-    } else {
-      logger.debug('[rag.context.cache.skip]', {
-        conversationId,
-        cacheKey,
-        reason: 'cache_disabled',
-      });
-    }
-
-    const toolsGatewayUrl = runtimeCfg?.toolsGateway?.url || '';
-    const toolsGatewayTimeout = runtimeCfg?.toolsGateway?.timeoutMs || 20000;
-    const graphLimits = runtimeCfg.graphContext || {};
-    const vectorLimits = runtimeCfg.vectorContext || {};
-
-    const graphMaxLines = Number(graphLimits.maxLines ?? 40);
-    const graphMaxLineChars = Number(graphLimits.maxLineChars ?? 200);
-    const graphSummaryHintMaxChars = Number(graphLimits.summaryHintMaxChars ?? 2000);
-
-    const vectorMaxChunks = Number(vectorLimits.maxChunks ?? 4);
-    const vectorMaxChars = Number(vectorLimits.maxChars ?? 70000);
-    const vectorTopK = Number(vectorLimits.topK ?? 12);
-    const embeddingModel = vectorLimits.embeddingModel;
-    const recentTurns = Number(vectorLimits.recentTurns ?? 6);
-
-    let graphContextLines = [];
-    let graphQueryHint = '';
-    let rawGraphLinesCount = 0;
-
-    if (toolsGatewayUrl) {
-      try {
-        const graphContext = await fetchGraphContext({
-          conversationId,
-          toolsGatewayUrl,
-          limit: graphMaxLines,
-          timeoutMs: toolsGatewayTimeout,
-        });
-
-        rawGraphLinesCount = Array.isArray(graphContext?.lines) ? graphContext.lines.length : 0;
-
-        if (graphContext?.lines?.length) {
-          graphContextLines = sanitizeGraphContext(graphContext.lines, {
-            maxLines: graphMaxLines,
-            maxLineChars: graphMaxLineChars,
-          });
-
-          if (rawGraphLinesCount > graphContextLines.length && graphMaxLines) {
-            logger.debug(
-              `[rag.context.limit] conversation=${conversationId} param=memory.graphContext.maxLines limit=${graphMaxLines} original=${rawGraphLinesCount}`
-            );
-          }
-
-          if (
-            graphContextLines.some((line) => line.endsWith('…')) &&
-            graphMaxLineChars
-          ) {
-            logger.debug(
-              `[rag.context.limit] conversation=${conversationId} param=memory.graphContext.maxLineChars limit=${graphMaxLineChars}`
-            );
-          }
-        }
-
-        logger.debug(
-          `[rag.context.graph.raw] conversation=${conversationId} rawLines=${rawGraphLinesCount} sanitizedLines=${graphContextLines.length}`
-        );
-
-        if (typeof graphContext?.queryHint === 'string') {
-          const trimmedHint = graphContext.queryHint.trim();
-          if (trimmedHint) {
-            if (
-              graphSummaryHintMaxChars &&
-              trimmedHint.length > graphSummaryHintMaxChars
-            ) {
-              logger.debug(
-                `[rag.context.limit] conversation=${conversationId} param=memory.graphContext.summaryHintMaxChars limit=${graphSummaryHintMaxChars} original=${trimmedHint.length}`
-              );
-            }
-            graphQueryHint = trimmedHint.slice(
-              0,
-              graphSummaryHintMaxChars || trimmedHint.length,
-            );
-          }
-        }
-      } catch (error) {
-        logger.error('[rag.context.graph.error]', {
-          conversationId,
-          message: error?.message,
-          stack: error?.stack,
-        });
-      }
-    } else {
-      logger.debug('[rag.context.graph.skip]', {
-        conversationId,
-        reason: 'tools_gateway_missing',
-      });
-    }
-
-    metrics.graphLines = graphContextLines.length;
-
-    let ragSearchQuery = normalizedQuery;
-    if (graphQueryHint) {
-      ragSearchQuery = `${normalizedQuery}
-
-Graph hints: ${graphQueryHint}`;
-    }
-
-    const condensedQuery = condenseRagQuery(ragSearchQuery, queryMaxChars);
-    if (condensedQuery.length < ragSearchQuery.length) {
-      logger.debug('[rag.context.query.condensed]', {
-        conversationId,
-        originalLength: ragSearchQuery.length,
-        condensedLength: condensedQuery.length,
-      });
-    }
-    ragSearchQuery = condensedQuery;
-
-    let vectorChunks = [];
-    let recentChunks = [];
-    let rawVectorResults = 0;
-
-    if (toolsGatewayUrl) {
-      try {
-        const response = await axios.post(
-          `${toolsGatewayUrl}/rag/search`,
-          {
-            query: ragSearchQuery,
-            top_k: vectorTopK,
-            embedding_model: embeddingModel,
-            conversation_id: conversationId,
-            user_id: req?.user?.id,
-          },
-          { timeout: toolsGatewayTimeout },
-        );
-
-        const rawChunks = Array.isArray(response?.data?.results)
-          ? response.data.results.map((item) => item?.content ?? '').filter(Boolean)
-          : [];
-
-        rawVectorResults = rawChunks.length;
-
-        vectorChunks = sanitizeVectorChunks(rawChunks, {
-          maxChunks: vectorMaxChunks,
-          maxChars: vectorMaxChars,
-        });
-
-        logger.debug(
-          `[rag.context.vector.raw] conversation=${conversationId} rawResults=${rawVectorResults} sanitizedChunks=${vectorChunks.length} topK=${vectorTopK}`
-        );
-        logger.debug('[rag.context.vector.limits]', { 
-          conversationId, 
-          maxChunks: vectorMaxChunks, 
-          recentTurns, 
-          topK: vectorTopK 
-        });
-      } catch (error) {
-        logger.error('[rag.context.vector.error]', {
-          conversationId,
-          message: error?.message,
-          stack: error?.stack,
-        });
-      }
-
-      if (recentTurns > 0) {
-        try {
-          const recentResp = await axios.post(
-            `${toolsGatewayUrl}/rag/recent`,
-            { 
-              conversation_id: conversationId, 
-              limit: recentTurns, 
-              user_id: req?.user?.id 
-            },
-            { timeout: toolsGatewayTimeout },
-          );
-
-          const rawRecent = Array.isArray(recentResp?.data?.results)
-            ? recentResp.data.results.map(r => r?.content ?? '').filter(Boolean)
-            : [];
-
-          recentChunks = sanitizeVectorChunks(rawRecent, {
-            maxChunks: recentTurns,
-            maxChars: vectorMaxChars,
-          });
-
-          logger.debug('[rag.context.recent]', { 
-            conversationId, 
-            recentTurns, 
-            got: recentChunks.length 
-          });
-        } catch (e) {
-          const status = e?.response?.status;
-          if (status === 404 || status === 501) {
-            logger.debug('[rag.context.recent.unavailable]', { conversationId, status });
-          } else {
-            logger.warn('[rag.context.recent.skip]', { 
-              conversationId, 
-              reason: e?.message, 
-              status 
-            });
-          }
-        }
-      }
-
-      const merged = [];
-      const seen = new Set();
-
-      for (const c of [...recentChunks, ...vectorChunks]) {
-        const key = c.trim();
-        if (!key) continue;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        merged.push(c);
-      }
-
-      vectorChunks = merged.slice(0, vectorMaxChunks);
-
-      if (rawVectorResults > vectorChunks.length && vectorMaxChunks) {
-        logger.debug(
-          `[rag.context.limit] conversation=${conversationId} param=memory.vectorContext.maxChunks limit=${vectorMaxChunks} original=${rawVectorResults}`
-        );
-      }
-
-      if (
-        vectorChunks.some((chunk) => chunk.endsWith('…')) &&
-        vectorMaxChars
-      ) {
-        logger.debug(
-          `[rag.context.limit] conversation=${conversationId} param=memory.vectorContext.maxChars limit=${vectorMaxChars}`
-        );
-      }
-    } else {
-      logger.debug('[rag.context.vector.skip]', {
-        conversationId,
-        reason: 'tools_gateway_missing',
-      });
-    }
-
-    metrics.vectorChunks = vectorChunks.length;
-
-    const hasGraph = graphContextLines.length > 0;
-    const hasVector = vectorChunks.length > 0;
-    const policyIntro =
-      'Ниже предоставлен внутренний контекст для твоего сведения: граф знаний и выдержки из беседы. ' +
-      'Используй эти данные для формирования точного и полного ответа. ' +
-      'Категорически запрещается цитировать или пересказывать этот контекст, особенно строки, содержащие "-->". ' +
-      'Эта информация предназначена только для твоего внутреннего анализа.\n\n';
-
-    if (!hasGraph && !hasVector) {
-      logger.debug(
-        `[rag.context.tokens] conversation=${conversationId} graphTokens=0 vectorTokens=0 contextTokens=0`
-      );
-    } else {
-      const summarizationCfg = runtimeCfg.summarization || {};
-      const defaults = { 
-        budgetChars: 12000, 
-        chunkChars: 20000,
-        timeoutMs: 125000,
-      };
-      const budgetChars =
-        Number.isFinite(summarizationCfg?.budgetChars) && summarizationCfg.budgetChars > 0
-          ? summarizationCfg.budgetChars
-          : defaults.budgetChars;
-      const chunkChars =
-        Number.isFinite(summarizationCfg?.chunkChars) && summarizationCfg.chunkChars > 0
-          ? summarizationCfg.chunkChars
-          : defaults.chunkChars;
-      const baseTimeoutMs = Number.isFinite(summarizationCfg?.timeoutMs) && summarizationCfg.timeoutMs > 0
-        ? summarizationCfg.timeoutMs
-        : defaults.timeoutMs;
-
-      let vectorText = vectorChunks.join('\n\n');
-      const rawVectorTextLength = vectorText.length;
-      const shouldSummarize =
-        !multiStepEnabled &&
-        summarizationCfg.enabled !== false &&
-        vectorText.length > budgetChars;
-
-      if (shouldSummarize) {
-        logger.debug(
-          `[rag.context.limit] conversation=${conversationId} param=memory.summarization.budgetChars limit=${budgetChars} original=${rawVectorTextLength}`
-        );
-        try {
-          const adaptiveTimeoutMs = calculateAdaptiveTimeout(rawVectorTextLength, baseTimeoutMs);
-          
-          logger.debug('[rag.context.summarize.timeout]', {
-            conversationId,
-            contextLength: rawVectorTextLength,
-            baseTimeoutMs,
-            adaptiveTimeoutMs,
-            configuredTimeout: summarizationCfg?.timeoutMs,
-          });
-          
-          vectorText = await withTimeout(
-            mapReduceContext({
-              req,
-              res,
-              endpointOption,
-              contextText: vectorText,
-              userQuery: normalizedQuery,
-              graphContext: hasGraph
-                ? { lines: graphContextLines, queryHint: graphQueryHint }
-                : null,
-              summarizationConfig: {
-                budgetChars,
-                chunkChars,
-                provider: summarizationCfg.provider,
-                timeoutMs: adaptiveTimeoutMs,
-              },
-            }),
-            adaptiveTimeoutMs,
-            'RAG summarization timed out'
-          );
-        } catch (summarizeError) {
-          logger.error('[rag.context.vector.summarize.error]', {
-            message: summarizeError?.message,
-            stack: summarizeError?.stack,
-            timeout: summarizeError?.message?.includes('timed out'),
-            contextLength: rawVectorTextLength,
-          });
-          
-          if (summarizeError?.message?.includes('timed out')) {
-            const fallbackLength = Math.min(vectorText.length, budgetChars);
-            vectorText = vectorText.slice(0, fallbackLength);
-            logger.warn(
-              `[rag.context.vector.summarize.fallback] Using truncated text (${fallbackLength} chars) due to timeout`
-            );
-          }
-        }
-      }
-
-      const ragBlock = buildRagBlock({
-        policyIntro,
-        graphLines: hasGraph ? graphContextLines : [],
-        vectorText,
-      });
-
-      let sanitizedBlock = ragBlock;
-      try {
-        sanitizedBlock = sanitizeInput(ragBlock);
-      } catch (sanitizeError) {
-        logger.error('[rag.context.sanitize.error]', {
-          message: sanitizeError?.message,
-          stack: sanitizeError?.stack,
-        });
-      }
-
-      finalSystemContent = sanitizedBlock + systemContent;
-      contextLength = sanitizedBlock.length;
-
-      if (hasGraph) {
-        const graphText = graphContextLines.join('\n');
-        metrics.graphTokens = graphText
-          ? Tokenizer.getTokenCount(graphText, encoding)
-          : 0;
-
-        if (metrics.graphTokens) {
-          observeSegmentTokens({
-            segment: 'rag_graph',
-            tokens: metrics.graphTokens,
-            endpoint: endpointOption?.endpoint || this.options?.endpoint,
-            model: endpointOption?.model || this.options?.model,
-          });
-          setContextLength({
-            segment: 'rag_graph',
-            length: graphText.length,
-            endpoint: endpointOption?.endpoint || this.options?.endpoint,
-            model: endpointOption?.model || this.options?.model,
-          });
-        }
-
-        logger.info(
-          `[rag.context.graph.stats] conversation=${conversationId} lines=${graphContextLines.length} tokens=${metrics.graphTokens}`
-        );
-      }
-
-      if (vectorText.length) {
-        metrics.vectorTokens = Tokenizer.getTokenCount(vectorText, encoding);
-
-        if (metrics.vectorTokens) {
-          observeSegmentTokens({
-            segment: 'rag_vector',
-            tokens: metrics.vectorTokens,
-            endpoint: endpointOption?.endpoint || this.options?.endpoint,
-            model: endpointOption?.model || this.options?.model,
-          });
-          setContextLength({
-            segment: 'rag_vector',
-            length: vectorText.length,
-            endpoint: endpointOption?.endpoint || this.options?.endpoint,
-            model: endpointOption?.model || this.options?.model,
-          });
-        }
-
-        logger.info(
-          `[rag.context.vector.stats] conversation=${conversationId} chunks=${metrics.vectorChunks} tokens=${metrics.vectorTokens}`
-        );
-      }
-
-      metrics.contextTokens = sanitizedBlock
-        ? Tokenizer.getTokenCount(sanitizedBlock, encoding)
-        : metrics.graphTokens + metrics.vectorTokens;
-
-      if (multiStepEnabled && req) {
-        logger.info('[rag.context.summarize.deferred]', {
-          conversationId,
-          graphLines: graphContextLines.length,
-          vectorChunks: vectorChunks.length,
-        });
-        setDeferredContext(req, {
-          policyIntro,
-          graphLines: graphContextLines,
-          graphQueryHint,
-          vectorText,
-          vectorChunks,
-          summarizationConfig: {
-            budgetChars,
-            chunkChars,
-            provider: summarizationCfg.provider,
-            timeoutMs: baseTimeoutMs,
-            enabled: summarizationCfg.enabled !== false,
-          },
-          metrics: {
-            graphTokens: metrics.graphTokens,
-            vectorTokens: metrics.vectorTokens,
-            contextTokens: metrics.contextTokens,
-          },
-        });
-      }
-
-      logger.info(
-        `[rag.context.tokens] conversation=${conversationId} graphTokens=${metrics.graphTokens} vectorTokens=${metrics.vectorTokens} contextTokens=${metrics.contextTokens}`
-      );
-    }
-
-    if (runtimeCfg.enableMemoryCache) {
-      ragCache.set(cacheKey, {
-        systemContent: finalSystemContent,
-        contextLength,
-        metrics,
-        expiresAt: now + ragCacheTtlMs,
-      });
-      logger.debug(
-        `[rag.context.cache.store] conversation=${conversationId} cacheKey=${cacheKey} contextTokens=${metrics.contextTokens} graphTokens=${metrics.graphTokens} vectorTokens=${metrics.vectorTokens} queryTokens=${metrics.queryTokens}`
-      );
-    }
-
-    if (req) {
-      req.ragCacheStatus = cacheStatus;
-      req.ragMetrics = Object.assign({}, req.ragMetrics, metrics);
-      req.ragContextTokens = metrics.contextTokens;
-    }
-
-    return {
-      patchedSystemContent: finalSystemContent,
-      contextLength,
-      cacheStatus,
-      metrics,
-    };
-  }
 
   async buildMessages(
     messages,
@@ -1891,6 +1086,7 @@ const ragResult = await contextBuild({
             relationHints: hints,
             passIndex,
             signal,
+            logger,
           });
 
           if (!graphContext?.lines?.length) {
@@ -1914,7 +1110,7 @@ const ragResult = await contextBuild({
             runtimeCfg,
             baseContext: systemContent,
             fetchGraphContext: fetchGraphLinesForEntity,
-            enqueueMemoryTasks,
+            enqueueMemoryTasks: queueGateway.enqueueMemory,
             conversationId: this.conversationId,
             userId: requestUserId,
             endpoint: this.options?.endpoint,
@@ -2418,7 +1614,7 @@ const ragResult = await contextBuild({
         continue;
       }
 
-      spendTokens(txMetadata, {
+      usageReporter.spendTokens(txMetadata, {
         promptTokens: usage.input_tokens,
         completionTokens: usage.output_tokens,
       }).catch((err) => {
@@ -2450,8 +1646,8 @@ const ragResult = await contextBuild({
       }
       costUsd = Math.round(costUsd * 1_000_000) / 1_000_000;
 
-      if (typeof observeCost === 'function' && costUsd != null) {
-        observeCost(
+      if (typeof usageReporter.observeCost === 'function' && costUsd != null) {
+        usageReporter.observeCost(
           {
             model: modelName,
             endpoint:
@@ -3092,7 +2288,7 @@ const ragResult = await contextBuild({
     context = 'message',
   }) {
     try {
-      await spendTokens(
+      await usageReporter.spendTokens(
         {
           model,
           context,
@@ -3105,7 +2301,7 @@ const ragResult = await contextBuild({
       );
 
       if (usage && typeof usage === 'object' && 'reasoning_tokens' in usage && typeof usage.reasoning_tokens === 'number') {
-        await spendTokens(
+        await usageReporter.spendTokens(
           {
             model,
             balance,
@@ -3149,7 +2345,7 @@ const ragResult = await contextBuild({
       return;
     }
 
-    const breakdown = computePromptTokenBreakdown({
+    const breakdown = usageReporter.computePromptTokenBreakdown({
       conversationId: this.promptTokenContext.conversationId,
       promptTokens: promptTokens ?? (this.promptTokenContext.promptTokensEstimate ?? 0),
       instructionsTokens: this.promptTokenContext.instructionsTokens,
@@ -3175,7 +2371,7 @@ const ragResult = await contextBuild({
       enabled: true,
       level: "info"
     }).enabled) {
-      logPromptTokenBreakdown(logger, breakdown, configService.get("logging.tokenBreakdown", {
+      usageReporter.logPromptTokenBreakdown(logger, breakdown, configService.get("logging.tokenBreakdown", {
         enabled: true,
         level: "info"
       }).level || "info");
@@ -3235,6 +2431,8 @@ const ragResult = await contextBuild({
           );
           vectorText = await withTimeout(
             mapReduceContext({
+              ragCondenseContext,
+              logger,
               req,
               res,
               endpointOption,
