@@ -40,7 +40,6 @@
 | LLM clients (`Anthropic`, `OpenAI`, `Google`, `BaseClient`) | ✅ Готово | все клиенты используют scoped логгеры, buildContext и события вида `clients.<provider>.*` без дампа payload |
 | Скрипты (`manage_summaries`, `sync_history`) | ✅ Готово | scoped логгеры и контекст |
 | Документация                        | ⏳ В работе | Таблица прогресса, чеклист, TODO |
-
 | RagContextBuilder                  | ✅ Готово | `rag.context.*` события + кэш контекст |
 | RagCache                           | ✅ Готово | `rag.cache.*` события с контекстом |
 | multiStep orchestrator             | ✅ Готово | `rag.multiStep.*` события с entity/pass |
@@ -83,5 +82,3 @@
   ```
   2026-02-23T18:12:00.789Z [rag.longTextWorker] info: rag.longText.chunk_start {"context":{"conversationId":"conv-42","requestId":"dedupe-123","userId":"user-7"},"chunkCount":3,"messageId":"msg-1"}
   ```
-
-

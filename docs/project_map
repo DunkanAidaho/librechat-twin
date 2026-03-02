@@ -669,7 +669,7 @@ Inbound Links: none detected
 Exports: None
 Functions:
 - calculateAdaptiveTimeout: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to calculate adaptive timeout
-- compressMessagesForRetry: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to compress messages for retry
+- compressMessagesForRetry: status=вынесено; callers: server/services/agents/utils.js; Purpose: moved to server/services/agents/utils.js (used by AgentClient)
 - computeImportanceScore: status=сирота; callers: —; Purpose: local helper to compute importance score
 - computeTokens: status=используется | опасность, дублируется в: app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js; callers: app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js; Purpose: triggered from app/clients/BaseClient.js, app/clients/utils/instructions.js, server/controllers/agents/client.js to compute tokens
 - condenseRagQuery: status=используется | опасность, дублируется в: server/controllers/agents/client.js, server/utils/messageUtils.js; callers: server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js; Purpose: triggered from server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js to condense rag query
@@ -677,8 +677,8 @@ Functions:
 - createCacheKey: status=используется; callers: server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js, server/services/tokens/TokenCounter.js; Purpose: triggered from server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js, server/services/tokens/TokenCounter.js to create cache key
 - createSafeLogger: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to create safe logger
 - createTokenCounter: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to create token counter
-- detectContextOverflow: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to detect context overflow
-- extractMessageText: status=используется | опасность, дублируется в: server/controllers/agents/client.js, server/utils/messageUtils.js; callers: server/services/agents/MessageHistoryManager.js; Purpose: triggered from server/services/agents/MessageHistoryManager.js to extract message text
+- detectContextOverflow: status=вынесено; callers: server/services/agents/utils.js; Purpose: moved to server/services/agents/utils.js (used by AgentClient)
+- extractMessageText: status=вынесено | дубликат устранён; callers: server/utils/messageUtils.js; Purpose: used via server/utils/messageUtils.js
 - fetchGraphContext: status=используется; callers: server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/multiStepOrchestrator.js; Purpose: triggered from server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js, server/services/RAG/multiStepOrchestrator.js to fetch graph context
 - fetchGraphLinesForEntity: status=сирота; callers: —; Purpose: local helper to fetch graph lines for entity
 - getBoolean: status=используется; callers: models/Message.js, server/controllers/agents/client.js, server/routes/convos.js; Purpose: triggered from models/Message.js, server/controllers/agents/client.js, server/routes/convos.js to get boolean
@@ -687,11 +687,11 @@ Functions:
 - hashPayload: status=используется; callers: server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js, server/services/agents/MessageHistoryManager.js; Purpose: triggered from server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js, server/services/agents/MessageHistoryManager.js to hash payload
 - isGoogleModel: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to is google model
 - logToolError: status=сирота; callers: —; Purpose: local helper to log tool error
-- makeIngestKey: status=используется | опасность, дублируется в: server/controllers/agents/client.js, server/utils/messageUtils.js; callers: server/controllers/agents/client.js, server/services/agents/MessageHistoryManager.js; Purpose: triggered from server/controllers/agents/client.js, server/services/agents/MessageHistoryManager.js to make ingest key
+- makeIngestKey: status=вынесено | дубликат устранён; callers: server/utils/messageUtils.js; Purpose: used via server/utils/messageUtils.js
 - mapReduceContext: status=используется; callers: server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js; Purpose: triggered from server/controllers/agents/client.js, server/services/RAG/RagContextBuilder.js to map reduce context
 - markMessagesAsStored: status=используется | опасность, дублируется в: server/controllers/agents/client.js, server/controllers/agents/request.js; callers: server/controllers/agents/request.js; Purpose: triggered from server/controllers/agents/request.js to mark messages as stored
-- normalizeInstructionsPayload: status=используется | опасность, дублируется в: app/clients/utils/instructions.js, server/controllers/agents/client.js; callers: app/clients/AnthropicClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js, server/controllers/agents/client.js; Purpose: triggered from app/clients/AnthropicClient.js, app/clients/GoogleClient.js, app/clients/OpenAIClient.js, server/controllers/agents/client.js to normalize instructions payload
-- normalizeMemoryText: status=используется | опасность, дублируется в: server/controllers/agents/client.js, server/utils/messageUtils.js; callers: server/services/agents/MessageHistoryManager.js; Purpose: triggered from server/services/agents/MessageHistoryManager.js to normalize memory text
+- normalizeInstructionsPayload: status=вынесено; callers: app/clients/utils/instructions.js; Purpose: used via app/clients/utils/instructions.js
+- normalizeMemoryText: status=вынесено | дубликат устранён; callers: server/utils/messageUtils.js; Purpose: used via server/utils/messageUtils.js
 - onClientAbort: status=сирота; callers: —; Purpose: local helper to on client abort
 - parseUsdRate: status=используется; callers: server/controllers/agents/client.js, server/services/pricing/PricingCalculator.js; Purpose: triggered from server/controllers/agents/client.js, server/services/pricing/PricingCalculator.js to parse usd rate
 - payloadParser: status=используется; callers: server/controllers/agents/client.js; Purpose: triggered from server/controllers/agents/client.js to payload parser
@@ -1353,6 +1353,17 @@ Outgoing Calls:
 - setTimeout: count=1; defined_in=external/unknown; Purpose: invokes set timeout
 - toLowerCase: count=1; defined_in=external/unknown; Purpose: invokes to lower case
 - String: count=1; defined_in=external/unknown; Purpose: invokes string
+
+## server/services/agents/utils.js
+Purpose: Agent orchestration helpers
+Inbound Links: server/controllers/agents/client.js
+Exports: detectContextOverflow, compressMessagesForRetry
+Functions:
+- detectContextOverflow: status=используется; callers: server/controllers/agents/client.js; Purpose: detect context overflow
+- compressMessagesForRetry: status=используется; callers: server/controllers/agents/client.js; Purpose: compress messages after overflow
+Outgoing Calls:
+- SystemMessage: count=1; defined_in=@langchain/core/messages; Purpose: constructs system message
+- HumanMessage: count=1; defined_in=@langchain/core/messages; Purpose: constructs human message
 
 ## server/services/Config/ConfigService.js
 Purpose: Server services

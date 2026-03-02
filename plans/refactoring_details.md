@@ -3,7 +3,7 @@
 ## Общие принципы
 - Следуем SRP (Single Responsibility Principle)
 - Используем scoped логгеры для каждого компонента
-- Обеспечиваем прозрачное логирование согласно `docs/1_Trasparent_logging.md`
+- Обеспечиваем прозрачное логирование согласно `docs/logging/transparent_logging.md`
 - Поддерживаем существующие метрики и добавляем новые где необходимо
 - Соблюдаем требования к обработке ошибок и resilience
 
@@ -186,7 +186,7 @@ class EventService {
 ## 6. Документация
 
 ### Обновить
-- docs/1_Trasparent_logging.md
+- docs/logging/transparent_logging.md
 - docs/TODO.md
 - docs/project_map
 

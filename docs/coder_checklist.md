@@ -1,6 +1,6 @@
 # Чеклист разработчика LibreChat Twin
 
-Документ фиксирует единые критерии ревью кода для форка LibreChat на Node.js/Express + React. Он учитывает текущие инициативы из `docs/project_map`, `docs/TODO.md`, `docs/1_Trasparent_logging.md` и используется на всех этапах разработки.
+Документ фиксирует единые критерии ревью кода для форка LibreChat на Node.js/Express + React. Он учитывает текущие инициативы из `docs/project_map`, `docs/TODO.md`, `docs/logging/transparent_logging.md` и используется на всех этапах разработки.
 
 ## 1. Архитектура и разделение слоёв
 - **SRP и границы модулей**: каждый модуль делает одну вещь. Контроллеры (`server/controllers/agents/*.js`) не содержат бизнес-логики — она должна быть в `server/services/**` или `utils/**`.
@@ -19,10 +19,10 @@
 - **Transparent logging initiative**: только scoped логгер (`utils/logger`) или `ragLogger` для RAG. Никаких `debug`, `console.log`, `warn` напрямую. Map/Reduce конденсация обязана использовать `buildContext` для request/chunk/reduce контекстов и события `rag.condense.*` включая финальный `rag.condense.mr_finished`; history manager использует `buildContext({ conversationId, userId })` и `rag.history.*` события (drop, prompt shrink/keep, context_layers, enqueue). 
 - **LLM clients**: все клиенты (`Anthropic`, `OpenAI`, `Google`, `BaseClient`) уже на scoped логгерах `clients.<provider>`; новые клиенты должны использовать `buildClientContext`, события вида `clients.<provider>.request_start|stream_token|request_success|request_error|title_*` и не логировать сырые payload’ы.
 - **Контроллеры `/agents`**: `api/server/controllers/agents/request.js` обязан создавать scoped логгер `routes.agents.request` и прокидывать контекст через `buildContext`/`getRequestContext` для всех логов и SSE.
-- **Перед любым логом используем buildLogContext/buildContext**: импортируем из `~/utils/logContext`, чтобы включить `requestId`, `conversationId`, `userId`, `agentId`. После каждого модуля, мигрированного на новый логгер, обновляем `docs/1_Trasparent_logging.md` и соответствующий пункт в `docs/TODO.md`.
+- **Перед любым логом используем buildLogContext/buildContext**: импортируем из `~/utils/logContext`, чтобы включить `requestId`, `conversationId`, `userId`, `agentId`. После каждого модуля, мигрированного на новый логгер, обновляем `docs/logging/transparent_logging.md` и соответствующий пункт в `docs/TODO.md`.
 - **Гигиена репозитория:** при переносе/переименовании логгеров удаляем старые файлы (`logger.js`, `.bak`, временные копии) и проверяем `git status`. Перед сборкой контейнера запускаем `docker build --no-cache` (или аналогичный шаг CI), чтобы исключить подтягивание устаревших артефактов.
 - **Request context**: контроллеры обязаны создавать `requestId` и передавать его дальше (в SSE, RAG, очереди). Логи без `requestId` считаются долгом.
-- **Единый формат событий**: `scope`, `phase`, `conversationId`, `userId`, `agentId`, `latency`, `model`, `attempt`, `signalAborted` и т.п. — по списку из `docs/1_Trasparent_logging.md`.
+- **Единый формат событий**: `scope`, `phase`, `conversationId`, `userId`, `agentId`, `latency`, `model`, `attempt`, `signalAborted` и т.п. — по списку из `docs/logging/transparent_logging.md`.
 - **Структурные meta-поля**: `context` и другие объекты проходят через `sanitizePlainObject` (с лимитами глубины/размера и защитой от циклов). Нельзя применять `JSON.stringify` в hot-path или превращать объекты в строки — передаём лёгкую, но структурированную версию.
 - **Метрики Prometheus**: новые сервисы/очереди регистрируют метрики через `utils/metrics.js`/`utils/ragMetrics.js` (гейджи ragCache, счётчики эвикций, latency).
 - **Отладочные флаги**: verbose-трейсы (token usage, SSE, RAG) завязываем на ENV (`TRACE_PIPELINE`, `DEBUG_SSE`, `tokenUsageReportMode`).

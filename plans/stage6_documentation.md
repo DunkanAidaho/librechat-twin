@@ -57,7 +57,7 @@ graph TD
     K --> L[ImageProcessor]
 ```
 
-## 2. Обновление docs/1_Trasparent_logging.md
+## 2. Обновление docs/logging/transparent_logging.md
 
 ```markdown
 # Transparent Logging Initiative - Обновленная структура

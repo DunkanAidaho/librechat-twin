@@ -41,6 +41,7 @@ const {
   removeNullishValues,
 } = require('librechat-data-provider');
 const { addCacheControl, createContextHandlers } = require('~/app/clients/prompts');
+const { normalizeInstructionsPayload } = require('~/app/clients/utils/instructions');
 const { initializeAgent } = require('~/server/services/Endpoints/agents/agent');
 const { spendStructuredTokens } = require('~/models/spendTokens');
 const { getFormattedMemories, deleteMemory, setMemory } = require('~/models');
@@ -71,11 +72,20 @@ const { HistoryTrimmer } = require('~/server/services/agents/historyTrimmer');
 const { queueGateway } = require('~/server/services/agents/queue');
 const { usageReporter } = require('~/server/services/agents/usage');
 const {
+  compressMessagesForRetry,
+  detectContextOverflow,
+} = require('~/server/services/agents/utils');
+const {
   buildContext: contextBuild,
   fetchGraphContext,
   calculateAdaptiveTimeout,
   mapReduceContext,
 } = require('~/server/services/agents/context');
+const {
+  extractMessageText,
+  normalizeMemoryText,
+  makeIngestKey,
+} = require('~/server/utils/messageUtils');
 
 /** @type {Map<string, { expiresAt: number, payload: object }>} */
 
@@ -243,7 +253,6 @@ const GRAPH_QUERY_HINT_MAX_CHARS = configService.getNumber('memory.graphContext.
 const RAG_QUERY_MAX_CHARS = configService.getNumber('memory.ragQuery.maxChars', 6000);
 
 const MEMORY_TASK_TIMEOUT_MS = configService.getNumber('memory.queue.taskTimeoutMs', 30000);
-const DEFAULT_ENCODING = getString('agents.encoding.defaultTokenizerEncoding', 'o200k_base');
 const DEFAULT_SYSTEM_PROMPT = 'Ты самый полезный ИИ-помощник. Всегда в приоритете используй русский язык для ответов.';
 
 const logger = getLogger('agents.client');
@@ -257,7 +266,7 @@ const createSafeLogger = () => ({
   error: (...args) => logger.error(...args),
 });
 
-const { info: safeInfo, warn: safeWarn, error: safeError } = createSafeLogger();
+const { error: safeError } = createSafeLogger();
 
 /**
  * Wraps a promise with a timeout.
@@ -277,156 +286,6 @@ function withTimeout(promise, timeoutMs, timeoutMessage = 'Operation timed out')
       );
     }),
   ]).finally(() => clearTimeout(timer));
-}
-
-/**
- * Normalizes instruction payload into a consistent object format.
- */
-function normalizeInstructionsPayload(rawInstructions, getEncoding, logPrefix = '[AgentClient]') {
-  const resolveEncoding = () => {
-    if (typeof getEncoding === 'function') {
-      try {
-        const resolved = getEncoding();
-        if (resolved) {
-          return resolved;
-        }
-      } catch (error) {
-        safeWarn(`${logPrefix} Failed to resolve encoding via function: ${error.message}`);
-      }
-    } else if (typeof getEncoding === 'string' && getEncoding.length > 0) {
-      return getEncoding;
-    }
-    return DEFAULT_ENCODING;
-  };
-
-  const encoding = resolveEncoding();
-
-  const computeTokens = (text) => {
-    if (!text) {
-      return 0;
-    }
-    if (Tokenizer?.getTokenCount) {
-      try {
-        return Tokenizer.getTokenCount(text, encoding);
-      } catch (error) {
-        safeWarn(`${logPrefix} Failed to count tokens: ${error.message}`);
-      }
-    } else {
-      safeWarn(`${logPrefix} Tokenizer unavailable, using string length as estimate.`);
-    }
-    return text.length;
-  };
-
-  if (rawInstructions == null) {
-    return { content: '', tokenCount: 0 };
-  }
-
-  if (typeof rawInstructions === 'object') {
-    if (rawInstructions.content == null || typeof rawInstructions.content !== 'string') {
-      safeWarn(`${logPrefix} Instructions object missing valid content property.`);
-      return { content: '', tokenCount: 0 };
-    }
-
-    const tokenCount = computeTokens(rawInstructions.content);
-    if (rawInstructions.tokenCount !== tokenCount) {
-      safeInfo(
-        `${logPrefix} Recomputed instruction tokens. Length: ${rawInstructions.content.length}, Tokens: ${tokenCount}`,
-      );
-    }
-    return {
-      content: rawInstructions.content,
-      tokenCount,
-    };
-  }
-
-  if (typeof rawInstructions !== 'string') {
-    safeWarn(`${logPrefix} Unsupported instructions type: ${typeof rawInstructions}`);
-    return { content: '', tokenCount: 0 };
-  }
-
-  const tokenCount = computeTokens(rawInstructions);
-  safeInfo(
-    `${logPrefix} Converted string instructions. Length: ${rawInstructions.length}, Tokens: ${tokenCount}`,
-  );
-  return {
-    content: rawInstructions,
-    tokenCount,
-  };
-}
-
-/**
- * Extracts text content from a message object.
- */
-function extractMessageText(message, logPrefix = '[AgentClient]', options = {}) {
-  const { silent = false } = options ?? {};
-  const warn = (...args) => {
-    if (!silent) {
-      safeWarn(...args);
-    }
-  };
-
-  if (!message) {
-    warn(`${logPrefix} extractMessageText received null/undefined message`);
-    return '';
-  }
-
-  if (typeof message.text === 'string') {
-    const trimmedText = message.text.trim();
-    if (trimmedText.length > 0) {
-      return message.text;
-    }
-  }
-
-  if (typeof message.content === 'string') {
-    const trimmedContent = message.content.trim();
-    if (trimmedContent.length > 0) {
-      return message.content;
-    }
-  }
-
-  if (message.content && typeof message.content === 'object' && !Array.isArray(message.content)) {
-    warn(`${logPrefix} message.content is an object, not string/array. Returning empty string.`);
-    return '';
-  }
-
-  if (Array.isArray(message.content)) {
-    return message.content
-      .filter((part) => part && part.type === 'text' && part.text != null && typeof part.text === 'string')
-      .map((part) => part.text)
-      .join('\n');
-  }
-
-  return '';
-}
-
-/**
- * Normalizes and cleans memory text for RAG processing.
- */
-function normalizeMemoryText(text, logPrefix = '[history->RAG]') {
-  if (text == null) {
-    return '';
-  }
-  if (typeof text !== 'string') {
-    safeWarn(`${logPrefix} Ожидалась строка для нормализации, получено: ${typeof text}`);
-    return '';
-  }
-  let normalized = text;
-  try {
-    normalized = text.normalize('NFC');
-  } catch (error) {
-    safeWarn(`${logPrefix} Не удалось нормализовать текст`, { message: error?.message });
-  }
-  const cleaned = normalized.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
-  return cleaned.trim();
-}
-
-/**
- * Generates a unique ingest key for deduplication in RAG.
- */
-function makeIngestKey(convId, msgId, raw) {
-  if (msgId) return `ing:${convId}:${msgId}`;
-  const hash = crypto.createHash('md5').update(String(raw || '')).digest('hex');
-  return `ing:${convId}:${hash}`;
 }
 
 /**
@@ -475,88 +334,6 @@ function logToolError(graph, error, toolId) {
   });
 }
 
-/**
- * Detects if error is context overflow (400 with token limit message).
- */
-function detectContextOverflow(error) {
-  if (!error) {
-    return false;
-  }
-
-  const status = error?.status || error?.response?.status || error?.code;
-  if (status !== 400 && status !== '400') {
-    return false;
-  }
-
-  const message = error?.message || error?.response?.data?.message || '';
-  const lowerMessage = String(message).toLowerCase();
-
-  return (
-    lowerMessage.includes('context length') ||
-    lowerMessage.includes('maximum context') ||
-    lowerMessage.includes('token') && (lowerMessage.includes('exceed') || lowerMessage.includes('limit'))
-  );
-}
-
-/**
- * Aggressively compresses messages for retry after context overflow.
- */
-function compressMessagesForRetry(messages, targetReduction = 0.5) {
-  if (!Array.isArray(messages) || messages.length === 0) {
-    return messages;
-  }
-
-  const compressed = [];
-  const keepSystemMessage = messages.find(m => m._getType && m._getType() === 'system');
-  
-  if (keepSystemMessage) {
-    const systemContent = typeof keepSystemMessage.content === 'string' 
-      ? keepSystemMessage.content 
-      : JSON.stringify(keepSystemMessage.content);
-    
-    const maxSystemLength = Math.floor(systemContent.length * (1 - targetReduction));
-    const truncatedSystem = systemContent.slice(0, maxSystemLength);
-    
-    compressed.push(new SystemMessage({ 
-      content: truncatedSystem + '\n[...system message truncated due to context limit...]' 
-    }));
-  }
-
-  const nonSystemMessages = messages.filter(m => !m._getType || m._getType() !== 'system');
-  const keepCount = Math.max(3, Math.floor(nonSystemMessages.length * (1 - targetReduction)));
-  const recentMessages = nonSystemMessages.slice(-keepCount);
-
-  for (const msg of recentMessages) {
-    const messageType = msg._getType ? msg._getType() : 'unknown';
-    let content = msg.content;
-
-    if (typeof content === 'string') {
-      const maxLength = Math.floor(content.length * (1 - targetReduction));
-      if (content.length > maxLength) {
-        content = content.slice(0, maxLength) + '\n[...truncated...]';
-      }
-    } else if (Array.isArray(content)) {
-      content = content
-        .filter(part => part.type === 'text')
-        .map(part => {
-          const text = part.text || '';
-          const maxLength = Math.floor(text.length * (1 - targetReduction));
-          return {
-            type: 'text',
-            text: text.length > maxLength ? text.slice(0, maxLength) + '\n[...truncated...]' : text
-          };
-        });
-    }
-
-    if (messageType === 'human') {
-      compressed.push(new HumanMessage({ content }));
-    } else {
-      compressed.push(msg.constructor ? new msg.constructor({ content }) : { ...msg, content });
-    }
-  }
-
-  return compressed;
-}
 
 /**
  * Marks messages as stored in memory (bulk update)

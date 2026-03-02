@@ -57,17 +57,28 @@
 
 ## 🔜 Оставшиеся задачи (подробная декомпозиция)
 
+### 0. Док-индекс и инвентаризация (docs/)
+- **Что нужно сделать**
+  - Собрать единый индекс по тематическим подпапкам `docs/` и проверить ссылки на TODO/project_map.
+  - Убедиться, что основной план логирования — `docs/logging/transparent_logging.md`.
+- **Как нельзя**
+  - Оставлять дубликаты файлов без ссылки/редиректа в индексах.
+- **Как нужно**
+  - Любой перенос фиксировать в `docs/README.md`, `docs/TODO.md` и `docs/project_map`.
+
+**Статус:** ✅ актуальная структура уже в `docs/architecture/`, `docs/logging/`, `docs/refactoring/`, `docs/event_service/`; дублей вне подпапок нет.
+
 ### 1. Transparent logging initiative (сквозное API-логирование)
 - **Статус**
   - memoryQueue + temporalClient, scripts (manage_summaries/sync_history), routes/files (+ RAG подроуты) и response utils уже переведены на scoped логгеры и `buildContext`.
   - ✅ RAG core (`condense`, `multiStepOrchestrator`, `LongTextWorker`, `RagContextBuilder`, `RagCache`, `intentAnalyzer`) завершён, Map/Reduce логирует `rag.condense.*` и финальный `rag.condense.mr_finished`.
-  - В работе: маршруты SSE.
-  - Предстоит: LLM clients (`Anthropic`, `OpenAI`, `Google`, `BaseClient`).
+  - ✅ Маршруты SSE и response utils завершены.
+  - ✅ LLM clients (`Anthropic`, `OpenAI`, `Google`, `BaseClient`) завершены.
 - [x] RAG core: RagContextBuilder / RagCache / intentAnalyzer / multiStepOrchestrator / LongTextWorker / condense  
-- [ ] LLM clients: BaseClient / Anthropic / OpenAI / Google (после переноса обновить `docs/1_Trasparent_logging.md` и чеклист)
+- [x] LLM clients: BaseClient / Anthropic / OpenAI / Google (после переноса обновить `docs/logging/transparent_logging.md` и чеклист)
 - **Что нужно сделать**
   - Построить единый слой логирования для всех API-проходов (клиенты, контроллеры, сервисы, очереди, утилиты), чтобы каждая стадия запроса фиксировалась с единым форматом и requestId.
-  - Использовать план из `docs/1_Trasparent_logging.md`, дополненный конкретными областями из `docs/project_map`.
+  - Использовать план из `docs/logging/transparent_logging.md`, дополненный конкретными областями из `docs/project_map`.
 - **Декомпозиция**
   1. **Config & инфраструктура**
      - Расширить `logging` секцию `ConfigService`: глобальный уровень, формат (json/text), опции консольных цветов, файловый транспорт, feature-флаги (`tracePipeline`, `debugSse`, `tokenUsageReportMode`).
@@ -87,7 +98,7 @@
      - Утвердить набор полей (`timestamp`, `level`, `scope`, `message`, `requestId`, `conversationId`, `userId`, `context`).
      - Для trace-режима писать вложенные объекты (например, токенайзер, RAG cache hits) в `meta`.
   6. **Документация и контроль качества**
-     - Обновить `docs/1_Trasparent_logging.md` по мере реализации (статус, примеры JSON/console).
+     - Обновить `docs/logging/transparent_logging.md` по мере реализации (статус, примеры JSON/console).
      - Добавить раздел в `docs/project_map` о статусе логирования по файлам (готово/в работе).
      - План тестирования: smoke-тесты с `TRACE_PIPELINE=true`, прогон unit/интеграционных тестов, проверка того, что `DEBUG_SSE`/`tokenUsageReportMode` переключаются из ENV.
 - **Как нельзя**
@@ -96,6 +107,17 @@
 - **Как нужно**
   - Использовать scoped loggers повсеместно, не хранить глобальное состояние вне Logger-модуля.
   - Для шумных путей (RAG trace) привязывать вывод к конфиг-флагам.
+
+**Статус по документации:** основной план и примеры живут в [`docs/logging/transparent_logging.md`](docs/logging/transparent_logging.md).
+
+### 1.1 SRP-разнос `client.js` (AgentClient)
+- **Что нужно сделать**
+  - Разнести `api/server/controllers/agents/client.js` по блокам utils/config/pricing/memory/prompt/tools/usage.
+  - Увязать с существующими сервисами (`server/services/agents/*`, `server/services/pricing/*`, `server/services/RAG/*`).
+- **Статус**
+  - ✅ utils-хелперы вынесены: `normalizeInstructionsPayload` → `app/clients/utils/instructions.js`, `extractMessageText/normalizeMemoryText/makeIngestKey` → `server/utils/messageUtils.js`, `detectContextOverflow/compressMessagesForRetry` → `server/services/agents/utils.js`.
+- **Ссылки**
+  - План: [`docs/refactoring/client_refactoring.md`](docs/refactoring/client_refactoring.md)
 
 ### 2. Multi-step RAG + Graph resilience (инцидент 18–20 фев 2026)
 - **Статус**
@@ -263,4 +285,3 @@
 3. После исправлений обновляем статус задач в `docs/TODO.md` и, при необходимости, `docs/project_map`.
 
 Чеклист является обязательной точкой входа при планировании фич и код-ревью для LibreChat Twin.
-
