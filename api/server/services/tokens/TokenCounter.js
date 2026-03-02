@@ -101,7 +101,27 @@ class TokenCounter {
   static createCounter(encoding) {
     return function (message) {
       const countTokens = (text) => Tokenizer.getTokenCount(text, encoding);
-      return getTokenCountForMessage(message, countTokens);
+      if (typeof getTokenCountForMessage === 'function') {
+        return getTokenCountForMessage(message, countTokens);
+      }
+
+      if (!message) {
+        return 0;
+      }
+
+      const rawText =
+        typeof message.content === 'string'
+          ? message.content
+          : Array.isArray(message.content)
+            ? message.content
+                .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+                .map((part) => part.text)
+                .join('\n')
+            : typeof message.text === 'string'
+              ? message.text
+              : '';
+
+      return countTokens(rawText || '');
     };
   }
 
