@@ -57,7 +57,7 @@
 | memory | memory agent + queue | `server/services/agents/history`, `server/services/RAG/memoryQueue` | `api/server/services/agents/history/index.js`, `api/server/services/RAG/memoryQueue.js` |
 | prompt | buildMessages, deferred condense | `server/services/agents/context`, `server/services/RAG/RagContextManager` | `api/server/services/agents/context/index.js`, `api/server/services/RAG/RagContextManager.js` |
 | tools | tool errors/context handlers | `server/services/agents/tools` (новый фасад) | `api/server/services/agents/tools/index.js` |
-| usage | usage reporting & breakdown | `server/services/agents/usage` | `api/server/services/agents/usage/index.js` |
+| usage | usage reporting & breakdown (включая promptTokenContext) | `server/services/agents/usage` | `api/server/services/agents/usage/index.js` |
 
 ## Следующие шаги
 

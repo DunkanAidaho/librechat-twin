@@ -47,7 +47,11 @@ const MessageHistoryManager = require('~/server/services/agents/MessageHistoryMa
 const { ContextCompressor, MessageCompressorBridge } = require('~/server/services/agents/ContextCompressor');
 const { analyzeIntent } = require('~/server/services/RAG/intentAnalyzer');
 const { runMultiStepRag } = require('~/server/services/RAG/multiStepOrchestrator');
-const { setDeferredContext } = require('~/server/services/RAG/RagContextManager');
+const {
+  setDeferredContext,
+  getDeferredContext,
+  clearDeferredContext,
+} = require('~/server/services/RAG/RagContextManager');
 const { HistoryTrimmer } = require('~/server/services/agents/historyTrimmer');
 const { queueGateway } = require('~/server/services/agents/queue');
 const { createAgentMemoryService } = require('~/server/services/agents/memory/agentMemoryService');
@@ -419,8 +423,8 @@ class AgentClient extends BaseClient {
     const historyCompressionCfg = runtimeCfg?.historyCompression ?? {};
     const historyCfg = runtimeCfg?.history ?? {};
     const dontShrinkLastN = Number.isFinite(historyCfg?.dontShrinkLastN)
-      ? Math.max(historyCfg.dontShrinkLastN, 0)
-      : 0;
+      ? Math.max(historyCfg.dontShrinkLastN, 1)
+      : 1;
     const MAX_MESSAGES_TO_PROCESS = historyCompressionCfg?.enabled ? Infinity : 25;
     const conversationId = this.conversationId || this.options?.req?.body?.conversationId;
     const requestUserId = this.options?.req?.user?.id || null;
@@ -815,6 +819,14 @@ const ragResult = await contextBuild({
     }
 
     const formattedMessages = orderedMessages.map((message, i) => {
+      if (i === orderedMessages.length - 1) {
+        logger.debug('[AgentClient] last_message_pre_format', {
+          conversationId: this.conversationId,
+          role: message?.role,
+          rawTextLength: message?.text?.length || 0,
+          contentParts: Array.isArray(message?.content) ? message.content.length : 0,
+        });
+      }
       const formattedMessage = formatMessage({
         message,
         userName: this.options?.name,
@@ -858,6 +870,23 @@ const ragResult = await contextBuild({
       if (!message.isCreatedByUser && i !== orderedMessages.length - 1) {
         formattedMessage.metadata.isRagContext = true;
         orderedMessages[i].metadata.isRagContext = true;
+      }
+
+      if (i === orderedMessages.length - 1) {
+        const formattedLength = Array.isArray(formattedMessage.content)
+          ? formattedMessage.content
+              .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+              .reduce((sum, part) => sum + part.text.length, 0)
+          : typeof formattedMessage.content === 'string'
+            ? formattedMessage.content.length
+            : 0;
+        logger.debug('[AgentClient] last_message_post_format', {
+          conversationId: this.conversationId,
+          formattedLength,
+          contentType: Array.isArray(formattedMessage.content)
+            ? 'array'
+            : typeof formattedMessage.content,
+        });
       }
 
       return formattedMessage;
@@ -913,21 +942,13 @@ const ragResult = await contextBuild({
       messages,
     };
 
-    const perMessageBreakdown = orderedMessages.map((msg, idx) => ({
-      messageId: msg?.messageId || "msg-" + (idx + 1),
-      tokens: Number(msg?.tokenCount) || 0,
-      isRagContext: msg?.metadata?.isRagContext || false
-    }));
-
-    const rm = this.options?.req?.ragMetrics || {};
-    this.promptTokenContext = {
-      conversationId: this.conversationId ?? "unknown",
-      instructionsTokens: instructions?.tokenCount || 0,
-      ragGraphTokens: Number(rm.graphTokens) || 0,
-      ragVectorTokens: Number(rm.vectorTokens) || 0,
-      messages: perMessageBreakdown,
-      promptTokensEstimate: promptTokens ?? 0
-    };
+    this.promptTokenContext = agentUsageService.buildPromptTokenContext({
+      conversationId: this.conversationId,
+      instructionsTokens: instructions?.tokenCount,
+      ragMetrics: this.options?.req?.ragMetrics,
+      orderedMessages,
+      promptTokensEstimate: promptTokens,
+    });
 
     if (promptTokens >= 0 && typeof opts?.getReqData === 'function') {
       opts.getReqData({ promptTokens });
@@ -1614,8 +1635,6 @@ const ragResult = await contextBuild({
     const encoding = this.getEncoding();
     return Tokenizer.getTokenCount(text, encoding);
   }
-  promptTokenContext;
-  promptTokenBreakdown;
 
   emitPromptTokenBreakdown(
     {

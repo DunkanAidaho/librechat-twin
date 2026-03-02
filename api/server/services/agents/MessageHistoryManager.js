@@ -160,6 +160,17 @@ class MessageHistoryManager {
         const normalizedText = normalizeMemoryText(rawText);
         const len = normalizedText.length;
 
+        if (m?.isCreatedByUser) {
+          this.logger.debug(
+            'rag.history.user_message_length',
+            this.getLogContext(conversationId, userId, {
+              messageId: m?.messageId,
+              length: len,
+              histLongUserToRag,
+            }),
+          );
+        }
+
         const looksHTML =
           /</i.test(normalizedText) && /<html|<body|<div|<p|<span/i.test(normalizedText);
 

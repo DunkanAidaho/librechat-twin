@@ -706,6 +706,14 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
 
   try {
     const originalUserText = text || '';
+    logger.debug(
+      'routes.agents.user_text_size',
+      buildContext(getRequestContext(req), {
+        textLength: originalUserText.length,
+        maxUserMsgToModelChars: MAX_USER_MSG_TO_MODEL_CHARS,
+        maxTextSize: MAX_TEXT_SIZE,
+      }),
+    );
     if (originalUserText.length > MAX_USER_MSG_TO_MODEL_CHARS) {
       if (MAX_TEXT_SIZE && originalUserText.length > MAX_TEXT_SIZE) {
         const oversizedResponse = {

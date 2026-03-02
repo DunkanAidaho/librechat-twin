@@ -245,10 +245,34 @@ function createAgentUsageService({ pricingConfig, usageReporter, writeTokenRepor
     return breakdown;
   };
 
+  const buildPromptTokenContext = ({
+    conversationId,
+    instructionsTokens = 0,
+    ragMetrics = {},
+    orderedMessages = [],
+    promptTokensEstimate = 0,
+  }) => {
+    const perMessageBreakdown = orderedMessages.map((msg, idx) => ({
+      messageId: msg?.messageId || `msg-${idx + 1}`,
+      tokens: Number(msg?.tokenCount) || 0,
+      isRagContext: msg?.metadata?.isRagContext || false,
+    }));
+
+    return {
+      conversationId: conversationId ?? 'unknown',
+      instructionsTokens: instructionsTokens || 0,
+      ragGraphTokens: Number(ragMetrics?.graphTokens) || 0,
+      ragVectorTokens: Number(ragMetrics?.vectorTokens) || 0,
+      messages: perMessageBreakdown,
+      promptTokensEstimate: promptTokensEstimate ?? 0,
+    };
+  };
+
   return Object.freeze({
     recordCollectedUsage,
     recordTokenUsage,
     emitPromptTokenBreakdown,
+    buildPromptTokenContext,
   });
 }
 
