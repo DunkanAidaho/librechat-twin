@@ -505,8 +505,14 @@ class AgentClient extends BaseClient {
 
     const PromptBudgetManager = require('~/server/services/agents/PromptBudgetManager');
     const budgetManager = new PromptBudgetManager({ configService });
+    const budgetModel =
+      this.options?.endpointOption?.model ||
+      this.options?.req?.body?.endpointOption?.model ||
+      this.options?.req?.body?.model ||
+      this.options?.agent?.model_parameters?.model ||
+      this.model;
     const budget = await budgetManager.getBudget({
-      model: this.options?.endpointOption?.model || this.options?.req?.body?.model,
+      model: budgetModel,
       runtimeCfg,
       requestContext: buildContext({
         conversationId: this.conversationId,
@@ -515,6 +521,10 @@ class AgentClient extends BaseClient {
         agentId: this.agent_id,
       }),
       encoding: this.getEncoding(),
+    });
+    logger.info('[context.budget.model]', {
+      conversationId: this.conversationId,
+      model: budgetModel,
     });
 
     let historyTrimmer = null;
