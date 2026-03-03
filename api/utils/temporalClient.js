@@ -12,6 +12,20 @@ function getQueueConfig() {
   return configService.getSection('queues');
 }
 
+function getNatsMaxPayloadBytes(queueConfig) {
+  const fallbackBytes = 900_000;
+  if (!queueConfig || typeof queueConfig !== 'object') {
+    return fallbackBytes;
+  }
+
+  const maxBytes = queueConfig.natsMaxPayloadBytes;
+  if (typeof maxBytes !== 'number' || Number.isNaN(maxBytes) || maxBytes <= 0) {
+    return fallbackBytes;
+  }
+
+  return maxBytes;
+}
+
 function isNatsEnabled() {
   return configService.get('nats.enabled') === true;
 }
@@ -46,8 +60,23 @@ function resolveSubject(queueConfig, subjectKey) {
 async function publishWithFallback(subjectKey, payload, fallbackPath, workflowLabel) {
   const queueConfig = getQueueConfig();
   const subject = resolveSubject(queueConfig, subjectKey);
+  const maxPayloadBytes = getNatsMaxPayloadBytes(queueConfig);
+  const payloadSize = Buffer.byteLength(JSON.stringify(payload), 'utf8');
+  const payloadTooLarge = payloadSize > maxPayloadBytes;
 
-  if (isNatsEnabled() && subject) {
+  if (payloadTooLarge) {
+    logger.warn(
+      'temporalClient.nats_payload_oversize',
+      buildContext({}, {
+        workflowLabel,
+        subject,
+        payloadSize,
+        maxPayloadBytes,
+      }),
+    );
+  }
+
+  if (isNatsEnabled() && subject && !payloadTooLarge) {
     try {
       await publish(subject, payload);
       return { status: 'queued', via: 'nats' };

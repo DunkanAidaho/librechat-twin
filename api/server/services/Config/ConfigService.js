@@ -173,6 +173,7 @@ class ConfigService {
       toolsGatewayUrl: z.string().url().nullable(),
       httpTimeoutMs: z.number().int().positive(),
       redisMemoryQueueName: z.string().min(1).nullable().optional(),
+      natsMaxPayloadBytes: z.number().int().positive().optional(),
       subjects: z.object({
         memory: z.string().min(1).nullable(),
         graph: z.string().min(1).nullable(),
@@ -579,6 +580,7 @@ class ConfigService {
           toolsGatewayUrl: sanitizeUrl(this.env.TOOLS_GATEWAY_URL),
           httpTimeoutMs: parseOptionalInt(this.env.TOOLS_GATEWAY_TIMEOUT_MS) ?? 15000,
           redisMemoryQueueName: sanitizeOptionalString(this.env.REDIS_MEMORY_QUEUE_NAME) ?? null,
+          natsMaxPayloadBytes: parseOptionalInt(this.env.NATS_MAX_PAYLOAD_BYTES) ?? undefined,
           subjects: {
             memory: sanitizeOptionalString(this.env.NATS_MEMORY_SUBJECT) ?? null,
             graph: sanitizeOptionalString(this.env.NATS_GRAPH_SUBJECT) ?? null,
