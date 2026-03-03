@@ -981,6 +981,31 @@ class AgentClient extends BaseClient {
     logger.info(
       `[DIAG-PROMPT] Final instructions object created. Length: ${instructions.content.length}, Tokens: ${instructions.tokenCount}`,
     );
+
+    const tailCount = Math.min(2, formattedMessages.length);
+    if (tailCount > 0) {
+      const tail = formattedMessages.slice(-tailCount).map((message) => {
+        const contentText = Array.isArray(message?.content)
+          ? message.content
+              .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+              .map((part) => part.text)
+              .join('\n')
+          : typeof message?.content === 'string'
+            ? message.content
+            : '';
+        const preview = contentText.slice(0, 120);
+        return {
+          role: message?.role,
+          messageId: message?.messageId,
+          length: contentText.length,
+          preview,
+        };
+      });
+      logger.info('[diag.prompt.tail_messages]', {
+        conversationId: this.conversationId,
+        tail,
+      });
+    }
     if (this.contextStrategy) {
    ({ payload, promptTokens, tokenCountMap, messages } = await this.handleContextStrategy({
      orderedMessages,

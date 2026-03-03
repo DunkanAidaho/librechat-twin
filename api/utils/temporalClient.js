@@ -63,6 +63,7 @@ async function publishWithFallback(subjectKey, payload, fallbackPath, workflowLa
   const maxPayloadBytes = getNatsMaxPayloadBytes(queueConfig);
   const payloadSize = Buffer.byteLength(JSON.stringify(payload), 'utf8');
   const payloadTooLarge = payloadSize > maxPayloadBytes;
+  const startAt = Date.now();
 
   if (payloadTooLarge) {
     logger.warn(
@@ -94,6 +95,16 @@ async function publishWithFallback(subjectKey, payload, fallbackPath, workflowLa
   }
 
   const url = `${baseUrl}${fallbackPath}`;
+  logger.info(
+    'temporalClient.http_fallback_start',
+    buildContext({}, {
+      workflowLabel,
+      subject,
+      url,
+      payloadSize,
+      payloadTooLarge,
+    }),
+  );
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -106,7 +117,18 @@ async function publishWithFallback(subjectKey, payload, fallbackPath, workflowLa
     throw new Error(`[HTTP fallback] ${workflowLabel} → ${url} вернул ${response.status}: ${text}`);
   }
 
-  return response.json();
+  const result = await response.json();
+  logger.info(
+    'temporalClient.http_fallback_done',
+    buildContext({}, {
+      workflowLabel,
+      subject,
+      url,
+      status: response.status,
+      durationMs: Date.now() - startAt,
+    }),
+  );
+  return result;
 }
 
 async function enqueueMemoryTask(payload) {

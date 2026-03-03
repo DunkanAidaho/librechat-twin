@@ -106,16 +106,48 @@ async function enqueueMemoryTasksWithResilience(tasks, meta = {}, options = {}) 
   const reasonLabel = normalizeLabelValue(meta?.reason);
   const config = getResilienceConfig('memoryQueue');
   const mergedOptions = { ...config, ...options };
+  const timeoutMs = mergedOptions?.timeoutMs ?? 0;
 
   try {
+    logger.info(
+      'routes.agents.memory_queue_resilience_start',
+      buildContext(getRequestContext(meta?.req || {}), {
+        reason: meta?.reason,
+        conversationId: meta?.conversationId,
+        userId: meta?.userId,
+        taskCount: Array.isArray(tasks) ? tasks.length : 0,
+        timeoutMs,
+        retries: mergedOptions?.retries ?? 0,
+      }),
+    );
     const result = await runWithResilience(
       'enqueueMemoryTasks',
       () => queueGateway.enqueueMemory(tasks, meta),
       mergedOptions,
     );
+    logger.info(
+      'routes.agents.memory_queue_resilience_done',
+      buildContext(getRequestContext(meta?.req || {}), {
+        reason: meta?.reason,
+        conversationId: meta?.conversationId,
+        userId: meta?.userId,
+        durationMs: Date.now() - startedAt,
+      }),
+    );
     observeMemoryQueueLatency({ reason: reasonLabel, status: 'success' }, Date.now() - startedAt);
     return result;
   } catch (error) {
+    logger.error(
+      'routes.agents.memory_queue_resilience_error',
+      buildContext(getRequestContext(meta?.req || {}), {
+        reason: meta?.reason,
+        conversationId: meta?.conversationId,
+        userId: meta?.userId,
+        durationMs: Date.now() - startedAt,
+        timeoutMs,
+        err: error,
+      }),
+    );
     observeMemoryQueueLatency({ reason: reasonLabel, status: 'failure' }, Date.now() - startedAt);
     incMemoryQueueFailure(reasonLabel);
     throw error;
