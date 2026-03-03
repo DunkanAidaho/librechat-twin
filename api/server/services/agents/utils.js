@@ -62,6 +62,17 @@ function compressMessagesForRetry(messages, targetReduction = 0.5) {
   const nonSystemMessages = messages.filter((m) => !m._getType || m._getType() !== 'system');
   const keepCount = Math.max(3, Math.floor(nonSystemMessages.length * (1 - targetReduction)));
   const recentMessages = nonSystemMessages.slice(-keepCount);
+  const lastHumanEntry = [...recentMessages]
+    .map((msg, index) => ({ msg, index }))
+    .reverse()
+    .find((entry) => (entry.msg?._getType?.() || entry.msg?.role) === 'human');
+  if (lastHumanEntry) {
+    logger.debug('[context.retry.lock_last_human]', {
+      keepCount,
+      targetReduction,
+      messageIndex: lastHumanEntry.index,
+    });
+  }
   const lastHumanIndex = recentMessages
     .map((msg, index) => ({ msg, index }))
     .reverse()
@@ -87,13 +98,14 @@ function compressMessagesForRetry(messages, targetReduction = 0.5) {
   for (const msg of recentMessages) {
     const messageType = msg._getType ? msg._getType() : 'unknown';
     let content = msg.content;
+    const isLastHuman = lastHumanEntry && msg === lastHumanEntry.msg;
 
-    if (typeof content === 'string') {
+    if (!isLastHuman && typeof content === 'string') {
       const maxLength = Math.floor(content.length * (1 - targetReduction));
       if (content.length > maxLength) {
         content = `${content.slice(0, maxLength)}\n[...truncated...]`;
       }
-    } else if (Array.isArray(content)) {
+    } else if (!isLastHuman && Array.isArray(content)) {
       content = content
         .filter((part) => part.type === 'text')
         .map((part) => {
