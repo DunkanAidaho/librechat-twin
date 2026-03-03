@@ -631,6 +631,12 @@ class AgentClient extends BaseClient {
 
     let ragContextLength = 0;
     let ragCacheStatus = 'skipped';
+    let multiStepResult = {
+      globalContext: systemContent,
+      entities: [],
+      passesUsed: 0,
+      queueStatus: {},
+    };
     const req = this.options?.req;
     const res = this.options?.res;
 
@@ -649,58 +655,6 @@ class AgentClient extends BaseClient {
         reqDidEnqueueIngest: req?.didEnqueueIngest
       });
       await new Promise((r) => setTimeout(r, waitMs));
-    }
-
-    try {
-const ragResult = await contextBuild({
-        orderedMessages,
-        systemContent,
-        runtimeCfg,
-        req,
-        res,
-        endpointOption,
-        logger,
-        encoding: this.getEncoding(),
-        ragBudgetTokens: budget?.budgets?.rag,
-      });
-
-      if (ragResult && typeof ragResult === 'object') {
-        systemContent = ragResult.patchedSystemContent ?? systemContent;
-        const contextLengthCandidate = Number(ragResult.contextLength);
-        ragContextLength = Number.isFinite(contextLengthCandidate) ? contextLengthCandidate : 0;
-        ragCacheStatus = ragResult.cacheStatus ?? ragCacheStatus;
-
-        if (req) {
-          req.ragCacheStatus = ragCacheStatus;
-          if (ragResult.metrics && typeof ragResult.metrics === 'object') {
-            req.ragMetrics = Object.assign({}, req.ragMetrics, ragResult.metrics);
-          }
-        }
-      }
-
-      if (ragContextLength > 0) {
-        logger.info('[rag.context.applied]', {
-          conversationId: this.conversationId,
-          cacheStatus: ragCacheStatus,
-          contextLength: ragContextLength,
-          contextTokens: ragResult?.metrics?.contextTokens ?? 0,
-          graphTokens: ragResult?.metrics?.graphTokens ?? 0,
-          vectorTokens: ragResult?.metrics?.vectorTokens ?? 0,
-        });
-      }
-    } catch (ragError) {
-      logger.error('[rag.context.error]', {
-        conversationId: this.conversationId,
-        message: ragError?.message,
-        stack: ragError?.stack,
-      });
-      if (req) {
-        req.ragCacheStatus = 'error';
-      }
-    }
-
-    if (this.options?.req) {
-      this.options.req.ragContextLength = ragContextLength;
     }
 
     try {
@@ -746,11 +700,12 @@ const ragResult = await contextBuild({
         }
       };
 
-      const multiStepResult = runtimeCfg?.multiStepRag?.enabled
+      multiStepResult = runtimeCfg?.multiStepRag?.enabled
         ? await runMultiStepRag({
             intentAnalysis,
             runtimeCfg,
             baseContext: systemContent,
+            graphContext: req?.graphContext,
             fetchGraphContext: fetchGraphLinesForEntity,
             enqueueMemoryTasks: queueGateway.enqueueMemory,
             conversationId: this.conversationId,
@@ -815,6 +770,87 @@ const ragResult = await contextBuild({
         stack: multiStepError?.stack,
       });
       clearDeferredContext(req);
+    }
+
+    try {
+      const ragResult = await contextBuild({
+        orderedMessages,
+        systemContent,
+        runtimeCfg,
+        req,
+        res,
+        endpointOption,
+        logger,
+        encoding: this.getEncoding(),
+        ragBudgetTokens: budget?.budgets?.rag,
+      });
+
+      if (ragResult && typeof ragResult === 'object') {
+        systemContent = ragResult.patchedSystemContent ?? systemContent;
+        const contextLengthCandidate = Number(ragResult.contextLength);
+        ragContextLength = Number.isFinite(contextLengthCandidate) ? contextLengthCandidate : 0;
+        ragCacheStatus = ragResult.cacheStatus ?? ragCacheStatus;
+
+        if (req) {
+          req.ragCacheStatus = ragCacheStatus;
+          if (ragResult.metrics && typeof ragResult.metrics === 'object') {
+            req.ragMetrics = Object.assign({}, req.ragMetrics, ragResult.metrics);
+          }
+        }
+      }
+
+      if (ragContextLength > 0) {
+        logger.info('[rag.context.applied]', {
+          conversationId: this.conversationId,
+          cacheStatus: ragCacheStatus,
+          contextLength: ragContextLength,
+          contextTokens: ragResult?.metrics?.contextTokens ?? 0,
+          graphTokens: ragResult?.metrics?.graphTokens ?? 0,
+          vectorTokens: ragResult?.metrics?.vectorTokens ?? 0,
+        });
+      }
+    } catch (ragError) {
+      logger.error('[rag.context.error]', {
+        conversationId: this.conversationId,
+        message: ragError?.message,
+        stack: ragError?.stack,
+      });
+      if (req) {
+        req.ragCacheStatus = 'error';
+      }
+    }
+
+    if (this.options?.req) {
+      this.options.req.ragContextLength = ragContextLength;
+    }
+
+    const shouldCondense = Boolean(
+      runtimeCfg?.multiStepRag?.enabled &&
+        multiStepResult?.entities?.length &&
+        (req?.ragCondenseQuery ?? '').length === 0,
+    );
+
+    if (shouldCondense) {
+      const lastUserMessage = orderedMessages[orderedMessages.length - 1];
+      const lastUserText = lastUserMessage?.text || '';
+      if (req && lastUserText) {
+        req.ragCondenseQuery = lastUserText;
+      }
+      const deferred = getDeferredContext(req);
+      if (deferred && deferred.vectorText?.length) {
+        await this.applyDeferredCondensation({
+          req,
+          res,
+          endpointOption,
+          runtimeCfg,
+          userQuery: lastUserText,
+          systemContentRef: () => systemContent,
+          updateSystemContent: (next) => {
+            systemContent = next;
+          },
+          deferredContext: deferred,
+        });
+      }
     }
 
     let payload;

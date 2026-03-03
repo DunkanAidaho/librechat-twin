@@ -114,7 +114,19 @@ async function buildContext({
   const normalizedQuery = userQuery.slice(0, queryMaxChars);
   if (req) {
     req.ragUserQuery = normalizedQuery;
+    req.ragCondenseQuery = multiStepEnabled ? '' : normalizedQuery;
   }
+  const intentEntities = Array.isArray(req?.intentAnalysis?.entities)
+    ? req.intentAnalysis.entities
+        .map((entity) => entity?.name)
+        .filter(Boolean)
+        .slice(0, runtimeCfg?.multiStepRag?.maxEntities || 3)
+    : [];
+  const intentHints = Array.isArray(req?.intentAnalysis?.entities)
+    ? req.intentAnalysis.entities
+        .flatMap((entity) => (Array.isArray(entity?.hints) ? entity.hints : []))
+        .filter(Boolean)
+    : [];
   const queryTokenCount = Tokenizer?.getTokenCount
     ? Tokenizer.getTokenCount(normalizedQuery, encoding)
     : normalizedQuery.length;
@@ -305,8 +317,23 @@ async function buildContext({
   }
 
   metrics.graphLines = graphContextLines.length;
+  if (req) {
+    req.graphContext = {
+      lines: graphContextLines,
+      queryHint: graphQueryHint,
+    };
+  }
 
   let ragSearchQuery = normalizedQuery;
+  if (intentEntities.length) {
+    const hints = intentHints.length ? ` (hints: ${[...new Set(intentHints)].join(', ')})` : '';
+    ragSearchQuery = `${normalizedQuery}\n\nEntities: ${intentEntities.join(', ')}${hints}`;
+    logger?.debug?.('[rag.context.intent.entities]', {
+      conversationId,
+      entities: intentEntities,
+      hints: [...new Set(intentHints)],
+    });
+  }
   if (graphQueryHint) {
     ragSearchQuery = `${normalizedQuery}\n\nGraph hints: ${graphQueryHint}`;
   }

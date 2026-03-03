@@ -8,6 +8,15 @@ const DEFAULT_TIMEOUT_MS = 2000;
 const MIN_CONFIDENCE = 0.35;
 const logger = getLogger('rag.intentAnalyzer');
 const ENTITY_REGEX = /\b([A-ZА-ЯЁ][a-zа-яё]+(?:\s+[A-ZА-ЯЁ][a-zа-яё]+)*)\b/g;
+const TOKEN_REGEX = /[A-Za-zА-Яа-яЁё]{3,}/g;
+const STOPWORDS = new Set([
+  'это', 'как', 'что', 'когда', 'где', 'почему', 'зачем', 'который', 'которая', 'которые',
+  'вот', 'все', 'всё', 'его', 'ее', 'её', 'для', 'при', 'без', 'над', 'под', 'про', 'после',
+  'или', 'а', 'но', 'и', 'или', 'ли', 'не', 'да', 'нет', 'ты', 'вы', 'мы', 'они', 'он', 'она',
+  'оно', 'этот', 'эта', 'эти', 'там', 'тут', 'ещё', 'уже', 'очень', 'просто', 'тоже', 'если',
+  'the', 'and', 'for', 'with', 'from', 'this', 'that', 'these', 'those', 'who', 'what', 'when',
+  'where', 'why', 'how', 'is', 'are', 'was', 'were', 'to', 'of', 'in', 'on', 'at', 'by', 'as',
+]);
 const RELATION_HINT_REGEX = /(между|связ(ь|и)|отношени[яе]|контакт[ы]?)/i;
 const ACK_REGEX = /^(ok|okay|ack|принято|ага|понял|да|✅|👌)/i;
 function normalizeText({ message, context }) {
@@ -62,11 +71,23 @@ function extractEntities(text = '') {
     matches.set(key, { count: prev.count + 1, name: candidate });
   }
 
+  if (matches.size === 0) {
+    const tokenMatches = text.match(TOKEN_REGEX) || [];
+    for (const token of tokenMatches) {
+      const normalized = token.toLowerCase();
+      if (STOPWORDS.has(normalized)) {
+        continue;
+      }
+      const prev = matches.get(normalized) || { count: 0, name: token };
+      matches.set(normalized, { count: prev.count + 1, name: token });
+    }
+  }
+
   return Array.from(matches.values()).map(({ count, name }) => ({
     name,
     type: /(inc|corp|llc|gmbh|АО|ООО|ЗАО|ИП|банк)/i.test(name)
       ? 'organization'
-      : 'person',
+      : 'keyword',
     confidence: Math.min(0.9, MIN_CONFIDENCE + count * 0.1),
     hints: [],
   }));

@@ -228,12 +228,13 @@ async function mapReduceContext({
   const adaptiveTimeout = calculateAdaptiveTimeout(contextText.length, baseTimeout);
 
   try {
+    const condenseQuery = typeof req?.ragCondenseQuery === 'string' ? req.ragCondenseQuery : userQuery;
     const finalContext = await ragCondenseContext({
       req,
       res,
       endpointOption,
       contextText,
-      userQuery,
+      userQuery: condenseQuery,
       graphContext,
       budgetChars,
       chunkChars,

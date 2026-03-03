@@ -187,6 +187,7 @@ async function runMultiStepRag({
   intentAnalysis,
   runtimeCfg,
   baseContext,
+  graphContext,
   fetchGraphContext,
   enqueueMemoryTasks,
   conversationId,
@@ -221,7 +222,25 @@ async function runMultiStepRag({
     };
   }
 
-  const entityStates = entities.map(createEntityState);
+  const initialGraphLines = Array.isArray(graphContext?.lines) ? graphContext.lines : [];
+  if (initialGraphLines.length) {
+    for (const entity of entities) {
+      const lines = initialGraphLines.filter((line) =>
+        line.toLowerCase().includes(entity.name.toLowerCase()),
+      );
+      if (lines.length) {
+        entity.graphLines = lines;
+      }
+    }
+  }
+
+  const entityStates = entities.map(createEntityState).map((state, index) => {
+    const prefilled = entities[index]?.graphLines;
+    if (Array.isArray(prefilled) && prefilled.length) {
+      state.graphLines.push(...prefilled);
+    }
+    return state;
+  });
   const queueStatus = { memory: 'skipped', graph: 'skipped' };
   let passesUsed = 0;
 
