@@ -10,9 +10,11 @@ function buildMemoryConfig() {
   const rag = configService.getSection('rag');
   const logging = configService.getSection('logging');
   const pricing = configService.get('pricing', {});
+  const openrouterModels = configService.getSection('openrouterModels');
   const limits = configService.getSection('limits');
   const historyCompression = configService.getSection('historyCompression');
   const multiStepRag = configService.getSection('multiStepRag');
+  const promptBudget = configService.get('promptBudget', {});
 
   return Object.freeze({
     useConversationMemory: memory.useConversationMemory,
@@ -54,12 +56,14 @@ function buildMemoryConfig() {
       maxLineChars: rag.graph?.maxLineChars ?? 200,
       summaryLineLimit: rag.graph?.summaryLineLimit ?? 8,
       summaryHintMaxChars: rag.graph?.summaryHintMaxChars ?? 2000,
+      avgTokensPerLine: rag.graph?.avgTokensPerLine ?? 24,
     }),
     vectorContext: Object.freeze({
       maxChunks: rag.vector?.maxChunks ?? 3,
       maxChars: rag.vector?.maxChars ?? 2000,
       topK: rag.vector?.topK ?? 12,
       embeddingModel: rag.vector?.embeddingModel ?? 'mxbai',
+      avgTokensPerChunk: rag.vector?.avgTokensPerChunk ?? 220,
     }),
     summarization: Object.freeze({
       enabled: rag.summarization?.enabled ?? true,
@@ -75,6 +79,29 @@ function buildMemoryConfig() {
       url: pricing.url ?? '',
       refreshIntervalSec: pricing.refreshIntervalSec ?? 86400,
       cachePath: pricing.cachePath ?? './api/cache/openrouter_pricing.json',
+    }),
+    openrouterModels: Object.freeze({
+      apiKey: openrouterModels.apiKey ?? '',
+      modelsUrl: openrouterModels.modelsUrl ?? 'https://openrouter.ai/api/v1/models',
+      refreshIntervalMs: openrouterModels.refreshIntervalMs ?? 86_400_000,
+      cachePath: openrouterModels.cachePath ?? './api/cache/openrouter_models.json',
+    }),
+    prompt: Object.freeze({
+      maxContextPercent: promptBudget.maxContextPercent ?? 1,
+      headroomPercent: promptBudget.headroomPercent ?? 0.08,
+      minShares: Object.freeze({
+        instructions: promptBudget.minShares?.instructions ?? 0.05,
+        history: promptBudget.minShares?.history ?? 0.2,
+        rag: promptBudget.minShares?.rag ?? 0.1,
+        tools: promptBudget.minShares?.tools ?? 0,
+      }),
+      shares: Object.freeze({
+        instructions: promptBudget.shares?.instructions ?? 0.15,
+        history: promptBudget.shares?.history ?? 0.35,
+        rag: promptBudget.shares?.rag ?? 0.25,
+        tools: promptBudget.shares?.tools ?? 0.05,
+      }),
+      models: Object.freeze(promptBudget.models ?? {}),
     }),
     multiStepRag: Object.freeze({
       enabled: multiStepRag.enabled,

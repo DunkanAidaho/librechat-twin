@@ -2,6 +2,7 @@ const { getLogger } = require('~/utils/logger');
 const { buildContext } = require('~/utils/logContext');
 const { extractMessageText, normalizeMemoryText, makeIngestKey } = require('~/server/utils/messageUtils');
 const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
+const { ensureTokenCount } = require('~/server/services/agents/historyTrimmer');
 const { observeHistoryPassthrough, observeLiveWindow } = require('~/utils/ragMetrics');
 const crypto = require('crypto');
 
@@ -146,6 +147,9 @@ class MessageHistoryManager {
     userId,
     histLongUserToRag = 20000,
     assistLongToRag = 15000,
+    trimmer = null,
+    tokenBudget = 0,
+    contextHeadroom = 0,
   }) {
     const toIngest = [];
     const config = typeof this.config === 'function' ? this.config() : this.config;
@@ -328,13 +332,67 @@ class MessageHistoryManager {
       observeLiveWindow({ mode: historyMode, size: finalMessages.length });
     }
 
+    let trimmedMessages = finalMessages;
+    let trimmedDropped = [];
+
+    const effectiveBudget = Math.max(Number(tokenBudget || 0) - Number(contextHeadroom || 0), 0);
+    if (trimmer && effectiveBudget > 0 && Array.isArray(finalMessages) && finalMessages.length) {
+      try {
+        const layers = trimmer.buildLayers(finalMessages);
+        const compressedLayers = await trimmer.compressLayers(layers);
+        const selection = trimmer.selectWithinBudget(compressedLayers, effectiveBudget);
+        trimmedMessages = selection.keptMessages;
+        trimmedDropped = selection.droppedMessages;
+
+        const lastUserMessage = [...finalMessages].reverse().find((m) => m?.role === 'user');
+        if (lastUserMessage && !trimmedMessages.includes(lastUserMessage)) {
+          ensureTokenCount(lastUserMessage, trimmer.tokenizerEncoding);
+          trimmedMessages.push(lastUserMessage);
+          trimmedMessages = trimmedMessages
+            .filter((m) => m !== lastUserMessage)
+            .concat(lastUserMessage);
+          while (trimmedMessages.length > 1) {
+            const head = trimmedMessages[0];
+            ensureTokenCount(head, trimmer.tokenizerEncoding);
+            const totalTokens = trimmedMessages.reduce(
+              (sum, msg) => sum + (msg?.tokenCount ?? 0),
+              0,
+            );
+            if (totalTokens <= effectiveBudget) {
+              break;
+            }
+            trimmedMessages.shift();
+            trimmedDropped.push(head);
+          }
+        }
+
+        this.logger.info(
+          'context.history.selection',
+          this.getLogContext(conversationId, userId, {
+            tokenBudget: effectiveBudget,
+            kept: trimmedMessages.length,
+            dropped: trimmedDropped.length,
+            remainingTokens: selection.remainingTokens,
+          }),
+        );
+      } catch (error) {
+        this.logger.error(
+          'context.history.selection_failed',
+          this.getLogContext(conversationId, userId, {
+            tokenBudget: effectiveBudget,
+            err: { message: error?.message, stack: error?.stack },
+          }),
+        );
+      }
+    }
+
     return {
       toIngest,
-      modifiedMessages: finalMessages,
+      modifiedMessages: trimmedMessages,
       liveWindowStats: {
         mode: historyMode,
-        kept: finalMessages.length,
-        dropped: droppedMessages.length,
+        kept: trimmedMessages.length,
+        dropped: droppedMessages.length + trimmedDropped.length,
       },
     };
   }

@@ -318,6 +318,14 @@ class ConfigService {
       cachePath: z.string().min(1).optional(),
     });
 
+    const openrouterModelsSchema = z.object({
+      apiKey: z.string().optional(),
+      modelsUrl: z.string().optional(),
+      refreshIntervalMs: z.number().int().positive().optional(),
+      cachePath: z.string().optional(),
+      fallbackMap: z.record(z.any()).optional(),
+    });
+
     const securitySchema = z.object({
       ragInternalKey: z.string().optional(),
     });
@@ -348,6 +356,28 @@ class ConfigService {
       maxPasses: z.number().int().positive(),
       graphRetryLimit: z.number().int().nonnegative(),
       followUpTimeoutMs: z.number().int().positive(),
+    });
+
+    const promptBudgetSchema = z.object({
+      maxContextPercent: z.number().min(0.1).max(1).optional(),
+      headroomPercent: z.number().min(0.01).max(0.5).optional(),
+      minShares: z
+        .object({
+          instructions: z.number().min(0).max(1).optional(),
+          history: z.number().min(0).max(1).optional(),
+          rag: z.number().min(0).max(1).optional(),
+          tools: z.number().min(0).max(1).optional(),
+        })
+        .optional(),
+      shares: z
+        .object({
+          instructions: z.number().min(0).max(1).optional(),
+          history: z.number().min(0).max(1).optional(),
+          rag: z.number().min(0).max(1).optional(),
+          tools: z.number().min(0).max(1).optional(),
+        })
+        .optional(),
+      models: z.record(z.any()).optional(),
     });
 
     const memorySchema = z.object({
@@ -619,6 +649,8 @@ class ConfigService {
             Math.min(ragGraphMaxLines, 8);
           const ragGraphSummaryHintMaxChars =
             parseOptionalInt(this.env.GRAPH_CONTEXT_SUMMARY_HINT_MAX_CHARS) ?? 2_000;
+          const ragGraphAvgTokensPerLine =
+            parseOptionalInt(this.env.RAG_GRAPH_AVG_TOKENS_PER_LINE) ?? 24;
 
           const ragVectorMaxChunks = parseOptionalInt(this.env.RAG_VECTOR_MAX_CHUNKS) ?? 3;
           const ragVectorMaxChars = parseOptionalInt(this.env.RAG_VECTOR_MAX_CHARS) ?? 2_000;
@@ -626,6 +658,8 @@ class ConfigService {
           const ragVectorEmbedding =
             sanitizeOptionalString(this.env.RAG_SEARCH_MODEL) || 'mxbai';
           const ragVectorRecentTurns = parseOptionalInt(this.env.RAG_VECTOR_RECENT_TURNS) ?? 6;
+          const ragVectorAvgTokensPerChunk =
+            parseOptionalInt(this.env.RAG_VECTOR_AVG_TOKENS_PER_CHUNK) ?? 220;
 
           const ragSummaryBudget = parseOptionalInt(this.env.RAG_SUMMARY_BUDGET) ?? 12_000;
           const ragSummaryChunk = parseOptionalInt(this.env.RAG_CHUNK_CHARS) ?? 20_000;
@@ -715,6 +749,7 @@ class ConfigService {
               maxLineChars: ragGraphMaxLineChars,
               summaryLineLimit: ragGraphSummaryLineLimit,
               summaryHintMaxChars: ragGraphSummaryHintMaxChars,
+              avgTokensPerLine: ragGraphAvgTokensPerLine,
             },
             vector: {
               maxChunks: ragVectorMaxChunks,
@@ -722,6 +757,7 @@ class ConfigService {
               topK: ragVectorTopK,
               embeddingModel: ragVectorEmbedding,
               recentTurns: ragVectorRecentTurns,
+              avgTokensPerChunk: ragVectorAvgTokensPerChunk,
             },
             summarization: {
               enabled: ragSummaryEnabled,
@@ -790,6 +826,27 @@ class ConfigService {
           };
         },
       },
+      openrouterModels: {
+        schema: openrouterModelsSchema,
+        loader: () => {
+          const baseUrl =
+            sanitizeOptionalString(this.env.OPENROUTER_BASE_URL) ||
+            'https://openrouter.ai/api/v1';
+          const normalizedBase = baseUrl.replace(/\/+|$/, '');
+          const url = `${normalizedBase}/models`;
+
+          return {
+            apiKey: sanitizeOptionalString(this.env.OPENROUTER_MODELS_API_KEY),
+            modelsUrl: sanitizeOptionalString(this.env.OPENROUTER_MODELS_URL) || url,
+            refreshIntervalMs:
+              parseOptionalInt(this.env.OPENROUTER_MODELS_REFRESH_MS) ?? 86_400_000,
+            cachePath:
+              sanitizeOptionalString(this.env.OPENROUTER_MODELS_CACHE_PATH) ||
+              './api/cache/openrouter_models.json',
+            fallbackMap: undefined,
+          };
+        },
+      },
       security: {
         schema: securitySchema,
         loader: () => ({
@@ -829,6 +886,26 @@ class ConfigService {
           maxPasses: parseOptionalInt(this.env.MULTISTEP_RAG_MAX_PASSES) ?? 2,
           graphRetryLimit: parseOptionalInt(this.env.MULTISTEP_RAG_GRAPH_RETRY_LIMIT) ?? 2,
           followUpTimeoutMs: parseOptionalInt(this.env.MULTISTEP_RAG_FOLLOWUP_TIMEOUT_MS) ?? 20000,
+        }),
+      },
+      promptBudget: {
+        schema: promptBudgetSchema,
+        loader: () => ({
+          maxContextPercent: parseOptionalFloat(this.env.PROMPT_MAX_CONTEXT_PERCENT),
+          headroomPercent: parseOptionalFloat(this.env.PROMPT_HEADROOM_PERCENT),
+          minShares: {
+            instructions: parseOptionalFloat(this.env.PROMPT_MIN_SHARE_INSTRUCTIONS),
+            history: parseOptionalFloat(this.env.PROMPT_MIN_SHARE_HISTORY),
+            rag: parseOptionalFloat(this.env.PROMPT_MIN_SHARE_RAG),
+            tools: parseOptionalFloat(this.env.PROMPT_MIN_SHARE_TOOLS),
+          },
+          shares: {
+            instructions: parseOptionalFloat(this.env.PROMPT_SHARE_INSTRUCTIONS),
+            history: parseOptionalFloat(this.env.PROMPT_SHARE_HISTORY),
+            rag: parseOptionalFloat(this.env.PROMPT_SHARE_RAG),
+            tools: parseOptionalFloat(this.env.PROMPT_SHARE_TOOLS),
+          },
+          models: undefined,
         }),
       },
       memory: {

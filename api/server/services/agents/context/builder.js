@@ -74,6 +74,9 @@ async function buildContext({
   logger,
   encoding = 'o200k_base',
   ragCondense = ragCondenseContext,
+  ragBudgetTokens,
+  graphBudgetTokens,
+  vectorBudgetTokens,
 }) {
   ragCacheTtlMs = Math.max(Number(runtimeCfg?.ragCacheTtl) * 1000, 0);
   const conversationId = req?.body?.conversationId || req?.conversationId;
@@ -188,15 +191,49 @@ async function buildContext({
   const graphLimits = runtimeCfg?.graphContext || {};
   const vectorLimits = runtimeCfg?.vectorContext || {};
 
-  const graphMaxLines = Number(graphLimits.maxLines ?? 40);
+  let graphMaxLines = Number(graphLimits.maxLines ?? 40);
   const graphMaxLineChars = Number(graphLimits.maxLineChars ?? 200);
   const graphSummaryHintMaxChars = Number(graphLimits.summaryHintMaxChars ?? 2000);
 
-  const vectorMaxChunks = Number(vectorLimits.maxChunks ?? 4);
+  let vectorMaxChunks = Number(vectorLimits.maxChunks ?? 4);
   const vectorMaxChars = Number(vectorLimits.maxChars ?? 70000);
-  const vectorTopK = Number(vectorLimits.topK ?? 12);
+  let vectorTopK = Number(vectorLimits.topK ?? 12);
   const embeddingModel = vectorLimits.embeddingModel;
   const recentTurns = Number(vectorLimits.recentTurns ?? 6);
+
+  if (Number.isFinite(graphBudgetTokens) && graphBudgetTokens > 0) {
+    const avgTokensPerLine = Number(graphLimits.avgTokensPerLine ?? 24);
+    const budgetMaxLines = Math.max(1, Math.floor(graphBudgetTokens / avgTokensPerLine));
+    if (budgetMaxLines < graphMaxLines) {
+      logger?.info?.('[rag.context.budget.graph]', {
+        conversationId,
+        graphBudgetTokens,
+        avgTokensPerLine,
+        maxLines: graphMaxLines,
+        adjustedMaxLines: budgetMaxLines,
+      });
+      graphMaxLines = budgetMaxLines;
+    }
+  }
+
+  if (Number.isFinite(vectorBudgetTokens) && vectorBudgetTokens > 0) {
+    const avgTokensPerChunk = Number(vectorLimits.avgTokensPerChunk ?? 220);
+    const budgetMaxChunks = Math.max(1, Math.floor(vectorBudgetTokens / avgTokensPerChunk));
+    if (budgetMaxChunks < vectorMaxChunks) {
+      logger?.info?.('[rag.context.budget.vector]', {
+        conversationId,
+        vectorBudgetTokens,
+        avgTokensPerChunk,
+        maxChunks: vectorMaxChunks,
+        adjustedMaxChunks: budgetMaxChunks,
+      });
+      vectorMaxChunks = budgetMaxChunks;
+    }
+
+    if (vectorTopK > vectorMaxChunks) {
+      vectorTopK = vectorMaxChunks;
+    }
+  }
 
   let graphContextLines = [];
   let graphQueryHint = '';
@@ -511,9 +548,9 @@ async function buildContext({
     finalSystemContent = sanitizedBlock + systemContent;
     contextLength = sanitizedBlock.length;
 
-    if (hasGraph) {
-      const graphText = graphContextLines.join('\n');
-      metrics.graphTokens = graphText ? Tokenizer.getTokenCount(graphText, encoding) : 0;
+  if (hasGraph) {
+    const graphText = graphContextLines.join('\n');
+    metrics.graphTokens = graphText ? Tokenizer.getTokenCount(graphText, encoding) : 0;
 
       if (metrics.graphTokens) {
         observeSegmentTokens?.({
@@ -535,8 +572,8 @@ async function buildContext({
       );
     }
 
-    if (vectorText.length) {
-      metrics.vectorTokens = Tokenizer.getTokenCount(vectorText, encoding);
+  if (vectorText.length) {
+    metrics.vectorTokens = Tokenizer.getTokenCount(vectorText, encoding);
 
       if (metrics.vectorTokens) {
         observeSegmentTokens?.({
@@ -558,9 +595,21 @@ async function buildContext({
       );
     }
 
-    metrics.contextTokens = sanitizedBlock
-      ? Tokenizer.getTokenCount(sanitizedBlock, encoding)
-      : metrics.graphTokens + metrics.vectorTokens;
+  metrics.contextTokens = sanitizedBlock
+    ? Tokenizer.getTokenCount(sanitizedBlock, encoding)
+    : metrics.graphTokens + metrics.vectorTokens;
+
+  if (Number.isFinite(ragBudgetTokens) && ragBudgetTokens > 0) {
+    if (metrics.contextTokens > ragBudgetTokens) {
+      logger?.info?.('[rag.context.budget_exceeded]', {
+        conversationId,
+        contextTokens: metrics.contextTokens,
+        ragBudgetTokens,
+        graphTokens: metrics.graphTokens,
+        vectorTokens: metrics.vectorTokens,
+      });
+    }
+  }
 
     if (multiStepEnabled && req) {
       logger?.info?.('[rag.context.summarize.deferred]', {

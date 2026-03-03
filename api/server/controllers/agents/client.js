@@ -502,20 +502,36 @@ class AgentClient extends BaseClient {
     }
     logger.debug(`[AgentClient] Initial systemContent: ${systemContent.length} chars`);
 
+    const PromptBudgetManager = require('~/server/services/agents/PromptBudgetManager');
+    const budgetManager = new PromptBudgetManager({ configService });
+    const budget = await budgetManager.getBudget({
+      model: this.options?.endpointOption?.model || this.options?.req?.body?.model,
+      runtimeCfg,
+      requestContext: buildContext({
+        conversationId: this.conversationId,
+        userId: requestUserId,
+        requestId: this.options?.req?.requestId,
+        agentId: this.agent_id,
+      }),
+      encoding: this.getEncoding(),
+    });
+
     let historyTrimmer = null;
     let historyTokenBudget = 0;
     const headroom = Number(historyCompressionCfg?.contextHeadroom) || 0;
     const ragTokens = Number(this.options?.req?.ragContextTokens) || 0;
     const instructionsTokensEstimate = tokenize(systemContent);
-    const maxContextTokens =
+    const maxContextTokens = budget?.safeBudget ||
       this.maxContextTokens ||
       Number(historyCfg?.tokenBudget) ||
       Number(runtimeCfg?.tokenLimits?.maxMessageTokens) ||
       0;
 
     if (historyCompressionCfg?.enabled) {
-      historyTokenBudget =
-        maxContextTokens - ragTokens - instructionsTokensEstimate;
+      historyTokenBudget = Math.max(
+        (budget?.budgets?.history ?? maxContextTokens) - Math.max(ragTokens, 0),
+        0,
+      );
 
       const availableBudget = historyTokenBudget - headroom;
 
@@ -633,6 +649,8 @@ const ragResult = await contextBuild({
         res,
         endpointOption,
         logger,
+        encoding: this.getEncoding(),
+        ragBudgetTokens: budget?.budgets?.rag,
       });
 
       if (ragResult && typeof ragResult === 'object') {
