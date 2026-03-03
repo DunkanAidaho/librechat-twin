@@ -39,6 +39,7 @@ COPY api/server/services/pricing/ /app/api/server/services/pricing/
 COPY api/server/services/tokens/ /app/api/server/services/tokens/
 COPY api/server/services/agents/memory/ /app/api/server/services/agents/memory/
 COPY api/server/services/agents/tools/ /app/api/server/services/agents/tools/
+COPY api/server/services/Models/    /app/api/server/services/Models/
 COPY api/manage_summaries.js       /app/api/manage_summaries.js
 COPY api/sync_history.js           /app/api/sync_history.js
 COPY api/server/utils/ /app/api/server/utils/
