@@ -214,25 +214,46 @@ class MessageHistoryManager {
         ) {
           let summaryText = null;
           if (typeof condenseContext === 'function') {
-            const isTechnical = /```|\b(error|stack|trace|exception|warn|log)\b/i.test(normalizedText);
-            if (isTechnical) {
-              summaryText = `Фрагмент кода/лога по теме ${
-                (normalizedText.match(/\b[A-Za-zА-Яа-я0-9_\-]{4,}\b/g) || [])[0] || 'unknown'
-              }`;
-            } else {
-              summaryText = await condenseContext({
-                chain: condenseChain || [],
-                prompt: `Сделай краткую выжимку 50-200 слов.\n\n=== Текст ===\n${normalizedText}`,
-                originalText: normalizedText,
-                budgetChars: 1200,
-                stage: 'ingest:summary',
-                requestContext: {
-                  conversationId,
-                  userId,
-                  messageId: m?.messageId,
-                },
-              });
-              summaryText = summaryText?.text || summaryText;
+            const summaryLogContext = this.getLogContext(conversationId, userId, {
+              messageId: m?.messageId,
+              textLength: len,
+            });
+            try {
+              const isTechnical = /```|\b(error|stack|trace|exception|warn|log)\b/i.test(normalizedText);
+              if (isTechnical) {
+                summaryText = `Фрагмент кода/лога по теме ${
+                  (normalizedText.match(/\b[A-Za-zА-Яа-я0-9_\-]{4,}\b/g) || [])[0] || 'unknown'
+                }`;
+              } else {
+                this.logger.info('rag.history.summary_start', summaryLogContext);
+                summaryText = await condenseContext({
+                  chain: condenseChain || [],
+                  prompt: `Сделай краткую выжимку 50-200 слов.\n\n=== Текст ===\n${normalizedText}`,
+                  originalText: normalizedText,
+                  budgetChars: 1200,
+                  stage: 'ingest:summary',
+                  requestContext: {
+                    conversationId,
+                    userId,
+                    messageId: m?.messageId,
+                  },
+                });
+                summaryText = summaryText?.text || summaryText;
+                this.logger.info(
+                  'rag.history.summary_done',
+                  Object.assign({}, summaryLogContext, {
+                    summaryLength: summaryText?.length || 0,
+                  }),
+                );
+              }
+            } catch (summaryError) {
+              this.logger.error(
+                'rag.history.summary_error',
+                Object.assign({}, summaryLogContext, {
+                  err: { message: summaryError?.message, stack: summaryError?.stack },
+                }),
+              );
+              throw summaryError;
             }
           }
 

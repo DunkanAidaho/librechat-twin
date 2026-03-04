@@ -601,6 +601,12 @@ class AgentClient extends BaseClient {
     }
 
     try {
+      logger.debug('[history->RAG] start', {
+        conversationId: this.conversationId,
+        orderedMessages: orderedMessages.length,
+        histLongUserToRag: HIST_LONG_USER_TO_RAG,
+        assistLongToRag: ASSIST_LONG_TO_RAG,
+      });
       orderedMessages = orderedMessages.map((message) => ({
         ...message,
         importance: computeImportanceScore(message),
@@ -646,8 +652,17 @@ class AgentClient extends BaseClient {
           }),
         );
       }
+      logger.debug('[history->RAG] done', {
+        conversationId: this.conversationId,
+        toIngest: toIngest.length,
+        modifiedMessages: orderedMessages.length,
+      });
     } catch (error) {
-      logger.error('[history->RAG] failed', error);
+      logger.error('[history->RAG] failed', {
+        conversationId: this.conversationId,
+        message: error?.message,
+        stack: error?.stack,
+      });
     }
 
     const intentAnalysis = runtimeCfg?.multiStepRag?.enabled
