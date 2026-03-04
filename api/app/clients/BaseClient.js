@@ -993,6 +993,18 @@ class BaseClient {
 
     const latestMessage = orderedWithInstructions[orderedWithInstructions.length - 1];
     if (payload.length === 0 && !shouldSummarize && latestMessage) {
+      this.logger.warn(
+        'clients.base.prompt_exceeds_context.debug',
+        this.buildLogContext({
+          orderedMessages: orderedMessages.length,
+          formattedMessages: formattedMessages.length,
+          orderedWithInstructions: orderedWithInstructions.length,
+          payloadLength: payload.length,
+          latestMessageTokens: latestMessage.tokenCount,
+          instructionsTokens: tokenCount,
+          maxContextTokens: this.maxContextTokens,
+        }),
+      );
       const info = `${latestMessage.tokenCount} / ${this.maxContextTokens}`;
       const errorMessage = `{ "type": "${ErrorTypes.INPUT_LENGTH}", "info": "${info}" }`;
       this.logger.warn(
@@ -1005,6 +1017,17 @@ class BaseClient {
       payload.length === 1 &&
       payload[0].content === _instructions.content
     ) {
+      this.logger.warn(
+        'clients.base.prompt_with_instructions_exceeds.debug',
+        this.buildLogContext({
+          orderedMessages: orderedMessages.length,
+          formattedMessages: formattedMessages.length,
+          orderedWithInstructions: orderedWithInstructions.length,
+          payloadLength: payload.length,
+          instructionsTokens: tokenCount,
+          maxContextTokens: this.maxContextTokens,
+        }),
+      );
       const info = `${tokenCount + 3} / ${this.maxContextTokens}`;
       const errorMessage = `{ "type": "${ErrorTypes.INPUT_LENGTH}", "info": "${info}" }`;
       this.logger.warn(
