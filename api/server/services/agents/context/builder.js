@@ -9,6 +9,7 @@ const {
   ragCondenseContext,
   Tokenizer,
 } = require('./helpers');
+const { extractEntitiesFromText } = require('~/server/services/RAG/intentAnalyzer');
 const { buildRagBlock, setDeferredContext } = require('~/server/services/RAG/RagContextManager');
 const { sanitizeInput } = require('~/utils/security');
 const { observeSegmentTokens, observeCache, setContextLength } = require('~/utils/ragMetrics');
@@ -251,79 +252,7 @@ async function buildContext({
   let graphQueryHint = '';
   let rawGraphLinesCount = 0;
 
-  if (toolsGatewayUrl) {
-    try {
-      const graphContext = await fetchGraphContext({
-        conversationId,
-        toolsGatewayUrl,
-        limit: graphMaxLines,
-        timeoutMs: toolsGatewayTimeout,
-        logger,
-      });
-
-      rawGraphLinesCount = Array.isArray(graphContext?.lines) ? graphContext.lines.length : 0;
-
-      if (graphContext?.lines?.length) {
-        graphContextLines = sanitizeGraphContext(graphContext.lines, {
-          maxLines: graphMaxLines,
-          maxLineChars: graphMaxLineChars,
-        });
-
-        if (rawGraphLinesCount > graphContextLines.length && graphMaxLines) {
-          logger?.debug?.(
-            `[rag.context.limit] conversation=${conversationId} param=memory.graphContext.maxLines limit=${graphMaxLines} original=${rawGraphLinesCount}`,
-          );
-        }
-
-        if (
-          graphContextLines.some((line) => line.endsWith('…')) &&
-          graphMaxLineChars
-        ) {
-          logger?.debug?.(
-            `[rag.context.limit] conversation=${conversationId} param=memory.graphContext.maxLineChars limit=${graphMaxLineChars}`,
-          );
-        }
-      }
-
-      if (typeof graphContext?.queryHint === 'string') {
-        const trimmedHint = graphContext.queryHint.trim();
-        if (trimmedHint) {
-          if (
-            graphSummaryHintMaxChars &&
-            trimmedHint.length > graphSummaryHintMaxChars
-          ) {
-            logger?.debug?.(
-              `[rag.context.limit] conversation=${conversationId} param=memory.graphContext.summaryHintMaxChars limit=${graphSummaryHintMaxChars} original=${trimmedHint.length}`,
-            );
-          }
-          graphQueryHint = trimmedHint.slice(
-            0,
-            graphSummaryHintMaxChars || trimmedHint.length,
-          );
-        }
-      }
-    } catch (error) {
-      logger?.error?.('[rag.context.graph.error]', {
-        conversationId,
-        message: error?.message,
-        stack: error?.stack,
-      });
-    }
-  } else {
-    logger?.debug?.('[rag.context.graph.skip]', {
-      conversationId,
-      reason: 'tools_gateway_missing',
-    });
-  }
-
   metrics.graphLines = graphContextLines.length;
-  if (req) {
-    req.graphContext = {
-      lines: graphContextLines,
-      queryHint: graphQueryHint,
-    };
-  }
-
   let ragSearchQuery = normalizedQuery;
   if (intentEntities.length) {
     const hints = intentHints.length ? ` (hints: ${[...new Set(intentHints)].join(', ')})` : '';
@@ -354,11 +283,12 @@ async function buildContext({
 
   if (toolsGatewayUrl) {
     try {
+      const vectorTopKForSeeds = Math.min(vectorTopK, Math.max(1, Math.ceil(vectorTopK / 2)));
       const response = await axios.post(
         `${toolsGatewayUrl}/rag/search`,
         {
           query: ragSearchQuery,
-          top_k: vectorTopK,
+          top_k: vectorTopKForSeeds,
           embedding_model: embeddingModel,
           conversation_id: conversationId,
           user_id: req?.user?.id,
@@ -372,13 +302,63 @@ async function buildContext({
 
       rawVectorResults = rawChunks.length;
 
-      vectorChunks = sanitizeVectorChunks(rawChunks, {
+      const entityCandidates = extractEntitiesFromText(
+        rawChunks.join('\n\n'),
+        runtimeCfg?.multiStepRag?.maxEntities || 3,
+      );
+
+      if (entityCandidates.length && !intentEntities.length) {
+        if (req) {
+          req.ragSeedEntities = entityCandidates;
+        }
+        logger?.info?.('[rag.context.vector.entities]', {
+          conversationId,
+          entities: entityCandidates,
+          source: 'vector_seed',
+        });
+      }
+
+      const useQuery = intentEntities.length
+        ? ragSearchQuery
+        : entityCandidates.length
+          ? `${normalizedQuery}\n\nEntities: ${entityCandidates.join(', ')}`
+          : ragSearchQuery;
+
+      if (useQuery !== ragSearchQuery) {
+        const updated = condenseRagQuery(useQuery, queryMaxChars);
+        ragSearchQuery = updated;
+        logger?.debug?.('[rag.context.query.condensed]', {
+          conversationId,
+          originalLength: useQuery.length,
+          condensedLength: updated.length,
+          reason: 'vector_seed_entities',
+        });
+      }
+
+      const finalTopK = vectorTopK;
+      const finalResponse = await axios.post(
+        `${toolsGatewayUrl}/rag/search`,
+        {
+          query: ragSearchQuery,
+          top_k: finalTopK,
+          embedding_model: embeddingModel,
+          conversation_id: conversationId,
+          user_id: req?.user?.id,
+        },
+        { timeout: toolsGatewayTimeout },
+      );
+
+      const finalChunks = Array.isArray(finalResponse?.data?.results)
+        ? finalResponse.data.results.map((item) => item?.content ?? '').filter(Boolean)
+        : [];
+
+      vectorChunks = sanitizeVectorChunks(finalChunks, {
         maxChunks: vectorMaxChunks,
         maxChars: vectorMaxChars,
       });
 
       logger?.debug?.(
-        `[rag.context.vector.raw] conversation=${conversationId} rawResults=${rawVectorResults} sanitizedChunks=${vectorChunks.length} topK=${vectorTopK}`,
+        `[rag.context.vector.raw] conversation=${conversationId} rawResults=${finalChunks.length} sanitizedChunks=${vectorChunks.length} topK=${finalTopK}`,
       );
     } catch (error) {
       logger?.error?.('[rag.context.vector.error]', {
@@ -386,6 +366,10 @@ async function buildContext({
         message: error?.message,
         stack: error?.stack,
       });
+    }
+
+    if (!intentEntities.length && req?.ragSeedEntities?.length) {
+      intentEntities.push(...req.ragSeedEntities);
     }
 
     if (recentTurns > 0) {
@@ -462,6 +446,83 @@ async function buildContext({
 
   metrics.vectorChunks = vectorChunks.length;
 
+  if (toolsGatewayUrl) {
+    try {
+      const graphEntities = intentEntities.length
+        ? intentEntities
+        : req?.ragSeedEntities?.length
+          ? req.ragSeedEntities
+          : [];
+
+      if (graphEntities.length) {
+        const graphResults = await Promise.all(
+          graphEntities.map((entity) =>
+            fetchGraphContext({
+              conversationId,
+              toolsGatewayUrl,
+              limit: graphMaxLines,
+              timeoutMs: toolsGatewayTimeout,
+              entity: { name: entity },
+              logger,
+            }),
+          ),
+        );
+
+        const lines = graphResults
+          .flatMap((result) => (Array.isArray(result?.lines) ? result.lines : []))
+          .filter(Boolean);
+        rawGraphLinesCount = lines.length;
+
+        if (lines.length) {
+          graphContextLines = sanitizeGraphContext(lines, {
+            maxLines: graphMaxLines,
+            maxLineChars: graphMaxLineChars,
+          });
+
+          if (rawGraphLinesCount > graphContextLines.length && graphMaxLines) {
+            logger?.debug?.(
+              `[rag.context.limit] conversation=${conversationId} param=memory.graphContext.maxLines limit=${graphMaxLines} original=${rawGraphLinesCount}`,
+            );
+          }
+        }
+
+        const firstHint = graphResults.find((result) => typeof result?.queryHint === 'string');
+        if (firstHint?.queryHint) {
+          const trimmedHint = String(firstHint.queryHint).trim();
+          if (trimmedHint) {
+            if (graphSummaryHintMaxChars && trimmedHint.length > graphSummaryHintMaxChars) {
+              logger?.debug?.(
+                `[rag.context.limit] conversation=${conversationId} param=memory.graphContext.summaryHintMaxChars limit=${graphSummaryHintMaxChars} original=${trimmedHint.length}`,
+              );
+            }
+            graphQueryHint = trimmedHint.slice(
+              0,
+              graphSummaryHintMaxChars || trimmedHint.length,
+            );
+          }
+        }
+      }
+    } catch (error) {
+      logger?.error?.('[rag.context.graph.error]', {
+        conversationId,
+        message: error?.message,
+        stack: error?.stack,
+      });
+    }
+  } else {
+    logger?.debug?.('[rag.context.graph.skip]', {
+      conversationId,
+      reason: 'tools_gateway_missing',
+    });
+  }
+
+  if (req) {
+    req.graphContext = {
+      lines: graphContextLines,
+      queryHint: graphQueryHint,
+    };
+  }
+
   const hasGraph = graphContextLines.length > 0;
   const hasVector = vectorChunks.length > 0;
   const policyIntro =
@@ -489,6 +550,12 @@ async function buildContext({
       Number.isFinite(summarizationCfg?.chunkChars) && summarizationCfg.chunkChars > 0
         ? summarizationCfg.chunkChars
         : defaults.chunkChars;
+    const dynamicBudgetChars = Number.isFinite(ragBudgetTokens)
+      ? Math.max(Math.floor(ragBudgetTokens * 4 * 0.35), 2000)
+      : budgetChars;
+    const dynamicChunkChars = Number.isFinite(ragBudgetTokens)
+      ? Math.max(Math.floor(ragBudgetTokens * 4 * 0.2), 2000)
+      : chunkChars;
     const baseTimeoutMs =
       Number.isFinite(summarizationCfg?.timeoutMs) && summarizationCfg.timeoutMs > 0
         ? summarizationCfg.timeoutMs
@@ -499,11 +566,11 @@ async function buildContext({
     const shouldSummarize =
       !multiStepEnabled &&
       summarizationCfg.enabled !== false &&
-      vectorText.length > budgetChars;
+      vectorText.length > dynamicBudgetChars;
 
     if (shouldSummarize) {
       logger?.debug?.(
-        `[rag.context.limit] conversation=${conversationId} param=memory.summarization.budgetChars limit=${budgetChars} original=${rawVectorTextLength}`,
+        `[rag.context.limit] conversation=${conversationId} param=memory.summarization.budgetChars limit=${dynamicBudgetChars} original=${rawVectorTextLength}`,
       );
       try {
         const adaptiveTimeoutMs = calculateAdaptiveTimeout(rawVectorTextLength, baseTimeoutMs);
@@ -529,8 +596,8 @@ async function buildContext({
               ? { lines: graphContextLines, queryHint: graphQueryHint }
               : null,
             summarizationConfig: {
-              budgetChars,
-              chunkChars,
+              budgetChars: dynamicBudgetChars,
+              chunkChars: dynamicChunkChars,
               provider: summarizationCfg.provider,
               timeoutMs: adaptiveTimeoutMs,
             },
@@ -560,6 +627,9 @@ async function buildContext({
       policyIntro,
       graphLines: hasGraph ? graphContextLines : [],
       vectorText,
+      maxChars: Number.isFinite(ragBudgetTokens)
+        ? Math.max(Math.floor(ragBudgetTokens * 4), 2000)
+        : null,
     });
 
     let sanitizedBlock = ragBlock;

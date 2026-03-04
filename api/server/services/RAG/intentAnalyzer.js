@@ -93,6 +93,14 @@ function extractEntities(text = '') {
   }));
 }
 
+function extractEntitiesFromText(text = '', maxEntities = 3) {
+  return extractEntities(text)
+    .filter((entity) => entity?.name)
+    .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
+    .slice(0, maxEntities)
+    .map((entity) => entity.name);
+}
+
 function buildHints(messageText = '', contextText = '') {
   const hints = new Set();
   if (RELATION_HINT_REGEX.test(messageText) || RELATION_HINT_REGEX.test(contextText)) {
@@ -196,4 +204,5 @@ async function analyzeIntent({
 
 module.exports = {
   analyzeIntent,
+  extractEntitiesFromText,
 };

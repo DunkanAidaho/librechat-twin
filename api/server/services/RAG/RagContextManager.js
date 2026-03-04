@@ -21,7 +21,12 @@ function coerceLines(lines) {
     .filter(Boolean);
 }
 
-function buildRagBlock({ policyIntro = POLICY_INTRO, graphLines = [], vectorText = "" } = {}) {
+function buildRagBlock({
+  policyIntro = POLICY_INTRO,
+  graphLines = [],
+  vectorText = "",
+  maxChars = null,
+} = {}) {
   const safeGraphLines = coerceLines(graphLines);
   const graphSection = safeGraphLines.length
     ? `${GRAPH_TITLE}\n${safeGraphLines.join("\n")}\n\n`
@@ -30,7 +35,10 @@ function buildRagBlock({ policyIntro = POLICY_INTRO, graphLines = [], vectorText
   const trimmedVector = typeof vectorText === "string" ? vectorText.trim() : "";
   const vectorSection = trimmedVector ? `${VECTOR_TITLE}\n${trimmedVector}\n\n` : "";
 
-  const block = `${policyIntro}${graphSection}${vectorSection}${BLOCK_FOOTER}`;
+  let block = `${policyIntro}${graphSection}${vectorSection}${BLOCK_FOOTER}`;
+  if (Number.isFinite(maxChars) && maxChars > 0 && block.length > maxChars) {
+    block = `${block.slice(0, Math.max(0, maxChars - 1))}…`;
+  }
   return sanitizeInput(block);
 }
 

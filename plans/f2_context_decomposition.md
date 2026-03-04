@@ -6,6 +6,15 @@
 
 **Ключевая идея:** мы **не сужаем трубу**, а **фильтруем содержимое**. Лимит модели — это физический потолок, а система должна разумно распределять бюджет между instructions, history, RAG и прочими компонентами, **учитывая конкретную модель** (например, gpt‑5.2=400k, gemini‑pro=1M).
 
+**Выполнено ранее (артефакты, чтобы не начинать заново):**
+- Лимит NATS payload и HTTP fallback при превышении размера (логирование старта/окончания fallback).
+- Дросселирование condense: уменьшены chunk/budget для стабилизации провайдера.
+- Подняты лимиты long‑text pipeline (MAX_TEXT_SIZE/MAX_USER_MSG_TO_MODEL_CHARS/LONG_TEXT_MAX_CHARS до 1_200_000).
+- Реординг RAG pipeline: multi‑step → RAG → condense, исключение последнего user из раннего condense.
+- Улучшен intent analyzer (fallback на lowercase‑tokens при отсутствии сущностей).
+- Диагностические логи prompt tail и таймаутов memory queue.
+- Настройки memory queue: batch size/timeout увеличены для устойчивости.
+
 ## 1. Термины и словарь
 
 **Model limit** — максимальный контекст модели, объявленный провайдером.
@@ -151,11 +160,17 @@ models:
 
 **Сделать:**
 - Ограничить graph/vector по share per‑model.
+- **Иерархический RAG:**
+  - vector поиск → top‑chunks,
+  - entity extraction по top‑chunks,
+  - graph fetch только по критичным сущностям,
+  - condense по budget при необходимости.
 - Использовать rerank и entity‑based selection:
   - если нет сущностей → минимальный контекст,
   - если сущности есть → top‑k per entity.
-- Если RAG превышает share → condense/summary.
+- Если RAG превышает share → condense/summary с бюджетом, зависящим от лимита модели.
 - Устанавливать per‑source quotas: graphTokens и vectorTokens отдельно.
+- Ввести правила ранжирования сущностей/узлов графа: близость к запросу, частота в vector hits, свежесть по метаданным (дата), веса по типу источника.
 
 **Нельзя:**
 - Включать все chunks, даже если rerank показал низкую релевантность.
@@ -208,7 +223,7 @@ models:
 ### 5.1 Token accounting
 Использовать `Tokenizer.getTokenCount` с правильным encoding для модели. Никаких char‑length как основного.
 
-### 5.2 Metrics
+### 5.2 Логирование (без метрик)
 Логировать per‑request:
 - instructionsTokens
 - historyTokens

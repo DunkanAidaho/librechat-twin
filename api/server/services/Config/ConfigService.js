@@ -275,6 +275,29 @@ class ConfigService {
           timeoutMs: z.number().int().positive().optional(),
         })
         .optional(),
+      budgetShares: z
+        .object({
+          default: z
+            .object({
+              vector: z.number().min(0).max(1),
+              graph: z.number().min(0).max(1),
+            })
+            .optional(),
+          entityHeavy: z
+            .object({
+              vector: z.number().min(0).max(1),
+              graph: z.number().min(0).max(1),
+            })
+            .optional(),
+          shortQuery: z
+            .object({
+              vector: z.number().min(0).max(1),
+              graph: z.number().min(0).max(1),
+            })
+            .optional(),
+          shortQueryMaxChars: z.number().int().positive().optional(),
+        })
+        .optional(),
       history: z
         .object({
           histLongUserToRag: z.number().int().nonnegative(),
@@ -667,9 +690,24 @@ class ConfigService {
           const ragSummaryChunk = parseOptionalInt(this.env.RAG_CHUNK_CHARS) ?? 20_000;
           const ragSummaryEnabled =
             parseOptionalBool(this.env.RAG_SUMMARIZE_IF_OVER) ?? true;
-          const ragSummaryProvider = sanitizeOptionalString(
-            this.env.RAG_VECTOR_SUMMARY_PROVIDER,
-          );
+    const ragSummaryProvider = sanitizeOptionalString(
+      this.env.RAG_VECTOR_SUMMARY_PROVIDER,
+    );
+    const ragVectorBudgetShare = parseOptionalFloat(this.env.RAG_BUDGET_SHARE_VECTOR);
+    const ragGraphBudgetShare = parseOptionalFloat(this.env.RAG_BUDGET_SHARE_GRAPH);
+    const ragVectorBudgetShareEntityHeavy = parseOptionalFloat(
+      this.env.RAG_BUDGET_SHARE_VECTOR_ENTITY,
+    );
+    const ragGraphBudgetShareEntityHeavy = parseOptionalFloat(
+      this.env.RAG_BUDGET_SHARE_GRAPH_ENTITY,
+    );
+    const ragVectorBudgetShareShort = parseOptionalFloat(
+      this.env.RAG_BUDGET_SHARE_VECTOR_SHORT,
+    );
+    const ragGraphBudgetShareShort = parseOptionalFloat(
+      this.env.RAG_BUDGET_SHARE_GRAPH_SHORT,
+    );
+    const ragShortQueryMaxChars = parseOptionalInt(this.env.RAG_SHORT_QUERY_MAX_CHARS) ?? 80;
           const ragSummaryTimeout = parseOptionalInt(this.env.RAG_SUMMARY_TIMEOUT_MS) ?? 125000;
 
           const ragQueryMaxChars =
@@ -767,6 +805,21 @@ class ConfigService {
               chunkChars: ragSummaryChunk,
               provider: ragSummaryProvider || '',
               timeoutMs: ragSummaryTimeout,
+            },
+            budgetShares: {
+              default: {
+                vector: ragVectorBudgetShare ?? 0.5,
+                graph: ragGraphBudgetShare ?? 0.5,
+              },
+              entityHeavy: {
+                vector: ragVectorBudgetShareEntityHeavy ?? 0.4,
+                graph: ragGraphBudgetShareEntityHeavy ?? 0.6,
+              },
+              shortQuery: {
+                vector: ragVectorBudgetShareShort ?? 0.7,
+                graph: ragGraphBudgetShareShort ?? 0.3,
+              },
+              shortQueryMaxChars: ragShortQueryMaxChars,
             },
             history: {
               histLongUserToRag: historyHistLongUser,

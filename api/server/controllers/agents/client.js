@@ -773,6 +773,43 @@ class AgentClient extends BaseClient {
     }
 
     try {
+      const ragBudgetTokens = budget?.budgets?.rag;
+      const budgetShares = runtimeCfg?.rag?.budgetShares || {};
+      const shortQueryMaxChars = Number(budgetShares.shortQueryMaxChars ?? 80);
+      const lastQuery = String(req?.ragUserQuery || '').trim();
+      const useShort = lastQuery && lastQuery.length <= shortQueryMaxChars;
+      const useEntityHeavy = Array.isArray(req?.intentAnalysis?.entities)
+        ? req.intentAnalysis.entities.length > 0
+        : false;
+      const selectedShares = useShort
+        ? budgetShares.shortQuery
+        : useEntityHeavy
+          ? budgetShares.entityHeavy
+          : budgetShares.default;
+      const shareVector = Number(selectedShares?.vector ?? 0.5);
+      const shareGraph = Number(selectedShares?.graph ?? 0.5);
+      const shareTotal = shareVector + shareGraph;
+      const normalizedVector = shareTotal > 0 ? shareVector / shareTotal : 0.5;
+      const normalizedGraph = shareTotal > 0 ? shareGraph / shareTotal : 0.5;
+      const graphBudgetTokens = Number.isFinite(ragBudgetTokens)
+        ? Math.floor(ragBudgetTokens * normalizedGraph)
+        : undefined;
+      const vectorBudgetTokens = Number.isFinite(ragBudgetTokens)
+        ? Math.floor(ragBudgetTokens * normalizedVector)
+        : undefined;
+
+      logger.debug('[rag.budget.shares]', {
+        conversationId: this.conversationId,
+        ragBudgetTokens,
+        shortQueryMaxChars,
+        useShort,
+        useEntityHeavy,
+        vectorShare: normalizedVector,
+        graphShare: normalizedGraph,
+        graphBudgetTokens,
+        vectorBudgetTokens,
+      });
+
       const ragResult = await contextBuild({
         orderedMessages,
         systemContent,
@@ -782,7 +819,9 @@ class AgentClient extends BaseClient {
         endpointOption,
         logger,
         encoding: this.getEncoding(),
-        ragBudgetTokens: budget?.budgets?.rag,
+        ragBudgetTokens,
+        graphBudgetTokens,
+        vectorBudgetTokens,
       });
 
       if (ragResult && typeof ragResult === 'object') {

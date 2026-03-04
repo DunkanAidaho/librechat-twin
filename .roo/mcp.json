@@ -10,7 +10,8 @@
 			"alwaysAllow": [
 				"edit_file",
 				"get_file_info",
-				"write_file"
+				"write_file",
+				"read_text_file"
 			]
 		},
 		"git": {
