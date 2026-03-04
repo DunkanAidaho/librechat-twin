@@ -231,18 +231,19 @@ class AgentClient extends BaseClient {
     this.agentConfigs = agentConfigs;
     this.maxContextTokens = maxContextTokens;
     if (!this.maxContextTokens) this.maxContextTokens = 32000;
-    logger.info('[AgentClient:init.max_context]', {
-      maxContextTokens: this.maxContextTokens,
-      optionsMaxContextTokens: maxContextTokens,
-      endpointOption: this.options?.endpointOption ?? this.options?.req?.body?.endpointOption,
-      agentId: this.options?.agent?.id,
-      agentMaxContextTokens: this.options?.agent?.maxContextTokens,
-      agentModelParameters: this.options?.agent?.model_parameters,
-    });
     this.contentParts = contentParts;
     this.collectedUsage = collectedUsage;
     this.artifactPromises = artifactPromises;
     this.options = Object.assign({ endpoint: options.endpoint }, clientOptions);
+    logger.info('[AgentClient:init.max_context]', {
+      maxContextTokens: this.maxContextTokens,
+      optionsMaxContextTokens: maxContextTokens,
+      endpointOption:
+        this.options?.endpointOption ?? this.options?.req?.body?.endpointOption ?? options?.endpointOption,
+      agentId: this.options?.agent?.id,
+      agentMaxContextTokens: this.options?.agent?.maxContextTokens,
+      agentModelParameters: this.options?.agent?.model_parameters,
+    });
     this.model = this.options.agent.model_parameters.model;
     this.inputTokensKey = 'input_tokens';
     this.outputTokensKey = 'output_tokens';
