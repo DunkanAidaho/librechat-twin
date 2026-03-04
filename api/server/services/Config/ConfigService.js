@@ -431,6 +431,9 @@ class ConfigService {
         enqueueConcurrency: z.number().int().positive().optional(),
         enqueueMaxTotalMs: z.number().int().positive().optional(),
         failOpen: z.boolean().optional(),
+        httpRetryMaxAttempts: z.number().int().positive().optional(),
+        httpRetryBaseMs: z.number().int().positive().optional(),
+        httpRetryMaxMs: z.number().int().positive().optional(),
       }),
       graphContext: z
         .object({
@@ -1021,15 +1024,18 @@ class ConfigService {
               waitForIngestMs:
                 parseOptionalInt(this.env.HISTORY_WAIT_FOR_INGEST_MS) ?? 0,
             },
-            queue: {
-              taskTimeoutMs: parseOptionalInt(this.env.MEMORY_TASK_TIMEOUT_MS) ?? 30_000,
-              historySyncBatchSize:
-                parseOptionalInt(this.env.HISTORY_SYNC_BATCH_SIZE) ?? 20,
-              enqueueBatchSize: parseOptionalInt(this.env.MEMORY_QUEUE_ENQUEUE_BATCH_SIZE) ?? 25,
-              enqueueConcurrency: parseOptionalInt(this.env.MEMORY_QUEUE_ENQUEUE_CONCURRENCY) ?? 1,
-              enqueueMaxTotalMs: parseOptionalInt(this.env.MEMORY_QUEUE_ENQUEUE_MAX_TOTAL_MS) ?? 60000,
-              failOpen: parseOptionalBool(this.env.MEMORY_QUEUE_FAIL_OPEN) ?? true,
-            },
+      queue: {
+        taskTimeoutMs: parseOptionalInt(this.env.MEMORY_TASK_TIMEOUT_MS) ?? 30_000,
+        historySyncBatchSize:
+          parseOptionalInt(this.env.HISTORY_SYNC_BATCH_SIZE) ?? 20,
+        enqueueBatchSize: parseOptionalInt(this.env.MEMORY_QUEUE_ENQUEUE_BATCH_SIZE) ?? 25,
+        enqueueConcurrency: parseOptionalInt(this.env.MEMORY_QUEUE_ENQUEUE_CONCURRENCY) ?? 1,
+        enqueueMaxTotalMs: parseOptionalInt(this.env.MEMORY_QUEUE_ENQUEUE_MAX_TOTAL_MS) ?? 60000,
+        failOpen: parseOptionalBool(this.env.MEMORY_QUEUE_FAIL_OPEN) ?? true,
+        httpRetryMaxAttempts: parseOptionalInt(this.env.MEMORY_QUEUE_HTTP_RETRY_MAX_ATTEMPTS) ?? 3,
+        httpRetryBaseMs: parseOptionalInt(this.env.MEMORY_QUEUE_HTTP_RETRY_BASE_MS) ?? 500,
+        httpRetryMaxMs: parseOptionalInt(this.env.MEMORY_QUEUE_HTTP_RETRY_MAX_MS) ?? 5000,
+      },
             graphContext: {
               maxLines: graphMaxLines,
               maxLineChars: graphMaxLineChars,

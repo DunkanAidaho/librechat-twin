@@ -57,6 +57,16 @@ function resolveSubject(queueConfig, subjectKey) {
   return subject;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function computeRetryDelay(attempt, baseMs = 500, maxMs = 5000) {
+  const exp = Math.min(maxMs, baseMs * 2 ** attempt);
+  const jitter = Math.floor(Math.random() * Math.floor(baseMs));
+  return exp + jitter;
+}
+
 async function publishWithFallback(subjectKey, payload, fallbackPath, workflowLabel) {
   const queueConfig = getQueueConfig();
   const subject = resolveSubject(queueConfig, subjectKey);
@@ -105,30 +115,77 @@ async function publishWithFallback(subjectKey, payload, fallbackPath, workflowLa
       payloadTooLarge,
     }),
   );
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-    timeout: queueConfig.httpTimeoutMs,
-  });
+  const maxAttempts = Math.max(Number(queueConfig.httpRetryMaxAttempts ?? 3), 1);
+  const retryBaseMs = Math.max(Number(queueConfig.httpRetryBaseMs ?? 500), 100);
+  const retryMaxMs = Math.max(Number(queueConfig.httpRetryMaxMs ?? 5000), retryBaseMs);
 
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(`[HTTP fallback] ${workflowLabel} → ${url} вернул ${response.status}: ${text}`);
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      timeout: queueConfig.httpTimeoutMs,
+    }).catch((error) => ({ error }));
+
+    if (response?.error) {
+      const delayMs = computeRetryDelay(attempt, retryBaseMs, retryMaxMs);
+      logger.warn(
+        'temporalClient.http_fallback_retry',
+        buildContext({}, {
+          workflowLabel,
+          subject,
+          url,
+          attempt: attempt + 1,
+          maxAttempts,
+          delayMs,
+          err: response.error,
+        }),
+      );
+      if (attempt < maxAttempts - 1) {
+        await sleep(delayMs);
+        continue;
+      }
+      throw response.error;
+    }
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      const delayMs = computeRetryDelay(attempt, retryBaseMs, retryMaxMs);
+      logger.warn(
+        'temporalClient.http_fallback_retry',
+        buildContext({}, {
+          workflowLabel,
+          subject,
+          url,
+          attempt: attempt + 1,
+          maxAttempts,
+          delayMs,
+          status: response.status,
+          body: text?.slice(0, 1000),
+        }),
+      );
+      if (attempt < maxAttempts - 1) {
+        await sleep(delayMs);
+        continue;
+      }
+      throw new Error(`[HTTP fallback] ${workflowLabel} → ${url} вернул ${response.status}: ${text}`);
+    }
+
+    const result = await response.json();
+    logger.info(
+      'temporalClient.http_fallback_done',
+      buildContext({}, {
+        workflowLabel,
+        subject,
+        url,
+        status: response.status,
+        durationMs: Date.now() - startAt,
+      }),
+    );
+    return result;
   }
 
-  const result = await response.json();
-  logger.info(
-    'temporalClient.http_fallback_done',
-    buildContext({}, {
-      workflowLabel,
-      subject,
-      url,
-      status: response.status,
-      durationMs: Date.now() - startAt,
-    }),
-  );
-  return result;
+  throw new Error('HTTP fallback attempts exhausted');
 }
 
 async function enqueueMemoryTask(payload) {
