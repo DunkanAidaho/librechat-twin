@@ -1017,6 +1017,7 @@ class BaseClient {
       payload.length === 1 &&
       payload[0].content === _instructions.content
     ) {
+      const combinedTokens = (tokenCount || 0) + 3;
       this.logger.warn(
         'clients.base.prompt_with_instructions_exceeds.debug',
         this.buildLogContext({
@@ -1025,15 +1026,30 @@ class BaseClient {
           orderedWithInstructions: orderedWithInstructions.length,
           payloadLength: payload.length,
           instructionsTokens: tokenCount,
+          latestMessageTokens: latestMessage?.tokenCount,
+          combinedTokens,
           maxContextTokens: this.maxContextTokens,
         }),
       );
-      const info = `${tokenCount + 3} / ${this.maxContextTokens}`;
+      if (combinedTokens > this.maxContextTokens) {
+        const info = `${combinedTokens} / ${this.maxContextTokens}`;
+        const errorMessage = `{ "type": "${ErrorTypes.INPUT_LENGTH}", "info": "${info}" }`;
+        this.logger.warn(
+          'clients.base.prompt_with_instructions_exceeds',
+          this.buildLogContext({
+            combinedTokens,
+            maxContextTokens: this.maxContextTokens,
+          }),
+        );
+        throw new Error(errorMessage);
+      }
+
+      const info = `payload_empty_after_history_trim; latestMessageTokens=${latestMessage?.tokenCount || 0} / ${this.maxContextTokens}`;
       const errorMessage = `{ "type": "${ErrorTypes.INPUT_LENGTH}", "info": "${info}" }`;
       this.logger.warn(
-        'clients.base.prompt_with_instructions_exceeds',
+        'clients.base.payload_empty_after_history_trim',
         this.buildLogContext({
-          combinedTokens: tokenCount + 3,
+          latestMessageTokens: latestMessage?.tokenCount,
           maxContextTokens: this.maxContextTokens,
         }),
       );
