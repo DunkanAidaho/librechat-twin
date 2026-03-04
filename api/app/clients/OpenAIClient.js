@@ -1395,6 +1395,13 @@ ${convo}
             }
 
             if (typeof finalMessage.content !== 'string' || finalMessage.content.trim() === '') {
+              this.logger.warn(
+                'clients.openai.stream_empty_final_message',
+                this.buildClientContext({
+                  streamTokens: this.streamHandler.tokens.length,
+                  reasoningTokens: this.streamHandler.reasoningTokens.length,
+                }),
+              );
               finalChatCompletion.choices[0].message.content = this.streamHandler.tokens.join('');
             }
           })
