@@ -133,9 +133,31 @@ function condenseRagQuery(text, limit = 6000) {
   return `${head}\n...\n${tail}`;
 }
 
+function extractContentDates(text = '') {
+  if (!text || typeof text !== 'string') {
+    return [];
+  }
+  const patterns = [
+    /\b\d{4}-\d{2}-\d{2}\b/g,
+    /\b\d{2}\.\d{2}\.\d{4}\b/g,
+    /\b\d{2}\/\d{2}\/\d{4}\b/g,
+    /\b\d{4}\.\d{2}\.\d{2}\b/g,
+    /\b\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?\b/g,
+  ];
+  const matches = new Set();
+  for (const pattern of patterns) {
+    const found = text.match(pattern);
+    if (found) {
+      found.forEach((value) => matches.add(value));
+    }
+  }
+  return Array.from(matches);
+}
+
 module.exports = {
   extractMessageText,
   normalizeMemoryText,
   makeIngestKey,
   condenseRagQuery,
+  extractContentDates,
 };

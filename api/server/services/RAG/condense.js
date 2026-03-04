@@ -907,4 +907,5 @@ function getCondenseProvidersPreview() {
 module.exports = {
   condenseContext,
   getCondenseProvidersPreview,
+  summarizeWithChain,
 };

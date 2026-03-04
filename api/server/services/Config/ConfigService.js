@@ -422,6 +422,7 @@ class ConfigService {
             minAssistantMessages: z.number().int().nonnegative().default(1),
           })
           .default({ size: 8, minUserMessages: 1, minAssistantMessages: 1 }),
+        safetyFactor: z.number().min(0.1).max(1).optional(),
         waitForIngestMs: z.number().int().nonnegative().default(0),
       }),
       queue: z.object({
@@ -1011,19 +1012,20 @@ class ConfigService {
             useConversationMemory,
             enableMemoryCache: enableMemoryCache ?? useConversationMemory,
             activationThreshold: parseOptionalInt(this.env.MEMORY_ACTIVATION_THRESHOLD) ?? 6,
-            history: {
-              tokenBudget: parseOptionalInt(this.env.HISTORY_TOKEN_BUDGET) ?? 8_000,
-              mode: sanitizeOptionalString(this.env.HISTORY_MODE) || 'legacy',
-              liveWindow: {
-                size: parseOptionalInt(this.env.HISTORY_LIVEWINDOW_SIZE) ?? 8,
-                minUserMessages:
-                  parseOptionalInt(this.env.HISTORY_LIVEWINDOW_MINUSERMESSAGES) ?? 1,
-                minAssistantMessages:
-                  parseOptionalInt(this.env.HISTORY_LIVEWINDOW_MINASSISTANTMESSAGES) ?? 1,
-              },
-              waitForIngestMs:
-                parseOptionalInt(this.env.HISTORY_WAIT_FOR_INGEST_MS) ?? 0,
-            },
+      history: {
+        tokenBudget: parseOptionalInt(this.env.HISTORY_TOKEN_BUDGET) ?? 8_000,
+        mode: sanitizeOptionalString(this.env.HISTORY_MODE) || 'legacy',
+        liveWindow: {
+          size: parseOptionalInt(this.env.HISTORY_LIVEWINDOW_SIZE) ?? 8,
+          minUserMessages:
+            parseOptionalInt(this.env.HISTORY_LIVEWINDOW_MINUSERMESSAGES) ?? 1,
+          minAssistantMessages:
+            parseOptionalInt(this.env.HISTORY_LIVEWINDOW_MINASSISTANTMESSAGES) ?? 1,
+        },
+        safetyFactor: parseOptionalFloat(this.env.HISTORY_SAFETY_FACTOR),
+        waitForIngestMs:
+          parseOptionalInt(this.env.HISTORY_WAIT_FOR_INGEST_MS) ?? 0,
+      },
       queue: {
         taskTimeoutMs: parseOptionalInt(this.env.MEMORY_TASK_TIMEOUT_MS) ?? 30_000,
         historySyncBatchSize:

@@ -1,6 +1,11 @@
 const { getLogger } = require('~/utils/logger');
 const { buildContext } = require('~/utils/logContext');
-const { extractMessageText, normalizeMemoryText, makeIngestKey } = require('~/server/utils/messageUtils');
+const {
+  extractMessageText,
+  normalizeMemoryText,
+  makeIngestKey,
+  extractContentDates,
+} = require('~/server/utils/messageUtils');
 const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
 const { ensureTokenCount } = require('~/server/services/agents/historyTrimmer');
 const { observeHistoryPassthrough, observeLiveWindow } = require('~/utils/ragMetrics');
@@ -147,9 +152,12 @@ class MessageHistoryManager {
     userId,
     histLongUserToRag = 20000,
     assistLongToRag = 15000,
+    assistSnippetChars = 0,
     trimmer = null,
     tokenBudget = 0,
     contextHeadroom = 0,
+    condenseContext = null,
+    condenseChain = [],
   }) {
     const toIngest = [];
     const config = typeof this.config === 'function' ? this.config() : this.config;
@@ -204,6 +212,30 @@ class MessageHistoryManager {
           normalizedText.length >= 20 &&
           userId
         ) {
+          let summaryText = null;
+          if (typeof condenseContext === 'function') {
+            const isTechnical = /```|\b(error|stack|trace|exception|warn|log)\b/i.test(normalizedText);
+            if (isTechnical) {
+              summaryText = `Фрагмент кода/лога по теме ${
+                (normalizedText.match(/\b[A-Za-zА-Яа-я0-9_\-]{4,}\b/g) || [])[0] || 'unknown'
+              }`;
+            } else {
+              summaryText = await condenseContext({
+                chain: condenseChain || [],
+                prompt: `Сделай краткую выжимку 50-200 слов.\n\n=== Текст ===\n${normalizedText}`,
+                originalText: normalizedText,
+                budgetChars: 1200,
+                stage: 'ingest:summary',
+                requestContext: {
+                  conversationId,
+                  userId,
+                  messageId: m?.messageId,
+                },
+              });
+              summaryText = summaryText?.text || summaryText;
+            }
+          }
+
           const dedupeKey = makeIngestKey(conversationId, m.messageId, normalizedText);
 
           if (this.ingestedHistory.has(dedupeKey)) {
@@ -219,9 +251,20 @@ class MessageHistoryManager {
             const taskPayload = {
               message_id: stableId,
               content: normalizedText,
+              summary: summaryText || undefined,
+              content_dates: extractContentDates(normalizedText),
+              conversation_id: conversationId,
+              message_index: idx,
+              created_at: m?.createdAt || new Date().toISOString(),
+              importance_score: typeof m?.importance === 'number' ? m.importance : undefined,
               role: m?.isCreatedByUser ? 'user' : 'assistant',
               user_id: userId,
             };
+            if (summaryText && summaryText.length > 0) {
+              m.text = summaryText;
+              m.content = [{ type: 'text', text: summaryText }];
+              m.isMemoryStored = true;
+            }
             this.ingestedHistory.add(dedupeKey);
             toIngest.push(taskPayload);
             this.logger.info(
@@ -421,6 +464,9 @@ class MessageHistoryManager {
       .filter((task) => task.payload.user_id);
 
     if (tasks.length) {
+      tasks.forEach((task, index) => {
+        task.payload.message_index = index;
+      });
       const totalLength = tasks.reduce((acc, task) => acc + (task.payload.content?.length ?? 0), 0);
 
       try {

@@ -118,46 +118,16 @@ async function publishWithFallback(subjectKey, payload, fallbackPath, workflowLa
   const maxAttempts = Math.max(Number(queueConfig.httpRetryMaxAttempts ?? 3), 1);
   const retryBaseMs = Math.max(Number(queueConfig.httpRetryBaseMs ?? 500), 100);
   const retryMaxMs = Math.max(Number(queueConfig.httpRetryMaxMs ?? 5000), retryBaseMs);
-  const httpTimeoutMs = queueConfig.httpTimeoutMs;
-
-  logger.debug(
-    'temporalClient.http_fallback_config',
-    buildContext({}, {
-      workflowLabel,
-      subject,
-      url,
-      maxAttempts,
-      retryBaseMs,
-      retryMaxMs,
-      httpTimeoutMs,
-      payloadSize,
-      payloadTooLarge,
-    }),
-  );
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-      timeout: httpTimeoutMs,
+      timeout: queueConfig.httpTimeoutMs,
     }).catch((error) => ({ error }));
 
     if (response?.error) {
-      logger.warn(
-        'temporalClient.http_fallback_error',
-        buildContext({}, {
-          workflowLabel,
-          subject,
-          url,
-          attempt: attempt + 1,
-          maxAttempts,
-          payloadSize,
-          payloadTooLarge,
-          httpTimeoutMs,
-          err: response.error,
-        }),
-      );
       const delayMs = computeRetryDelay(attempt, retryBaseMs, retryMaxMs);
       logger.warn(
         'temporalClient.http_fallback_retry',

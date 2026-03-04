@@ -459,6 +459,7 @@ class AgentClient extends BaseClient {
       historyTokenBudget: runtimeCfg?.history?.tokenBudget ?? configService.getNumber('memory.history.tokenBudget', 0),
     });
     const ragCacheTtlMs = Math.max(Number(runtimeCfg?.ragCacheTtl) * 1000, 0);
+    const condenseConfig = runtimeCfg?.rag?.condense || {};
     const shouldCompressHistory = Boolean(historyCompressionCfg?.enabled);
     const endpointOption = this.options?.req?.body?.endpointOption ?? this.options?.endpointOption ?? {};
     logger.debug({
@@ -472,13 +473,37 @@ class AgentClient extends BaseClient {
     }); } catch {}
 
     const computeImportanceScore = (message = {}) => {
+      const text =
+        typeof message.text === 'string'
+          ? message.text
+          : Array.isArray(message.content)
+            ? message.content
+                .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+                .map((part) => part.text)
+                .join('\n')
+            : '';
+      const lowered = text.toLowerCase();
+      const keywordHits = ['важно', 'инструкция', 'ошибка', 'предупреждение', 'note', 'important']
+        .filter((word) => lowered.includes(word)).length;
+
+      let score = 0;
       if (message.isCreatedByUser || message.role === 'user') {
-        return 2;
+        score += 0.5;
+      } else if (message.role === 'assistant') {
+        score += 0.3;
       }
-      if (message.role === 'assistant') {
-        return 1;
+
+      if (keywordHits > 0) {
+        score += Math.min(0.3, keywordHits * 0.1);
       }
-      return 0;
+
+      const interactions =
+        Number(message?.metadata?.likes ?? message?.metadata?.rating ?? 0) || 0;
+      if (interactions > 0) {
+        score += Math.min(0.2, interactions * 0.05);
+      }
+
+      return Math.max(0, Math.min(1, score));
     };
 
     const tokenize = (text = '') => {
@@ -539,10 +564,12 @@ class AgentClient extends BaseClient {
       0;
 
     if (historyCompressionCfg?.enabled) {
-      historyTokenBudget = Math.max(
+      const historyBudgetRaw = Math.max(
         (budget?.budgets?.history ?? maxContextTokens) - Math.max(ragTokens, 0),
         0,
       );
+      const safetyFactor = Number(runtimeCfg?.history?.safetyFactor ?? 0.65);
+      historyTokenBudget = Math.floor(historyBudgetRaw * safetyFactor);
 
       const availableBudget = historyTokenBudget - headroom;
 
@@ -574,6 +601,10 @@ class AgentClient extends BaseClient {
     }
 
     try {
+      orderedMessages = orderedMessages.map((message) => ({
+        ...message,
+        importance: computeImportanceScore(message),
+      }));
       const {
         toIngest = [],
         modifiedMessages,
@@ -589,6 +620,8 @@ class AgentClient extends BaseClient {
         trimmer: historyTrimmer,
         tokenBudget: historyTokenBudget,
         contextHeadroom: headroom,
+        condenseContext: ragCondense,
+        condenseChain: condenseConfig?.chain || [],
       });
 
       orderedMessages = modifiedMessages;
