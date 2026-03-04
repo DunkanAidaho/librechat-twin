@@ -13,14 +13,6 @@
 				"write_file",
 				"read_text_file"
 			]
-		},
-		"git": {
-			"command": "uvx",
-			"args": [
-				"mcp-server-git",
-				"--repository",
-				"~/git"
-			]
 		}
 	}
 }
