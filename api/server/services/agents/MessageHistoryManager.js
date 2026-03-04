@@ -416,7 +416,9 @@ class MessageHistoryManager {
         trimmedMessages = selection.keptMessages;
         trimmedDropped = selection.droppedMessages;
 
-        const lastUserMessage = [...finalMessages].reverse().find((m) => m?.role === 'user');
+        const lastUserMessage = [...finalMessages]
+          .reverse()
+          .find((m) => m?.role === 'user' || m?.isCreatedByUser);
         if (lastUserMessage && !trimmedMessages.includes(lastUserMessage)) {
           ensureTokenCount(lastUserMessage, trimmer.tokenizerEncoding);
           trimmedMessages.push(lastUserMessage);
@@ -435,6 +437,14 @@ class MessageHistoryManager {
             }
             trimmedMessages.shift();
             trimmedDropped.push(head);
+          }
+        }
+
+        if (!trimmedMessages.length && finalMessages.length === 1) {
+          const onlyMessage = finalMessages[0];
+          ensureTokenCount(onlyMessage, trimmer.tokenizerEncoding);
+          if ((onlyMessage?.tokenCount ?? 0) <= effectiveBudget) {
+            trimmedMessages = [onlyMessage];
           }
         }
 
