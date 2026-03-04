@@ -509,6 +509,9 @@ async function condenseContext({
   graphContext = null,
   timeoutMs = null, // ДОБАВЛЕНО: Принимаем таймаут извне
 }) {
+  if (!contextText || typeof contextText !== 'string') {
+    return '';
+  }
   const t0 = Date.now();
   const requestContext = buildContext(req || {}, {
     endpoint: endpointOption?.endpoint,
@@ -522,7 +525,7 @@ async function condenseContext({
       budgetChars,
       chunkChars,
       timeoutMs: effectiveTimeout,
-      contextLength: contextText.length,
+      contextLength: contextText?.length || 0,
     }));
     
     const { chain: providerChain, warnings, signature: chainSignature } = resolveSummarizerProviders();
