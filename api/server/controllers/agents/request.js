@@ -973,15 +973,6 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
         { req, res, endpointOption, signal: prelimAbortController.signal },
         { signal: prelimAbortController.signal },
       );
-      logger.info('[AgentController:init.payload]', buildContext(getRequestContext(req), {
-        endpointOption,
-        agentId: req?.body?.agent_id || req?.body?.agent?.id,
-        agentModelParameters: req?.body?.agent?.model_parameters,
-        maxContextTokens:
-          req?.body?.endpointOption?.model_parameters?.maxContextTokens ||
-          req?.body?.endpointOption?.maxContextTokens ||
-          req?.body?.agent?.maxContextTokens,
-      }));
 
       try {
         res.removeListener('close', prelimAbortController);
