@@ -47,6 +47,7 @@ const runtimeMemoryConfig = require('~/utils/memoryConfig');
 const MessageHistoryManager = require('~/server/services/agents/MessageHistoryManager');
 const { ContextCompressor, MessageCompressorBridge } = require('~/server/services/agents/ContextCompressor');
 const { analyzeIntent } = require('~/server/services/RAG/intentAnalyzer');
+const { condenseContext: ragCondense } = require('~/server/services/RAG/condense');
 const { runMultiStepRag } = require('~/server/services/RAG/multiStepOrchestrator');
 const {
   setDeferredContext,
