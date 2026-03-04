@@ -99,6 +99,9 @@ endpoints:
           - "qwen/qwen3-vl-235b-a22b-thinking"
           - "qwen/qwen3-30b-a3b-thinking-2507"
           - "qwen/qwen3-coder"
+          - "qwen/qwen3-max-thinking"
+          - "qwen/qwen3.5-plus-02-15"
+
       fetch: false
       titleConvo: true
       titleModel: "qwen/qwen3-max"
