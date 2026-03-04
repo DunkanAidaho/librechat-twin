@@ -238,6 +238,14 @@ class MessageHistoryManager {
                     messageId: m?.messageId,
                   },
                 });
+                if (summaryText && typeof summaryText === 'object') {
+                  this.logger.info(
+                    'rag.history.summary_provider',
+                    Object.assign({}, summaryLogContext, {
+                      provider: summaryText?.providerLabel || summaryText?.provider || 'unknown',
+                    }),
+                  );
+                }
                 summaryText = summaryText?.text || summaryText;
                 this.logger.info(
                   'rag.history.summary_done',

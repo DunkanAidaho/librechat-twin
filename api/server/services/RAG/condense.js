@@ -529,6 +529,11 @@ async function condenseContext({
     }));
     
     const { chain: providerChain, warnings, signature: chainSignature } = resolveSummarizerProviders();
+    logger.info('rag.condense.chain', buildContext(requestContext, {
+      chain: describeProviderChain(providerChain),
+      signature: chainSignature,
+      chainSize: providerChain.length,
+    }));
     warnings.forEach((message) =>
       logger.warn('rag.condense.config_warning', buildContext(requestContext, { warning: message })),
     );
