@@ -123,6 +123,54 @@ class ConfigService {
     this.#assertCritical();
   }
 
+  #logSectionValues(sectionName, value) {
+    if (String(this.env.LOG_LEVEL || '').toLowerCase() !== 'debug') {
+      return;
+    }
+
+    const redactKeys = new Set([
+      'apiKey',
+      'api_key',
+      'key',
+      'token',
+      'secret',
+      'password',
+      'authorization',
+    ]);
+
+    const entries = [];
+    const visit = (node, path = []) => {
+      if (node == null) {
+        entries.push({ path: path.join('.'), value: node });
+        return;
+      }
+      if (Array.isArray(node)) {
+        entries.push({ path: path.join('.'), value: node });
+        return;
+      }
+      if (typeof node !== 'object') {
+        entries.push({ path: path.join('.'), value: node });
+        return;
+      }
+      for (const key of Object.keys(node)) {
+        const normalizedKey = String(key).toLowerCase();
+        const nextPath = [...path, key];
+        if (redactKeys.has(normalizedKey)) {
+          entries.push({ path: nextPath.join('.'), value: '[redacted]' });
+          continue;
+        }
+        visit(node[key], nextPath);
+      }
+    };
+
+    visit(value, [sectionName]);
+    entries.forEach((entry) => {
+      logger.debug(
+        `[ConfigService][debug] ${entry.path}=${JSON.stringify(entry.value)}`,
+      );
+    });
+  }
+
   #buildSchemas() {
     const coreSchema = z.object({
       environment: z.string().default('development'),
@@ -1250,6 +1298,17 @@ class ConfigService {
       const parsed = entry.schema.parse(entry.loader());
       const frozen = deepFreeze(parsed);
       this.cache.set(name, frozen);
+      if (
+        name === 'openrouterModels' ||
+        name === 'providers' ||
+        name === 'limits' ||
+        name === 'rag' ||
+        name === 'memory' ||
+        name === 'clients' ||
+        name === 'agents'
+      ) {
+        this.#logSectionValues(name, frozen);
+      }
       return frozen;
     } catch (error) {
       if (error instanceof z.ZodError) {

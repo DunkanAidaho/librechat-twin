@@ -221,11 +221,19 @@ class OpenRouterModelService {
       return;
     }
 
+    const addedText = added.join(',');
+    const removedText = removed.join(',');
+    const yellow = '\x1b[33m';
+    const red = '\x1b[31m';
+    const reset = '\x1b[0m';
+
     this.logger.info(
       'models.openrouter.diff',
       buildContext(requestContext, {
-        added: added.join(','),
-        removed: removed.join(','),
+        added: addedText,
+        removed: removedText,
+        addedColored: addedText ? `${yellow}${addedText}${reset}` : '',
+        removedColored: removedText ? `${red}${removedText}${reset}` : '',
       }),
     );
   }
