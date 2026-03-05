@@ -336,17 +336,29 @@ async function buildContext({
       }
 
       const finalTopK = vectorTopK;
+      const searchPayload = {
+        query: ragSearchQuery,
+        top_k: finalTopK,
+        embedding_model: embeddingModel,
+        conversation_id: conversationId,
+        user_id: req?.user?.id,
+      };
+      const searchStart = Date.now();
       const finalResponse = await axios.post(
         `${toolsGatewayUrl}/rag/search`,
-        {
-          query: ragSearchQuery,
-          top_k: finalTopK,
-          embedding_model: embeddingModel,
-          conversation_id: conversationId,
-          user_id: req?.user?.id,
-        },
+        searchPayload,
         { timeout: toolsGatewayTimeout },
       );
+      logger?.info?.('[rag.context.vector.search.ok]', {
+        conversationId,
+        durationMs: Date.now() - searchStart,
+        timeoutMs: toolsGatewayTimeout,
+        queryLength: ragSearchQuery?.length ?? 0,
+        payloadBytes: Buffer.byteLength(JSON.stringify(searchPayload || {}), 'utf8'),
+        resultCount: Array.isArray(finalResponse?.data?.results)
+          ? finalResponse.data.results.length
+          : 0,
+      });
 
       const finalChunks = Array.isArray(finalResponse?.data?.results)
         ? finalResponse.data.results.map((item) => item?.content ?? '').filter(Boolean)
@@ -365,6 +377,10 @@ async function buildContext({
         conversationId,
         message: error?.message,
         stack: error?.stack,
+        code: error?.code,
+        status: error?.response?.status,
+        timeoutMs: toolsGatewayTimeout,
+        url: `${toolsGatewayUrl}/rag/search`,
       });
     }
 
@@ -374,15 +390,26 @@ async function buildContext({
 
     if (recentTurns > 0) {
       try {
+        const recentPayload = {
+          conversation_id: conversationId,
+          limit: recentTurns,
+          user_id: req?.user?.id,
+        };
+        const recentStart = Date.now();
         const recentResp = await axios.post(
           `${toolsGatewayUrl}/rag/recent`,
-          {
-            conversation_id: conversationId,
-            limit: recentTurns,
-            user_id: req?.user?.id,
-          },
+          recentPayload,
           { timeout: toolsGatewayTimeout },
         );
+        logger?.info?.('[rag.context.recent.ok]', {
+          conversationId,
+          durationMs: Date.now() - recentStart,
+          timeoutMs: toolsGatewayTimeout,
+          payloadBytes: Buffer.byteLength(JSON.stringify(recentPayload || {}), 'utf8'),
+          resultCount: Array.isArray(recentResp?.data?.results)
+            ? recentResp.data.results.length
+            : 0,
+        });
 
         const rawRecent = Array.isArray(recentResp?.data?.results)
           ? recentResp.data.results.map((r) => r?.content ?? '').filter(Boolean)
