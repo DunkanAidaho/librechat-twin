@@ -273,6 +273,16 @@ async function applyDeferredCondensation({
           calculateAdaptiveTimeout(vectorText.length, summarizationConfig.timeoutMs),
           600000,
         );
+        const budgetCutoff = Math.max(summarizationConfig.budgetChars * 2, 50000);
+        let textToSummarize = vectorText;
+        if (vectorText.length > budgetCutoff) {
+          textToSummarize = vectorText.slice(0, budgetCutoff);
+          logger?.warn?.('[rag.context.deferred.summarize.cutoff]', {
+            conversationId,
+            originalLength: vectorText.length,
+            cutoffLength: budgetCutoff,
+          });
+        }
         vectorText = await withTimeout(
           mapReduceContext({
             ragCondenseContext,
@@ -280,7 +290,7 @@ async function applyDeferredCondensation({
             req,
             res,
             endpointOption,
-            contextText: vectorText,
+            contextText: textToSummarize,
             userQuery,
             graphContext,
             summarizationConfig: {

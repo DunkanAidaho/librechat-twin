@@ -560,6 +560,19 @@ async function condenseContext({
     }
 
     const chunks = splitIntoChunks(contextText, chunkChars, Math.floor(chunkChars * 1.25));
+    const timeBudgetMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : effectiveTimeout;
+    const configuredConcurrency = Number.isFinite(condenseConfig.concurrency)
+      ? condenseConfig.concurrency
+      : 4;
+    const perChunkBudgetMs = Math.max(
+      15000,
+      Math.floor((timeBudgetMs * 0.8 * Math.max(1, configuredConcurrency)) / Math.max(1, chunks.length)),
+    );
+    for (const descriptor of providerChain) {
+      if (descriptor.options && typeof descriptor.options === 'object') {
+        descriptor.options.timeout = Math.min(descriptor.options.timeout, perChunkBudgetMs);
+      }
+    }
     const providerChainLabel = describeProviderChain(providerChain);
     logger.info(
       'rag.condense.map_start',
@@ -568,6 +581,9 @@ async function condenseContext({
         budgetChars,
         chunkChars,
         timeoutMs: effectiveTimeout,
+        perChunkBudgetMs,
+        timeBudgetMs,
+        concurrency: configuredConcurrency,
         providers: providerChainLabel,
       }),
     );
