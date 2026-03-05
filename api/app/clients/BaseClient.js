@@ -4,6 +4,7 @@ const { getLogger } = require('~/utils/logger');
 const { buildContext, getRequestContext } = require('~/utils/logContext');
 const { getBalanceConfig, Tokenizer, TextStream } = require('@librechat/api');
 const configService = require('../../server/services/Config/ConfigService');
+const { OpenRouterModelService } = require('~/server/services/Models');
 const {
   supportsBalanceCheck,
   isAgentsEndpoint,
@@ -81,6 +82,25 @@ logger.debug('Initialized client defaults', {
   retryFactor: DEFAULT_CLIENT_RETRY_FACTOR,
   retryJitter: DEFAULT_CLIENT_RETRY_JITTER
 });
+
+let openRouterModelsPreloaded = false;
+async function preloadOpenRouterModels() {
+  if (openRouterModelsPreloaded) {
+    return;
+  }
+  openRouterModelsPreloaded = true;
+  try {
+    const modelService = OpenRouterModelService.getShared({ configService });
+    const modelsMap = await modelService.getModelsMap({ requestContext: { source: 'startup' } });
+    logger.info('models.openrouter.preload', buildContext({}, { count: Object.keys(modelsMap || {}).length }));
+  } catch (error) {
+    logger.warn('models.openrouter.preload_failed', buildContext({}, {
+      err: { message: error?.message, stack: error?.stack },
+    }));
+  }
+}
+
+preloadOpenRouterModels();
 
 /**
  * Возвращает положительное целочисленное значение, либо значение по умолчанию.
