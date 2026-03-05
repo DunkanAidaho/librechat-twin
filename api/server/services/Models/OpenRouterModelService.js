@@ -33,6 +33,26 @@ class OpenRouterModelService {
     );
   }
 
+  static _sharedInstance;
+
+  /**
+   * Return a shared instance to avoid repeated fetches per request.
+   * @param {object} params
+   * @param {import('~/server/services/Config/ConfigService')} params.configService
+   * @param {import('axios')} [params.httpClient]
+   * @param {import('~/utils/logger').Logger} [params.logger]
+   */
+  static getShared({ configService, httpClient = axios, logger = null } = {}) {
+    if (!OpenRouterModelService._sharedInstance) {
+      OpenRouterModelService._sharedInstance = new OpenRouterModelService({
+        configService,
+        httpClient,
+        logger,
+      });
+    }
+    return OpenRouterModelService._sharedInstance;
+  }
+
   async getModelsMap({ requestContext = {} } = {}) {
     if (this._cachedModelsMap && this._lastFetchAt) {
       const ageMs = Date.now() - this._lastFetchAt;

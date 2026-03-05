@@ -236,6 +236,13 @@ class AgentClient extends BaseClient {
     this.artifactPromises = artifactPromises;
     this.options = Object.assign({ endpoint: options.endpoint }, clientOptions);
     this.model = this.options.agent.model_parameters.model;
+    logger.info('[AgentClient:init.max_context]', {
+      maxContextTokens: this.maxContextTokens,
+      optionsMaxContextTokens: maxContextTokens,
+      agentMaxContextTokens: this.options?.agent?.maxContextTokens,
+      agentModel: this.model,
+      provider: this.options?.agent?.provider,
+    });
     this.inputTokensKey = 'input_tokens';
     this.outputTokensKey = 'output_tokens';
     this.usage;

@@ -19,6 +19,7 @@ const { processFiles } = require('~/server/services/Files/process');
 const { getFiles, getToolFilesByIds } = require('~/models/File');
 const { getConvoFiles } = require('~/models/Conversation');
 const { OpenRouterModelService } = require('~/server/services/Models');
+const { getLogger } = require('~/utils/logger');
 const configService = require('~/server/services/Config/ConfigService');
 
 /**
@@ -143,17 +144,19 @@ const initializeAgent = async ({
     0,
   );
 
+  const logger = getLogger('agents.init');
   let agentMaxContextTokens = optionalChainWithEmptyCheck(
     maxContextTokens,
     getModelMaxTokens(tokensModel, providerEndpointMap[provider], options.endpointTokenConfig),
     18000,
   );
 
+  let openrouterLimit;
   if (!maxContextTokens && agent.provider === Providers.OPENROUTER && tokensModel) {
     try {
-      const modelService = new OpenRouterModelService({ configService });
+      const modelService = OpenRouterModelService.getShared({ configService });
       const modelEntry = await modelService.getModelsMap({ requestContext: { model: tokensModel } });
-      const openrouterLimit = modelEntry?.[tokensModel]?.maxContextTokens;
+      openrouterLimit = modelEntry?.[tokensModel]?.maxContextTokens;
       if (Number.isFinite(openrouterLimit) && openrouterLimit > 0) {
         agentMaxContextTokens = openrouterLimit;
       }
@@ -211,6 +214,21 @@ const initializeAgent = async ({
     });
   }
 
+  const finalMaxContextTokens = Math.round((agentMaxContextTokens - maxOutputTokens) * 0.9);
+
+  logger.info('[agent.init.tokens]', {
+    agentId: agent.id,
+    provider: agent.provider,
+    endpoint: agent.endpoint,
+    overrideProvider,
+    tokensModel,
+    maxContextTokensFromParams: maxContextTokens,
+    openrouterLimit,
+    agentMaxContextTokens,
+    maxOutputTokens,
+    finalMaxContextTokens,
+  });
+
   return {
     ...agent,
     tools,
@@ -219,7 +237,7 @@ const initializeAgent = async ({
     userMCPAuthMap,
     toolContextMap,
     useLegacyContent: !!options.useLegacyContent,
-    maxContextTokens: Math.round((agentMaxContextTokens - maxOutputTokens) * 0.9),
+    maxContextTokens: finalMaxContextTokens,
   };
 };
 
