@@ -108,12 +108,8 @@ function splitIntoChunks(text, target = 12000, hardMax = 15000) {
           buffer = s;
           flush();
         } else {
-          let i = 0;
-          while (i < s.length) {
-            parts.push(s.slice(i, i + target));
-            i += target;
-          }
-          buffer = '';
+          flush();
+          parts.push(s);
         }
       }
       flush();
@@ -606,9 +602,24 @@ async function condenseContext({
     const actualPLimit = await getPLimit();
     const limit = actualPLimit(CONCURRENCY);
 
+    const mapBudgetMs = Math.max(10000, Math.floor(timeBudgetMs * 0.5));
+    const mapDeadline = Date.now() + mapBudgetMs;
+    let processedCount = 0;
     const summaries = await Promise.all(
       chunks.map((chunk, index) =>
         limit(async () => {
+          if (Date.now() > mapDeadline) {
+            logger.warn(
+              'rag.condense.chunk_skipped',
+              buildContext(requestContext, {
+                chunkIndex: index + 1,
+                chunkTotal: chunks.length,
+                reason: 'map_budget_exhausted',
+                mapBudgetMs,
+              }),
+            );
+            return null;
+          }
           const chunkNumber = index + 1;
           const chunkContext = buildContext(requestContext, {
             chunkIndex: chunkNumber,
@@ -707,20 +718,39 @@ async function condenseContext({
             }
           }
 
+          processedCount += 1;
           return summaryText;
         }),
       ),
     );
 
-    const joined = summaries.filter(Boolean).join('\n\n---\n\n');
+    const validSummaries = summaries.filter(Boolean);
+    const processedRatio = chunks.length > 0 ? processedCount / chunks.length : 1;
+    const joined = validSummaries.join('\n\n---\n\n');
     logger.info(
       'rag.condense.map_done',
       buildContext(requestContext, {
-        chunkTotal: summaries.length,
+        chunkTotal: chunks.length,
+        processedCount,
+        processedRatio,
         joinedLength: joined.length,
         durationMs: Date.now() - t0,
+        mapBudgetMs,
       }),
     );
+
+    if (processedRatio < 0.5) {
+      logger.warn(
+        'rag.condense.map_partial_fallback',
+        buildContext(requestContext, {
+          processedCount,
+          chunkTotal: chunks.length,
+          processedRatio,
+          reason: 'processed_ratio_below_threshold',
+        }),
+      );
+      return localFallback(contextText, budgetChars);
+    }
 
     if (!joined || joined.length <= budgetChars || summaries.length <= 1) {
       logger.info(

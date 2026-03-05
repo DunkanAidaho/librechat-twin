@@ -273,16 +273,6 @@ async function applyDeferredCondensation({
           calculateAdaptiveTimeout(vectorText.length, summarizationConfig.timeoutMs),
           600000,
         );
-        const budgetCutoff = Math.max(summarizationConfig.budgetChars * 2, 50000);
-        let textToSummarize = vectorText;
-        if (vectorText.length > budgetCutoff) {
-          textToSummarize = vectorText.slice(0, budgetCutoff);
-          logger?.warn?.('[rag.context.deferred.summarize.cutoff]', {
-            conversationId,
-            originalLength: vectorText.length,
-            cutoffLength: budgetCutoff,
-          });
-        }
         vectorText = await withTimeout(
           mapReduceContext({
             ragCondenseContext,
@@ -290,7 +280,7 @@ async function applyDeferredCondensation({
             req,
             res,
             endpointOption,
-            contextText: textToSummarize,
+            contextText: vectorText,
             userQuery,
             graphContext,
             summarizationConfig: {
@@ -310,11 +300,18 @@ async function applyDeferredCondensation({
           stack: error?.stack,
         });
         if (error?.message?.includes('timed out')) {
-          const fallbackLength = Math.min(vectorText.length, summarizationConfig.budgetChars);
+          const budgetCutoff = Math.max(summarizationConfig.budgetChars * 2, 50000);
+          const fallbackLength = Math.min(vectorText.length, budgetCutoff);
           vectorText = vectorText.slice(0, fallbackLength);
           logger?.warn?.('[rag.context.deferred.summarize.fallback]', {
             conversationId,
             fallbackLength,
+          });
+          logger?.warn?.('[rag.context.deferred.summarize.cutoff]', {
+            conversationId,
+            originalLength: vectorText.length,
+            cutoffLength: fallbackLength,
+            reason: 'timeout',
           });
         }
       }
