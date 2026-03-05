@@ -170,6 +170,25 @@ class BaseClient {
         buildContext({}, { historyTokenBudget, event: 'history_budget' }),
       );
     }
+
+    if (!BaseClient._ragSummaryConfigLogged) {
+      BaseClient._ragSummaryConfigLogged = true;
+      const ragSummaryTimeoutMs =
+        this.configService?.getNumber?.('rag.summarization.timeoutMs', null) ?? null;
+      const ragSummaryChunkChars =
+        this.configService?.getNumber?.('rag.summarization.chunkChars', null) ?? null;
+      const ragSummaryBudgetChars =
+        this.configService?.getNumber?.('rag.summarization.budgetChars', null) ?? null;
+      this.logger.info(
+        'clients.base.config',
+        buildContext({}, {
+          event: 'rag_summarization',
+          timeoutMs: ragSummaryTimeoutMs,
+          chunkChars: ragSummaryChunkChars,
+          budgetChars: ragSummaryBudgetChars,
+        }),
+      );
+    }
     this.visionMode;
   }
 
