@@ -273,6 +273,12 @@ async function applyDeferredCondensation({
           calculateAdaptiveTimeout(vectorText.length, summarizationConfig.timeoutMs),
           600000,
         );
+        logger?.info?.('[rag.context.deferred.summarize.timeout]', {
+          conversationId,
+          contextLength: vectorText.length,
+          baseTimeoutMs: summarizationConfig.timeoutMs,
+          adaptiveTimeoutMs,
+        });
         vectorText = await withTimeout(
           mapReduceContext({
             ragCondenseContext,
