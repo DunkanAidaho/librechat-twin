@@ -1380,6 +1380,11 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
  */
 async function triggerSummarization(req, conversationId) {
   const userId = req.user.id;
+  const ragConfig = configService.getSection('rag') || {};
+  if (ragConfig?.temporal?.summaryEnabled === false) {
+    logger.info(`[Суммаризатор] Temporal summary отключён через ENV; пропуск для ${conversationId}.`);
+    return;
+  }
   const summariesConfig = configService.getSection('summaries') || {};
   const MAX_PAYLOAD_BYTES = summariesConfig.maxPayloadBytes || 900000;
 

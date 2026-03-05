@@ -129,7 +129,7 @@ class ConfigService {
     }
 
     const redactKeys = new Set([
-      'apiKey',
+      'apikey',
       'api_key',
       'key',
       'token',
@@ -742,6 +742,8 @@ class ConfigService {
           const ragSummaryChunk = parseOptionalInt(this.env.RAG_CHUNK_CHARS) ?? 20_000;
           const ragSummaryEnabled =
             parseOptionalBool(this.env.RAG_SUMMARIZE_IF_OVER) ?? true;
+          const temporalSummaryEnabled =
+            parseOptionalBool(this.env.TEMPORAL_SUMMARY_ENABLED) ?? true;
     const ragSummaryProvider = sanitizeOptionalString(
       this.env.RAG_VECTOR_SUMMARY_PROVIDER,
     );
@@ -857,6 +859,9 @@ class ConfigService {
               chunkChars: ragSummaryChunk,
               provider: ragSummaryProvider || '',
               timeoutMs: ragSummaryTimeout,
+            },
+            temporal: {
+              summaryEnabled: temporalSummaryEnabled,
             },
             budgetShares: {
               default: {
