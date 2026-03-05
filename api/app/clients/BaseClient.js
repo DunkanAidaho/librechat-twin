@@ -1498,6 +1498,12 @@ class BaseClient {
         this.buildLogContext({ messageId, tokenCount, summaryTokenCount }),
       );
     }
+    if (this.previous_summary == null) {
+      this.logger.warn(
+        'clients.base.previous_summary_missing',
+        this.buildLogContext({ reason: 'no_message_with_summary' }),
+      );
+    }
 
     return _messages;
   }

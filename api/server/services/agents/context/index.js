@@ -271,7 +271,7 @@ async function applyDeferredCondensation({
       try {
         const adaptiveTimeoutMs = Math.min(
           calculateAdaptiveTimeout(vectorText.length, summarizationConfig.timeoutMs),
-          300000,
+          600000,
         );
         vectorText = await withTimeout(
           mapReduceContext({
@@ -299,6 +299,14 @@ async function applyDeferredCondensation({
           message: error?.message,
           stack: error?.stack,
         });
+        if (error?.message?.includes('timed out')) {
+          const fallbackLength = Math.min(vectorText.length, summarizationConfig.budgetChars);
+          vectorText = vectorText.slice(0, fallbackLength);
+          logger?.warn?.('[rag.context.deferred.summarize.fallback]', {
+            conversationId,
+            fallbackLength,
+          });
+        }
       }
     }
 

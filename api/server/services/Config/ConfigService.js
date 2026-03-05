@@ -760,7 +760,7 @@ class ConfigService {
       this.env.RAG_BUDGET_SHARE_GRAPH_SHORT,
     );
     const ragShortQueryMaxChars = parseOptionalInt(this.env.RAG_SHORT_QUERY_MAX_CHARS) ?? 80;
-          const ragSummaryTimeout = parseOptionalInt(this.env.RAG_SUMMARY_TIMEOUT_MS) ?? 125000;
+          const ragSummaryTimeout = parseOptionalInt(this.env.RAG_SUMMARY_TIMEOUT_MS) ?? 300000;
 
           const ragQueryMaxChars =
             parseOptionalInt(this.env.RAG_QUERY_MAX_CHARS) ?? 6_000;
