@@ -1380,11 +1380,6 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
  */
 async function triggerSummarization(req, conversationId) {
   const userId = req.user.id;
-  const ragConfig = configService.getSection('rag') || {};
-  if (ragConfig?.temporal?.summaryEnabled === false) {
-    logger.info(`[Суммаризатор] Temporal summary отключён через ENV; пропуск для ${conversationId}.`);
-    return;
-  }
   const summariesConfig = configService.getSection('summaries') || {};
   const MAX_PAYLOAD_BYTES = summariesConfig.maxPayloadBytes || 900000;
 
@@ -1454,13 +1449,14 @@ async function triggerSummarization(req, conversationId) {
       }))
       .filter((m) => m.content);
 
-    const jobBatches = splitSummarizationJobs(
-      formatted,
-      messagesToSummarize,
-      conversationId,
-      userId,
-      MAX_PAYLOAD_BYTES,
-    );
+      const jobBatches = splitSummarizationJobs(
+        formatted,
+        messagesToSummarize,
+        conversationId,
+        userId,
+        MAX_PAYLOAD_BYTES,
+        req,
+      );
 
     for (const job of jobBatches) {
       try {
@@ -1494,7 +1490,7 @@ async function triggerSummarization(req, conversationId) {
   }
 }
 
-function splitSummarizationJobs(messages, rawMessages, conversationId, userId, maxBytes) {
+function splitSummarizationJobs(messages, rawMessages, conversationId, userId, maxBytes, req) {
   if (messages.length === 0) {
     return [];
   }
@@ -1516,6 +1512,7 @@ function splitSummarizationJobs(messages, rawMessages, conversationId, userId, m
         currentMessages,
         rawMessages[start],
         rawMessages[end - 1],
+        req,
       );
       const payloadSize = Buffer.byteLength(JSON.stringify(payload), 'utf8');
 
@@ -1572,13 +1569,15 @@ function splitSummarizationJobs(messages, rawMessages, conversationId, userId, m
   return jobs;
 }
 
-function buildSummarizationPayload(conversationId, userId, messages, firstRaw, lastRaw) {
+function buildSummarizationPayload(conversationId, userId, messages, firstRaw, lastRaw, req) {
+  const requestId = req?.context?.requestId || req?.headers?.['x-request-id'];
   return {
     conversation_id: conversationId,
     user_id: userId,
     messages,
     start_message_id: firstRaw?.messageId || messages[0]?.message_id,
     end_message_id: lastRaw?.messageId || messages[messages.length - 1]?.message_id,
+    metadata: requestId ? { request_id: requestId } : undefined,
   };
 }
 

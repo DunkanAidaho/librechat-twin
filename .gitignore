@@ -17,6 +17,7 @@ backup/
 node_modules/
 ui/
 backups/
+backend/
 logs/
 data/
 neo4j/
