@@ -223,9 +223,9 @@ class OpenRouterModelService {
 
     const addedText = added.join(',');
     const removedText = removed.join(',');
-    const yellow = '\x1b[33m';
-    const red = '\x1b[31m';
-    const reset = '\x1b[0m';
+    const yellow = '\u001b[33m';
+    const red = '\u001b[31m';
+    const reset = '\u001b[0m';
 
     this.logger.info(
       'models.openrouter.diff',

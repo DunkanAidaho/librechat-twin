@@ -152,11 +152,19 @@ const initializeAgent = async ({
   );
 
   let openrouterLimit;
-  if (!maxContextTokens && agent.provider === Providers.OPENROUTER && tokensModel) {
+  if (!maxContextTokens && tokensModel) {
     try {
       const modelService = OpenRouterModelService.getShared({ configService });
       const modelEntry = await modelService.getModelsMap({ requestContext: { model: tokensModel } });
       openrouterLimit = modelEntry?.[tokensModel]?.maxContextTokens;
+      if (!Number.isFinite(openrouterLimit)) {
+        const matchKey = Object.keys(modelEntry || {}).find(
+          (key) => key === tokensModel || key.startsWith(`${tokensModel}:`),
+        );
+        if (matchKey) {
+          openrouterLimit = modelEntry?.[matchKey]?.maxContextTokens;
+        }
+      }
       if (Number.isFinite(openrouterLimit) && openrouterLimit > 0) {
         agentMaxContextTokens = openrouterLimit;
       }

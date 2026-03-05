@@ -165,7 +165,7 @@ class ConfigService {
 
     visit(value, [sectionName]);
     entries.forEach((entry) => {
-      logger.debug(
+      logger.info(
         `[ConfigService][debug] ${entry.path}=${JSON.stringify(entry.value)}`,
       );
     });
@@ -1450,7 +1450,9 @@ class ConfigService {
 
     if (!this.missingDefaults.has(path)) {
       this.missingDefaults.add(path);
-      logger.debug(
+      const isDebug = String(this.env.LOG_LEVEL || '').toLowerCase() === 'debug';
+      const logFn = isDebug ? logger.warn : logger.debug;
+      logFn(
         `[ConfigService] Значение для "${path}" отсутствует; используется дефолт (${JSON.stringify(defaultValue)})`,
       );
     }
