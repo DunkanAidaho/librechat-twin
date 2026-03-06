@@ -260,6 +260,19 @@ async function applyDeferredCondensation({
       enabled: snapshot?.summarizationConfig?.enabled !== false,
     });
 
+    logger?.info?.('[rag.context.deferred.summarize.config]', {
+      conversationId,
+      defaults: summarizationDefaults,
+      snapshotConfig: snapshot?.summarizationConfig,
+      resolvedConfig: {
+        budgetChars: summarizationConfig.budgetChars,
+        chunkChars: summarizationConfig.chunkChars,
+        timeoutMs: summarizationConfig.timeoutMs,
+        provider: summarizationConfig.provider,
+        enabled: summarizationConfig.enabled,
+      },
+    });
+
     let vectorText = typeof snapshot.vectorText === 'string' ? snapshot.vectorText : '';
     const shouldSummarize =
       summarizationConfig.enabled && vectorText.length > summarizationConfig.budgetChars;
