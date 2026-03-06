@@ -132,6 +132,21 @@ const longTextGraphChunks = new client.Counter({
   registers: [register],
 });
 
+const agentTitleDuration = new client.Histogram({
+  name: 'agent_title_duration_ms',
+  help: 'Длительность генерации заголовка агента',
+  labelNames: ['endpoint'],
+  buckets: [50, 100, 200, 500, 1000, 2000, 5000, 10000],
+  registers: [register],
+});
+
+const agentTitleFailures = new client.Counter({
+  name: 'agent_title_failures_total',
+  help: 'Ошибки генерации заголовка агента',
+  labelNames: ['endpoint', 'reason'],
+  registers: [register],
+});
+
 function safeLabels(labels = {}) {
   return Object.fromEntries(
     Object.entries(labels).map(([key, value]) => [
@@ -226,6 +241,14 @@ function incLongTextGraphChunk(status) {
   longTextGraphChunks.inc(safeLabels({ status }));
 }
 
+function observeAgentTitle(labels, durationMs) {
+  observeMs(agentTitleDuration, labels)(durationMs);
+}
+
+function incAgentTitleFailure(labels) {
+  agentTitleFailures.inc(safeLabels(labels));
+}
+
 module.exports = {
   register,
   renderMetrics,
@@ -246,4 +269,6 @@ module.exports = {
   setTemporalStatus,
   incLongTextTask,
   incLongTextGraphChunk,
+  observeAgentTitle,
+  incAgentTitleFailure,
 };
