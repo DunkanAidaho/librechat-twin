@@ -883,9 +883,12 @@ class ConfigService {
           };
 
           const diag = parseOptionalBool(this.env.RAG_DIAG) ?? false;
-          if (diag && ragConfig.vector) {
-            logger.info('[diag.config.rag.vector]', ragConfig.vector);
-          }
+    if (diag && ragConfig.vector) {
+      logger.info('[diag.config.rag.vector]', ragConfig.vector);
+    }
+    if (diag && ragConfig.summarization) {
+      logger.info('[diag.config.rag.summarization]', ragConfig.summarization);
+    }
 
           return ragConfig;
         },
