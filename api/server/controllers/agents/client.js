@@ -880,10 +880,11 @@ class AgentClient extends BaseClient {
       });
 
       if (pendingIngest) {
-        setImmediate(() =>
-          this.historyManager.enqueueMemoryTasks(pendingIngest),
-        );
+        const ingestPayload = pendingIngest;
         pendingIngest = null;
+        setImmediate(() =>
+          this.historyManager.enqueueMemoryTasks(ingestPayload),
+        );
       }
 
       if (ragResult && typeof ragResult === 'object') {

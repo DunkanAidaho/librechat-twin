@@ -484,7 +484,7 @@ class MessageHistoryManager {
    * @param {Object} params
    * @returns {Promise<boolean>}
    */
-  async enqueueMemoryTasks({ toIngest, conversationId, userId, reason = 'history_sync' }) {
+  async enqueueMemoryTasks({ toIngest = [], conversationId, userId, reason = 'history_sync' } = {}) {
     if (!toIngest.length || !conversationId) {
       return false;
     }
