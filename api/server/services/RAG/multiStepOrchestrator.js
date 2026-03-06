@@ -264,7 +264,9 @@ async function runMultiStepRag({
 
     for (const entityState of entityStates) {
       entityState.passes += 1;
+    }
 
+    for (const entityState of entityStates) {
       const graphResult = await fetchGraph({
         fetchGraphContext:
           config.graph?.followUp === false ? null : fetchGraphContext,
@@ -297,7 +299,9 @@ async function runMultiStepRag({
           model,
         );
       }
+    }
 
+    for (const entityState of entityStates) {
       const memoryResult = await enqueueFollowUp({
         entity: entityState,
         passIndex,

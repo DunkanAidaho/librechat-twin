@@ -650,15 +650,14 @@ class AgentClient extends BaseClient {
         });
       }
 
+      let pendingIngest = null;
       if (toIngest.length && conversationId) {
-        setImmediate(() =>
-          this.historyManager.enqueueMemoryTasks({
-            toIngest,
-            conversationId,
-            userId: requestUserId,
-            reason: 'history_sync',
-          }),
-        );
+        pendingIngest = {
+          toIngest,
+          conversationId,
+          userId: requestUserId,
+          reason: 'history_sync',
+        };
       }
       logger.debug('[history->RAG] done', {
         conversationId: this.conversationId,
@@ -879,6 +878,13 @@ class AgentClient extends BaseClient {
         graphBudgetTokens,
         vectorBudgetTokens,
       });
+
+      if (pendingIngest) {
+        setImmediate(() =>
+          this.historyManager.enqueueMemoryTasks(pendingIngest),
+        );
+        pendingIngest = null;
+      }
 
       if (ragResult && typeof ragResult === 'object') {
         systemContent = ragResult.patchedSystemContent ?? systemContent;

@@ -70,6 +70,7 @@ function buildMemoryConfig() {
       budgetChars: rag.summarization?.budgetChars ?? 12000,
       chunkChars: rag.summarization?.chunkChars ?? 20000,
       provider: rag.summarization?.provider ?? '',
+      timeoutMs: rag.summarization?.timeoutMs ?? 125000,
     }),
     logging: Object.freeze({
       tokenUsageReportMode: logging.tokenUsageReportMode ?? 'json',
