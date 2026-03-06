@@ -412,6 +412,7 @@ class AgentClient extends BaseClient {
     opts,
   ) {
     const runtimeCfg = runtimeMemoryConfig.getMemoryConfig();
+    let pendingIngest = null;
     let orderedMessages = this.constructor.getMessagesForConversation({
       messages,
       parentMessageId,
