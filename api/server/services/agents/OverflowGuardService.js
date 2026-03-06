@@ -233,6 +233,12 @@ async function applyOverflowGuard({
       ragThresholdTokens: config.ragThresholdTokens,
       strategy: config.enableChunkingProcessing ? 'chunking_enabled' : 'chunking_disabled',
     });
+    if (typeof config.enableRagProcessing === 'boolean' && !config.enableRagProcessing) {
+      logger.warn('context.overflow.rag_disabled', {
+        ...loggerContext,
+        originalTokens: tokenCount,
+      });
+    }
     incOverflowRagDefer('rag_threshold');
     return { messages, action: 'rag_defer', stats: overflowStats, notice };
   }

@@ -1529,7 +1529,8 @@ class AgentClient extends BaseClient {
                   requestId: this.options?.req?.requestId,
                   userId: this.options?.req?.user?.id,
                 },
-                endpointOption,
+                endpointOption:
+                  this.options?.req?.body?.endpointOption ?? this.options?.endpointOption ?? {},
                 req: this.options?.req,
                 res: this.options?.res,
                 config: {
