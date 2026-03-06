@@ -82,7 +82,7 @@ function describeProviderChain(chain) {
   return chain.map((descriptor) => descriptor?.label || descriptor?.provider || 'unknown').join(' -> ');
 }
 
-function splitIntoChunks(text, target = 12000, hardMax = 15000) {
+function splitIntoChunks(text, target = 12000, hardMax = 15000, overlap = 0) {
   if (!text || typeof text !== 'string') return [];
   const parts = [];
   let buffer = '';
@@ -116,6 +116,21 @@ function splitIntoChunks(text, target = 12000, hardMax = 15000) {
     }
   }
   flush();
+
+  if (overlap > 0 && parts.length > 1) {
+    const withOverlap = [];
+    for (let i = 0; i < parts.length; i += 1) {
+      if (i === 0) {
+        withOverlap.push(parts[i]);
+        continue;
+      }
+      const prev = parts[i - 1];
+      const tail = prev.slice(-overlap);
+      withOverlap.push(`${tail}\n${parts[i]}`);
+    }
+    return withOverlap;
+  }
+
   return parts;
 }
 
@@ -504,6 +519,7 @@ async function condenseContext({
   chunkChars = 20000,
   graphContext = null,
   timeoutMs = null, // ДОБАВЛЕНО: Принимаем таймаут извне
+  overlapChars = 0,
 }) {
   if (!contextText || typeof contextText !== 'string') {
     return '';
@@ -555,7 +571,12 @@ async function condenseContext({
       return contextText;
     }
 
-    const chunks = splitIntoChunks(contextText, chunkChars, Math.floor(chunkChars * 1.25));
+    const chunks = splitIntoChunks(
+      contextText,
+      chunkChars,
+      Math.floor(chunkChars * 1.25),
+      overlapChars,
+    );
     const timeBudgetMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : effectiveTimeout;
     const configuredConcurrency = Number.isFinite(condenseConfig.concurrency)
       ? condenseConfig.concurrency

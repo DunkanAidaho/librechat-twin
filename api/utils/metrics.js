@@ -147,6 +147,36 @@ const agentTitleFailures = new client.Counter({
   registers: [register],
 });
 
+const overflowRagDefer = new client.Counter({
+  name: 'overflow_rag_defer_total',
+  help: 'Количество отложенных RAG обработок при переполнении',
+  labelNames: ['reason'],
+  registers: [register],
+});
+
+const overflowHardTruncate = new client.Counter({
+  name: 'overflow_hard_truncate_total',
+  help: 'Количество hard-truncate при переполнении',
+  labelNames: ['reason'],
+  registers: [register],
+});
+
+const overflowSummaryDuration = new client.Histogram({
+  name: 'overflow_summary_duration_ms',
+  help: 'Длительность суммаризации при переполнении',
+  labelNames: ['status'],
+  buckets: [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 40000, 120000],
+  registers: [register],
+});
+
+const overflowHardTruncateRatio = new client.Histogram({
+  name: 'overflow_hard_truncate_ratio',
+  help: 'Доля обрезки при hard-truncate (0..1)',
+  labelNames: ['reason', 'strategy'],
+  buckets: [0.05, 0.1, 0.2, 0.35, 0.5, 0.7, 0.85, 0.95],
+  registers: [register],
+});
+
 function safeLabels(labels = {}) {
   return Object.fromEntries(
     Object.entries(labels).map(([key, value]) => [
@@ -249,6 +279,28 @@ function incAgentTitleFailure(labels) {
   agentTitleFailures.inc(safeLabels(labels));
 }
 
+function incOverflowRagDefer(reason) {
+  overflowRagDefer.inc(safeLabels({ reason }));
+}
+
+function incOverflowHardTruncate(reason) {
+  overflowHardTruncate.inc(safeLabels({ reason }));
+}
+
+function observeOverflowSummary(status, durationMs) {
+  if (typeof durationMs !== 'number' || Number.isNaN(durationMs)) {
+    return;
+  }
+  overflowSummaryDuration.observe(safeLabels({ status }), durationMs);
+}
+
+function observeOverflowHardTruncateRatio(reason, ratio, strategy = 'unknown') {
+  if (typeof ratio !== 'number' || Number.isNaN(ratio)) {
+    return;
+  }
+  overflowHardTruncateRatio.observe(safeLabels({ reason, strategy }), ratio);
+}
+
 module.exports = {
   register,
   renderMetrics,
@@ -271,4 +323,8 @@ module.exports = {
   incLongTextGraphChunk,
   observeAgentTitle,
   incAgentTitleFailure,
+  incOverflowRagDefer,
+  incOverflowHardTruncate,
+  observeOverflowSummary,
+  observeOverflowHardTruncateRatio,
 };

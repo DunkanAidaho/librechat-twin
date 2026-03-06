@@ -59,6 +59,7 @@ const { queueGateway } = require('~/server/services/agents/queue');
 const { createAgentMemoryService } = require('~/server/services/agents/memory/agentMemoryService');
 const { createAgentToolsService } = require('~/server/services/agents/tools');
 const { agentUsageService } = require('~/server/services/agents/usage');
+const { applyOverflowGuard } = require('~/server/services/agents/OverflowGuardService');
 const {
   compressMessagesForRetry,
   detectContextOverflow,
@@ -469,6 +470,7 @@ class AgentClient extends BaseClient {
     });
     const ragCacheTtlMs = Math.max(Number(runtimeCfg?.ragCacheTtl) * 1000, 0);
     const condenseConfig = runtimeCfg?.rag?.condense || {};
+    const overflowCfg = configService.get('limits.overflow', {});
     const shouldCompressHistory = Boolean(historyCompressionCfg?.enabled);
     const endpointOption = this.options?.req?.body?.endpointOption ?? this.options?.endpointOption ?? {};
     logger.debug({
@@ -1516,6 +1518,70 @@ class AgentClient extends BaseClient {
           if (detectContextOverflow(runError) && retryAttempt < MAX_RETRIES) {
             retryAttempt++;
             const reductionFactor = 0.3 + (retryAttempt * 0.2);
+
+            try {
+              const guardResult = await applyOverflowGuard({
+                messages: initialMessages,
+                encoding: this.getEncoding(),
+                ragCondenseContext: ragCondense,
+                loggerContext: {
+                  conversationId: this.conversationId,
+                  requestId: this.options?.req?.requestId,
+                  userId: this.options?.req?.user?.id,
+                },
+                endpointOption,
+                req: this.options?.req,
+                res: this.options?.res,
+                config: {
+                  enabled: true,
+                  enableAdvancedProcessing: overflowCfg?.enableAdvancedProcessing ?? true,
+                  enableRagProcessing: overflowCfg?.enableRagProcessing ?? true,
+                  enableChunkingProcessing: overflowCfg?.enableChunkingProcessing ?? true,
+                  chunkingThresholdTokens: overflowCfg?.chunkingThresholdTokens ?? 100000,
+                  ragThresholdTokens: overflowCfg?.ragThresholdTokens ?? 500000,
+                  hardTruncateCapTokens: overflowCfg?.hardTruncateCapTokens ?? 80000,
+                  preserveHeadTail: overflowCfg?.preserveHeadTail ?? true,
+                  summaryTimeoutMs: overflowCfg?.summaryTimeoutMs ?? 120000,
+                  summaryProvider: overflowCfg?.summaryProvider ?? condenseConfig?.provider ?? 'auto',
+                  summaryCacheTtlMs: overflowCfg?.summaryCacheTtlMs ?? 86_400_000,
+                  maxUserMsgToModelChars: agentsConfig?.thresholds?.maxUserMessageChars ?? 0,
+                  dynamicBudgetTokens: Math.max(
+                    1,
+                    Math.floor(this.maxContextTokens * 0.55),
+                  ),
+                  noticeRag:
+                    '[Система] Получен большой текст. Запускаю фоновую обработку и пришлю сводку после завершения.',
+                  noticeTruncate:
+                    'Часть вашего сообщения была сокращена из-за технических ограничений. Пришлите продолжение или уточните запрос, если нужно учесть весь текст.',
+                },
+              });
+
+              if (guardResult?.action === 'rag_defer') {
+                this.contentParts = this.contentParts || [];
+                this.contentParts.push({
+                  type: ContentTypes.TEXT,
+                  [ContentTypes.TEXT]: guardResult.notice,
+                });
+                return;
+              }
+
+              if (guardResult?.action === 'hard_truncate' && guardResult.notice) {
+                this.contentParts = this.contentParts || [];
+                this.contentParts.push({
+                  type: ContentTypes.TEXT,
+                  [ContentTypes.TEXT]: guardResult.notice,
+                });
+              }
+
+              if (guardResult?.action && guardResult.action !== 'none') {
+                initialMessages = guardResult.messages;
+              }
+            } catch (guardError) {
+              logger.warn('[context.overflow.guard_error]', {
+                conversationId: this.conversationId,
+                message: guardError?.message,
+              });
+            }
             
             logger.warn('[context.overflow.retry]', {
               conversationId: this.conversationId,

@@ -402,12 +402,26 @@ class ConfigService {
       ragInternalKey: z.string().optional(),
     });
 
-    const limitsSchema = z.object({
+const limitsSchema = z.object({
       request: z.record(z.number().int().positive()).optional(),
       token: z
         .object({
           maxMessageTokens: z.number().int().nonnegative(),
           truncateLongMessages: z.boolean(),
+        })
+        .optional(),
+      overflow: z
+        .object({
+          enableAdvancedProcessing: z.boolean().optional(),
+          enableRagProcessing: z.boolean().optional(),
+          enableChunkingProcessing: z.boolean().optional(),
+          chunkingThresholdTokens: z.number().int().positive().optional(),
+          ragThresholdTokens: z.number().int().positive().optional(),
+          hardTruncateCapTokens: z.number().int().positive().optional(),
+          preserveHeadTail: z.boolean().optional(),
+          summaryTimeoutMs: z.number().int().positive().optional(),
+          summaryProvider: z.string().optional(),
+          summaryCacheTtlMs: z.number().int().positive().optional(),
         })
         .optional(),
       maxUserMsgToModelChars: z.number().int().nonnegative().optional(),
@@ -1225,6 +1239,27 @@ class ConfigService {
               maxMessageTokens: parseOptionalInt(this.env.MAX_MESSAGE_TOKENS) ?? 0,
               truncateLongMessages:
                 parseOptionalBool(this.env.TRUNCATE_LONG_MESSAGES) ?? true,
+            },
+            overflow: {
+              enableAdvancedProcessing:
+                parseOptionalBool(this.env.OVERFLOW_ENABLE_ADVANCED_PROCESSING) ?? true,
+              enableRagProcessing:
+                parseOptionalBool(this.env.OVERFLOW_ENABLE_RAG_PROCESSING) ?? true,
+              enableChunkingProcessing:
+                parseOptionalBool(this.env.OVERFLOW_ENABLE_CHUNKING_PROCESSING) ?? true,
+              chunkingThresholdTokens:
+                parseOptionalInt(this.env.OVERFLOW_CHUNKING_THRESHOLD_TOKENS) ?? 100_000,
+              ragThresholdTokens:
+                parseOptionalInt(this.env.OVERFLOW_RAG_THRESHOLD_TOKENS) ?? 500_000,
+              hardTruncateCapTokens:
+                parseOptionalInt(this.env.OVERFLOW_HARD_TRUNCATE_CAP_TOKENS) ?? 80_000,
+              preserveHeadTail:
+                parseOptionalBool(this.env.OVERFLOW_PRESERVE_HEAD_TAIL) ?? true,
+              summaryTimeoutMs:
+                parseOptionalInt(this.env.OVERFLOW_SUMMARY_TIMEOUT_MS) ?? 120_000,
+              summaryProvider: sanitizeOptionalString(this.env.OVERFLOW_SUMMARY_PROVIDER) ?? 'auto',
+              summaryCacheTtlMs:
+                parseOptionalInt(this.env.OVERFLOW_SUMMARY_CACHE_TTL_MS) ?? 86_400_000,
             },
             maxUserMsgToModelChars:
               parseOptionalInt(this.env.MAX_USER_MSG_TO_MODEL_CHARS) ?? 0,
