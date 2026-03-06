@@ -1520,6 +1520,7 @@ class AgentClient extends BaseClient {
             const reductionFactor = 0.3 + (retryAttempt * 0.2);
 
             try {
+              const overflowCfgSafe = configService.get('limits.overflow', {});
               const guardResult = await applyOverflowGuard({
                 messages: initialMessages,
                 encoding: this.getEncoding(),
@@ -1535,16 +1536,16 @@ class AgentClient extends BaseClient {
                 res: this.options?.res,
                 config: {
                   enabled: true,
-                  enableAdvancedProcessing: overflowCfg?.enableAdvancedProcessing ?? true,
-                  enableRagProcessing: overflowCfg?.enableRagProcessing ?? true,
-                  enableChunkingProcessing: overflowCfg?.enableChunkingProcessing ?? true,
-                  chunkingThresholdTokens: overflowCfg?.chunkingThresholdTokens ?? 100000,
-                  ragThresholdTokens: overflowCfg?.ragThresholdTokens ?? 500000,
-                  hardTruncateCapTokens: overflowCfg?.hardTruncateCapTokens ?? 80000,
-                  preserveHeadTail: overflowCfg?.preserveHeadTail ?? true,
-                  summaryTimeoutMs: overflowCfg?.summaryTimeoutMs ?? 120000,
-                  summaryProvider: overflowCfg?.summaryProvider ?? condenseConfig?.provider ?? 'auto',
-                  summaryCacheTtlMs: overflowCfg?.summaryCacheTtlMs ?? 86_400_000,
+                  enableAdvancedProcessing: overflowCfgSafe?.enableAdvancedProcessing ?? true,
+                  enableRagProcessing: overflowCfgSafe?.enableRagProcessing ?? true,
+                  enableChunkingProcessing: overflowCfgSafe?.enableChunkingProcessing ?? true,
+                  chunkingThresholdTokens: overflowCfgSafe?.chunkingThresholdTokens ?? 100000,
+                  ragThresholdTokens: overflowCfgSafe?.ragThresholdTokens ?? 500000,
+                  hardTruncateCapTokens: overflowCfgSafe?.hardTruncateCapTokens ?? 80000,
+                  preserveHeadTail: overflowCfgSafe?.preserveHeadTail ?? true,
+                  summaryTimeoutMs: overflowCfgSafe?.summaryTimeoutMs ?? 120000,
+                  summaryProvider: overflowCfgSafe?.summaryProvider ?? condenseConfig?.provider ?? 'auto',
+                  summaryCacheTtlMs: overflowCfgSafe?.summaryCacheTtlMs ?? 86_400_000,
                   maxUserMsgToModelChars: agentsConfig?.thresholds?.maxUserMessageChars ?? 0,
                   dynamicBudgetTokens: Math.max(
                     1,
