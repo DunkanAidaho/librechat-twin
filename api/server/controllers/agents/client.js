@@ -303,7 +303,6 @@ class AgentClient extends BaseClient {
 
   getSaveOptions() {
     let runOptions = {};
-    let pendingIngest = null;
     try {
       runOptions = payloadParser(this.options);
     } catch (error) {
