@@ -94,6 +94,14 @@ const getResilienceConfig = (key) => {
   return { ...config };
 };
 
+const computeDynamicSendTimeout = (text, baseTimeoutMs) => {
+  const base = Number.isFinite(baseTimeoutMs) ? baseTimeoutMs : 0;
+  const length = typeof text === 'string' ? text.length : 0;
+  const extraMs = Math.min(300_000, Math.ceil(length / 1000) * 1000);
+  const maxMs = 600_000;
+  return Math.min(Math.max(base, base + extraMs), maxMs);
+};
+
 /**
  * Enqueues memory tasks with resilience and metrics
  * @param {Array} tasks
@@ -430,6 +438,15 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
 
     const config = getResilienceConfig('sendMessage');
     const mergedOptions = { ...config, ...resilienceOptions };
+    const customOnRetry = mergedOptions.onRetry;
+    const wrappedOptions = {
+      ...mergedOptions,
+      onRetry: async (error, attemptNumber) => {
+        if (typeof customOnRetry === 'function') {
+          await customOnRetry(error, attemptNumber);
+        }
+      },
+    };
     const startedAt = Date.now();
     const endpointLabel = normalizeLabelValue(labels.endpoint);
     const modelLabel = normalizeLabelValue(labels.model);
@@ -438,7 +455,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       const result = await runWithResilience(
         'client.sendMessage',
         () => clientInstance.sendMessage(payload, messageOptions),
-        mergedOptions,
+        wrappedOptions,
       );
       observeSendMessage({ endpoint: endpointLabel, model: modelLabel }, Date.now() - startedAt);
       return result;
@@ -1000,12 +1017,19 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
         parentMessageId: overrideParentMessageId ?? userMessageId,
       });
 
+      let streamStarted = false;
       const { abortController, onStart } = createAbortController(
         req,
         res,
         getAbortData,
         getReqData,
       );
+      const wrappedOnStart = (...args) => {
+        streamStarted = true;
+        if (typeof onStart === 'function') {
+          onStart(...args);
+        }
+      };
 
       const onClose = () => {
         const closedAfterFinalize = responseFinalized || isResponseFinalized(res);
@@ -1038,7 +1062,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
 
       const messageOptions = {
         user: userId,
-        onStart,
+        onStart: wrappedOnStart,
         getReqData,
         isContinued,
         isRegenerate,
@@ -1061,7 +1085,18 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
           text,
           messageOptions,
           sendMessageLabels,
-          { signal: abortController.signal },
+          {
+            signal: abortController.signal,
+            timeoutMs: computeDynamicSendTimeout(
+              text,
+              getResilienceConfig('sendMessage').timeoutMs,
+            ),
+            onRetry: () => {
+              if (streamStarted) {
+                throw new Error('Retry blocked: stream already started');
+              }
+            },
+          },
         );
       } catch (e) {
         const msg = String(e && (e.message || e));
@@ -1097,7 +1132,18 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
             text,
             messageOptions,
             resolveSendMessageLabels(),
-            { signal: abortController.signal },
+            {
+              signal: abortController.signal,
+              timeoutMs: computeDynamicSendTimeout(
+                text,
+                getResilienceConfig('sendMessage').timeoutMs,
+              ),
+              onRetry: () => {
+                if (streamStarted) {
+                  throw new Error('Retry blocked: stream already started');
+                }
+              },
+            },
           );
         } else {
           throw e;
@@ -1258,11 +1304,18 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       };
     };
 
+    let streamStarted = false;
     const { abortController, onStart } = createAbortController(req, dres, getAbortData, getReqData);
+    const wrappedOnStart = (...args) => {
+      streamStarted = true;
+      if (typeof onStart === 'function') {
+        onStart(...args);
+      }
+    };
 
     const messageOptions = {
       user: userId,
-      onStart,
+      onStart: wrappedOnStart,
       getReqData,
       isContinued,
       isRegenerate,
@@ -1283,7 +1336,18 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       text,
       messageOptions,
       headlessSendMessageLabels,
-      { signal: abortController.signal },
+      {
+        signal: abortController.signal,
+        timeoutMs: computeDynamicSendTimeout(
+          text,
+          getResilienceConfig('sendMessage').timeoutMs,
+        ),
+        onRetry: () => {
+          if (streamStarted) {
+            throw new Error('Retry blocked: stream already started');
+          }
+        },
+      },
     );
     const safeEndpoint =
       (endpointOption && endpointOption.endpoint) ||
