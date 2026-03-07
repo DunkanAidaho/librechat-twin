@@ -38,6 +38,8 @@ RAG_LAST_PROCESSED_MAX_VALUE_SIZE=256
 
 > Примечание: NATS KV bucket `rag_last_processed` создаётся автоматически через `getOrCreateKV` при старте, вручную создавать его не требуется.
 
+> Примечание: ключи NATS KV должны быть совместимы с NATS subject (без `:`). Сейчас используется формат `dialog.<conversationId>` и `ing.<conversationId>.<messageId|hash>`.
+
 ## Примечания по структуре
 
 Документация группируется по тематическим подпапкам в `docs/`. При переносах обновляются ссылки в этом индексе, `docs/TODO.md` и `docs/project_map`.

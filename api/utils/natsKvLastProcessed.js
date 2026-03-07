@@ -133,7 +133,8 @@ class NatsKvLastProcessed {
       return 0;
     }
 
-    const key = `dialog:${conversationId}`;
+    const key = `dialog.${conversationId}`;
+    logger.debug(`[nats.last_processed] KV get key=${key}`);
     const start = Date.now();
     try {
       const entry = await withTimeout(
@@ -189,7 +190,8 @@ class NatsKvLastProcessed {
       return false;
     }
 
-    const key = `dialog:${conversationId}`;
+    const key = `dialog.${conversationId}`;
+    logger.debug(`[nats.last_processed] KV put key=${key}`);
     const start = Date.now();
     try {
       await withTimeout(

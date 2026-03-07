@@ -254,17 +254,21 @@ async function markAsIngested(key, taskType = 'index_file') {
   }
 
   try {
-    const entry = await retryTransient(() => kvBucket.get(key), 'kv.get');
+    const safeKey = String(key).replace(/[:\s]/g, '.');
+    if (safeKey !== key) {
+      logger.warn(`[ingestDeduplicator] Невалидный ключ KV, применён safeKey: ${key} -> ${safeKey}`);
+    }
+    const entry = await retryTransient(() => kvBucket.get(safeKey), 'kv.get');
     if (entry?.value) {
       markHit('jetstream');
-      cache.set(key, true);
+      cache.set(safeKey, true);
       return { deduplicated: true, mode: 'jetstream' };
     }
 
     markMiss('jetstream');
     const options = KV_TTL_NS ? { ttl: KV_TTL_NS } : undefined;
-    await retryTransient(() => kvBucket.put(key, sc.encode('1'), options), 'kv.put');
-    cache.set(key, true);
+    await retryTransient(() => kvBucket.put(safeKey, sc.encode('1'), options), 'kv.put');
+    cache.set(safeKey, true);
     return { deduplicated: false, mode: 'jetstream' };
   } catch (error) {
     if (isTransientKvError(error)) {

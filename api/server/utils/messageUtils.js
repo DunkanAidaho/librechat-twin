@@ -90,9 +90,13 @@ function normalizeMemoryText(text, logPrefix = '[MessageUtils]') {
  * @returns {string}
  */
 function makeIngestKey(convId, msgId, raw) {
-  if (msgId) return `ing:${convId}:${msgId}`;
+  const safeConv = String(convId || '').replace(/[:\s]/g, '.');
+  if (msgId) {
+    const safeMsg = String(msgId).replace(/[:\s]/g, '.');
+    return `ing.${safeConv}.${safeMsg}`;
+  }
   const hash = crypto.createHash('md5').update(String(raw || '')).digest('hex');
-  return `ing:${convId}:${hash}`;
+  return `ing.${safeConv}.${hash}`;
 }
 
 /**
