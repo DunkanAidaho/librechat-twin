@@ -102,6 +102,48 @@ const computeDynamicSendTimeout = (text, baseTimeoutMs) => {
   return Math.min(Math.max(base, base + extraMs), maxMs);
 };
 
+const createProgressTracker = () => {
+  let lastProgressAt = Date.now();
+  return {
+    bump: () => {
+      lastProgressAt = Date.now();
+    },
+    getLast: () => lastProgressAt,
+  };
+};
+
+const withProgressTimeout = (promise, { timeoutMs, progress, pollMs = 5000 }) => {
+  if (!timeoutMs || timeoutMs <= 0) {
+    return promise;
+  }
+  return new Promise((resolve, reject) => {
+    let finished = false;
+    const timer = setInterval(() => {
+      if (finished) {
+        return;
+      }
+      const lastAt = typeof progress?.getLast === 'function' ? progress.getLast() : Date.now();
+      const idleMs = Date.now() - lastAt;
+      if (idleMs >= timeoutMs) {
+        finished = true;
+        clearInterval(timer);
+        reject(new Error(`Operation timed out after ${timeoutMs} ms (idle ${idleMs} ms)`));
+      }
+    }, pollMs);
+    promise
+      .then((value) => {
+        finished = true;
+        clearInterval(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        finished = true;
+        clearInterval(timer);
+        reject(error);
+      });
+  });
+};
+
 /**
  * Enqueues memory tasks with resilience and metrics
  * @param {Array} tasks
@@ -439,8 +481,11 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
     const config = getResilienceConfig('sendMessage');
     const mergedOptions = { ...config, ...resilienceOptions };
     const customOnRetry = mergedOptions.onRetry;
+    const progressTracker = mergedOptions.progressTracker;
+    const timeoutMs = mergedOptions.timeoutMs ?? 0;
     const wrappedOptions = {
       ...mergedOptions,
+      timeoutMs: 0,
       onRetry: async (error, attemptNumber) => {
         if (typeof customOnRetry === 'function') {
           await customOnRetry(error, attemptNumber);
@@ -454,7 +499,10 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
     try {
       const result = await runWithResilience(
         'client.sendMessage',
-        () => clientInstance.sendMessage(payload, messageOptions),
+        () => withProgressTimeout(
+          clientInstance.sendMessage(payload, messageOptions),
+          { timeoutMs, progress: progressTracker },
+        ),
         wrappedOptions,
       );
       observeSendMessage({ endpoint: endpointLabel, model: modelLabel }, Date.now() - startedAt);
@@ -1018,6 +1066,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       });
 
       let streamStarted = false;
+      const progressTracker = createProgressTracker();
       const { abortController, onStart } = createAbortController(
         req,
         res,
@@ -1026,9 +1075,15 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       );
       const wrappedOnStart = (...args) => {
         streamStarted = true;
+        progressTracker.bump();
         if (typeof onStart === 'function') {
           onStart(...args);
         }
+      };
+      const progressCallback = ({ res: progressRes }) => {
+        return async () => {
+          progressTracker.bump();
+        };
       };
 
       const onClose = () => {
@@ -1063,6 +1118,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       const messageOptions = {
         user: userId,
         onStart: wrappedOnStart,
+        progressCallback,
         getReqData,
         isContinued,
         isRegenerate,
@@ -1091,6 +1147,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
               text,
               getResilienceConfig('sendMessage').timeoutMs,
             ),
+            progressTracker,
             onRetry: () => {
               if (streamStarted) {
                 throw new Error('Retry blocked: stream already started');
@@ -1138,6 +1195,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
                 text,
                 getResilienceConfig('sendMessage').timeoutMs,
               ),
+              progressTracker,
               onRetry: () => {
                 if (streamStarted) {
                   throw new Error('Retry blocked: stream already started');
@@ -1305,17 +1363,25 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
     };
 
     let streamStarted = false;
+    const progressTracker = createProgressTracker();
     const { abortController, onStart } = createAbortController(req, dres, getAbortData, getReqData);
     const wrappedOnStart = (...args) => {
       streamStarted = true;
+      progressTracker.bump();
       if (typeof onStart === 'function') {
         onStart(...args);
       }
+    };
+    const progressCallback = ({ res: progressRes }) => {
+      return async () => {
+        progressTracker.bump();
+      };
     };
 
     const messageOptions = {
       user: userId,
       onStart: wrappedOnStart,
+      progressCallback,
       getReqData,
       isContinued,
       isRegenerate,
@@ -1342,6 +1408,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
           text,
           getResilienceConfig('sendMessage').timeoutMs,
         ),
+        progressTracker,
         onRetry: () => {
           if (streamStarted) {
             throw new Error('Retry blocked: stream already started');
