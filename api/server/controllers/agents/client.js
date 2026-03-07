@@ -570,15 +570,16 @@ class AgentClient extends BaseClient {
     const instructionsTokensEstimate = tokenize(systemContent);
     const maxContextTokens = budget?.safeBudget ||
       this.maxContextTokens ||
-      Number(historyCfg?.tokenBudget) ||
+      Number(runtimeCfg?.tokenLimits?.maxPromptTokens) ||
       Number(runtimeCfg?.tokenLimits?.maxMessageTokens) ||
+      Number(historyCfg?.tokenBudget) ||
       0;
 
     if (historyCompressionCfg?.enabled) {
-      const historyBudgetRaw = Math.max(
-        (budget?.budgets?.history ?? maxContextTokens) - Math.max(ragTokens, 0),
-        0,
-      );
+    const historyBudgetRaw = Math.max(
+      (budget?.budgets?.history ?? maxContextTokens) - Math.max(ragTokens, 0),
+      0,
+    );
       const safetyFactor = Number(runtimeCfg?.history?.safetyFactor ?? 0.65);
       historyTokenBudget = Math.floor(historyBudgetRaw * safetyFactor);
 

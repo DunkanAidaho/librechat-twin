@@ -53,6 +53,42 @@ const memoryQueueFailures = new client.Counter({
   registers: [register],
 });
 
+const natsKvLatency = new client.Histogram({
+  name: 'nats_kv_latency_ms',
+  help: 'Задержка операций NATS KV (мс).',
+  labelNames: ['operation'],
+  buckets: [1, 5, 20, 50, 100, 250, 500, 1000, 2000, 5000],
+  registers: [register],
+});
+
+const natsKvErrors = new client.Counter({
+  name: 'nats_kv_errors_total',
+  help: 'Ошибки операций NATS KV.',
+  labelNames: ['operation', 'error_type'],
+  registers: [register],
+});
+
+const lastProcessedHits = new client.Counter({
+  name: 'rag_last_processed_get_hits_total',
+  help: 'Успешные чтения last_processed из KV.',
+  labelNames: ['reason'],
+  registers: [register],
+});
+
+const lastProcessedMisses = new client.Counter({
+  name: 'rag_last_processed_get_misses_total',
+  help: 'Промахи чтения last_processed из KV.',
+  labelNames: ['reason'],
+  registers: [register],
+});
+
+const lastProcessedPuts = new client.Counter({
+  name: 'rag_last_processed_put_total',
+  help: 'Записи last_processed в KV.',
+  labelNames: ['status'],
+  registers: [register],
+});
+
 const memoryQueueSkipped = new client.Counter({
   name: 'memoryQueue_skipped_total',
   help: 'Количество пропущенных задач памяти',
@@ -223,6 +259,26 @@ function incMemoryQueueFailure(reason) {
   memoryQueueFailures.inc(safeLabels({ reason }));
 }
 
+function observeNatsKvLatency(operation, durationMs) {
+  observeMs(natsKvLatency, { operation })(durationMs);
+}
+
+function incNatsKvError(operation, errorType) {
+  natsKvErrors.inc(safeLabels({ operation, error_type: errorType }));
+}
+
+function incLastProcessedHit(reason = 'ok') {
+  lastProcessedHits.inc(safeLabels({ reason }));
+}
+
+function incLastProcessedMiss(reason = 'unknown') {
+  lastProcessedMisses.inc(safeLabels({ reason }));
+}
+
+function incLastProcessedPut(status = 'ok') {
+  lastProcessedPuts.inc(safeLabels({ status }));
+}
+
 function incMemoryQueueSkipped(reason) {
   memoryQueueSkipped.inc(safeLabels({ reason }));
 }
@@ -311,6 +367,11 @@ module.exports = {
   observeMemoryQueueLatency,
   incMemoryQueueFailure,
   incMemoryQueueSkipped,
+  observeNatsKvLatency,
+  incNatsKvError,
+  incLastProcessedHit,
+  incLastProcessedMiss,
+  incLastProcessedPut,
   incMemoryQueueToolsGatewayFailure,
   observeSummaryEnqueue,
   incSummaryEnqueueFailure,

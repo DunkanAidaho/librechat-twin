@@ -9,6 +9,8 @@ const {
 const { enqueueMemoryTasks } = require('~/server/services/RAG/memoryQueue');
 const { ensureTokenCount } = require('~/server/services/agents/historyTrimmer');
 const { observeHistoryPassthrough, observeLiveWindow } = require('~/utils/ragMetrics');
+const ingestDeduplicator = require('~/server/services/Deduplication/ingestDeduplicator');
+const { NatsKvLastProcessed } = require('~/utils/natsKvLastProcessed');
 const crypto = require('crypto');
 
 /**
@@ -20,6 +22,7 @@ class MessageHistoryManager {
     this.config = options.config || {};
     this.memoryTaskTimeout = options.memoryTaskTimeout || 30000;
     this.logger = getLogger('rag.history');
+    this.lastProcessedStore = options.lastProcessedStore || new NatsKvLastProcessed();
   }
 
   sliceLiveWindow({ orderedMessages = [], size = 8, minUserMessages = 1, minAssistantMessages = 1 }) {
@@ -96,6 +99,14 @@ class MessageHistoryManager {
       const dedupeKey = makeIngestKey(conversationId, m.messageId, normalizedText);
       if (this.ingestedHistory.has(dedupeKey)) continue;
 
+      const dedupeResult = await ingestDeduplicator.markAsIngested(
+        dedupeKey,
+        'index_text',
+      );
+      if (dedupeResult?.deduplicated) {
+        continue;
+      }
+
       this.ingestedHistory.add(dedupeKey);
 
       const stableId = m.messageId || `dropped-${this.hashPayload(normalizedText).slice(0, 12)}`;
@@ -164,10 +175,33 @@ class MessageHistoryManager {
     const historyMode = config?.history?.mode || 'legacy';
     const liveWindowCfg = config?.history?.liveWindow || {};
     let heavyCount = 0;
+    let lastProcessed = 0;
+    let skippedByTimestamp = 0;
+    let skippedByDedupe = 0;
+
+    if (conversationId) {
+      lastProcessed = await this.lastProcessedStore.getLastProcessed(conversationId);
+    }
 
     for (let idx = 0; idx < orderedMessages.length; idx++) {
       const m = orderedMessages[idx];
       try {
+        if (lastProcessed > 0) {
+          const createdAt = m?.createdAt ? new Date(m.createdAt).getTime() : 0;
+          if (!createdAt && typeof m?.messageId === 'string') {
+            const idAsNumber = Number(m.messageId);
+            if (Number.isFinite(idAsNumber)) {
+              if (idAsNumber <= lastProcessed) {
+                skippedByTimestamp += 1;
+                continue;
+              }
+            }
+          }
+          if (createdAt && createdAt <= lastProcessed) {
+            skippedByTimestamp += 1;
+            continue;
+          }
+        }
         const rawText = extractMessageText(m, '[history->RAG]');
         const normalizedText = normalizeMemoryText(rawText);
         const len = normalizedText.length;
@@ -275,6 +309,21 @@ class MessageHistoryManager {
               }),
             );
           } else {
+            const dedupeResult = await ingestDeduplicator.markAsIngested(
+              dedupeKey,
+              'index_text',
+            );
+            if (dedupeResult?.deduplicated) {
+              skippedByDedupe += 1;
+              this.logger.info(
+                'rag.history.dedup_skip',
+                this.getLogContext(conversationId, userId, {
+                  messageId: m?.messageId,
+                  mode: dedupeResult.mode,
+                }),
+              );
+              continue;
+            }
             const stableId =
               m.messageId || `hist-${idx}-${this.hashPayload(normalizedText).slice(0, 12)}`;
             const taskPayload = {
@@ -346,6 +395,16 @@ class MessageHistoryManager {
         'rag.history.heavy_total',
         this.getLogContext(conversationId, userId, {
           heavyCount,
+        }),
+      );
+    }
+
+    if (skippedByTimestamp || skippedByDedupe) {
+      this.logger.info(
+        'rag.history.skip_summary',
+        this.getLogContext(conversationId, userId, {
+          skippedByTimestamp,
+          skippedByDedupe,
         }),
       );
     }
@@ -525,7 +584,14 @@ class MessageHistoryManager {
           }),
         );
 
-        return result?.status === 'queued';
+        if (result?.status === 'queued') {
+          await this.lastProcessedStore.updateLastProcessed(
+            conversationId,
+            Date.now(),
+          );
+          return true;
+        }
+        return false;
       } catch (queueError) {
         this.logger.error(
           'rag.history.enqueue_failure',

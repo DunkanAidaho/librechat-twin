@@ -1,6 +1,7 @@
 'use strict';
 
 const configService = require('~/server/services/Config/ConfigService');
+const { parseOptionalInt } = configService;
 
 let memoized;
 let lastLoadedEnvSnapshot = null;
@@ -26,6 +27,7 @@ function buildMemoryConfig() {
       truncateLongMessages: limits.token?.truncateLongMessages ?? true,
       maxUserMessageChars: limits.maxUserMsgToModelChars ?? 0,
       promptPerMsgMax: limits.promptPerMsgMax ?? 0,
+      maxPromptTokens: limits.token?.maxPromptTokens ?? 0,
     }),
     history: Object.freeze({
       dontShrinkLastN: limits.dontShrinkLastN ?? 4,
@@ -121,6 +123,7 @@ function getMemoryConfig() {
     historyMinUser: process.env.HISTORY_LIVEWINDOW_MINUSERMESSAGES,
     historyMinAssistant: process.env.HISTORY_LIVEWINDOW_MINASSISTANTMESSAGES,
     historyTokenBudget: process.env.HISTORY_TOKEN_BUDGET,
+    targetPromptTokens: process.env.TARGET_PROMPT_TOKENS,
     historyWaitForIngest: process.env.HISTORY_WAIT_FOR_INGEST_MS,
   });
 
@@ -139,6 +142,7 @@ function refreshMemoryConfig() {
     historyMinUser: process.env.HISTORY_LIVEWINDOW_MINUSERMESSAGES,
     historyMinAssistant: process.env.HISTORY_LIVEWINDOW_MINASSISTANTMESSAGES,
     historyTokenBudget: process.env.HISTORY_TOKEN_BUDGET,
+    targetPromptTokens: process.env.TARGET_PROMPT_TOKENS,
     historyWaitForIngest: process.env.HISTORY_WAIT_FOR_INGEST_MS,
   });
   return memoized;

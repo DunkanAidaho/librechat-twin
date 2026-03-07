@@ -5,6 +5,8 @@ const {
   extractLibreChatParams,
   optionalChainWithEmptyCheck,
 } = require('@librechat/api');
+const configService = require('~/server/services/Config/ConfigService');
+const { parseOptionalInt } = configService;
 const {
   ErrorTypes,
   EModelEndpoint,
@@ -20,7 +22,6 @@ const { getFiles, getToolFilesByIds } = require('~/models/File');
 const { getConvoFiles } = require('~/models/Conversation');
 const { OpenRouterModelService } = require('~/server/services/Models');
 const { getLogger } = require('~/utils/logger');
-const configService = require('~/server/services/Config/ConfigService');
 
 /**
  * @param {object} params
@@ -150,6 +151,11 @@ const initializeAgent = async ({
     getModelMaxTokens(tokensModel, providerEndpointMap[provider], options.endpointTokenConfig),
     18000,
   );
+
+  const configMaxContextTokens = parseOptionalInt(process.env.AGENT_MAX_CONTEXT_TOKENS);
+  if (Number.isFinite(configMaxContextTokens) && configMaxContextTokens > 0) {
+    agentMaxContextTokens = Math.min(agentMaxContextTokens, configMaxContextTokens);
+  }
 
   let openrouterLimit;
   if (!maxContextTokens && tokensModel) {

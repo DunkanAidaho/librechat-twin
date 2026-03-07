@@ -262,6 +262,11 @@ class ConfigService {
             ttlSeconds: z.number().int().nonnegative(),
           }),
         }),
+        lastProcessed: z.object({
+          bucket: z.string().min(1),
+          ttlMs: z.number().int().nonnegative(),
+          maxValueSize: z.number().int().positive(),
+        }),
       }),
     });
 
@@ -407,6 +412,7 @@ const limitsSchema = z.object({
       token: z
         .object({
           maxMessageTokens: z.number().int().nonnegative(),
+          maxPromptTokens: z.number().int().nonnegative().optional(),
           truncateLongMessages: z.boolean(),
         })
         .optional(),
@@ -711,6 +717,13 @@ const limitsSchema = z.object({
               l2: {
                 ttlSeconds: parseOptionalInt(this.env.SUMMARY_CACHE_L2_TTL_SEC) ?? 604_800,
               },
+            },
+            lastProcessed: {
+              bucket:
+                sanitizeOptionalString(this.env.RAG_LAST_PROCESSED_BUCKET) ||
+                'rag_last_processed',
+              ttlMs: parseOptionalInt(this.env.RAG_LAST_PROCESSED_TTL_MS) ?? 2_592_000_000,
+              maxValueSize: parseOptionalInt(this.env.RAG_LAST_PROCESSED_MAX_VALUE_SIZE) ?? 256,
             },
           },
         }),
@@ -1237,6 +1250,7 @@ const limitsSchema = z.object({
             request: requestLimits,
             token: {
               maxMessageTokens: parseOptionalInt(this.env.MAX_MESSAGE_TOKENS) ?? 0,
+              maxPromptTokens: parseOptionalInt(this.env.TARGET_PROMPT_TOKENS) ?? 0,
               truncateLongMessages:
                 parseOptionalBool(this.env.TRUNCATE_LONG_MESSAGES) ?? true,
             },
@@ -1534,3 +1548,4 @@ const configService = new ConfigService();
 
 module.exports = configService;
 module.exports.ConfigService = ConfigService;
+module.exports.parseOptionalInt = parseOptionalInt;

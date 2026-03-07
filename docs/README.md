@@ -16,6 +16,28 @@
 - Рефакторинг: [`docs/refactoring/client_refactoring.md`](docs/refactoring/client_refactoring.md)
 - Архитектура: [`docs/architecture/base_infrastructure.md`](docs/architecture/base_infrastructure.md)
 
+## Переменные окружения
+
+```bash
+# Лимиты истории/промпта
+HISTORY_TOKEN_BUDGET=12000
+CONTEXT_HEADROOM_TOKENS=8000
+TARGET_PROMPT_TOKENS=20000
+AGENT_MAX_CONTEXT_TOKENS=40000
+
+# RAG
+RAG_CONTEXT_TOPK=15
+
+# NATS KV для last_processed (инкрементальная индексация)
+RAG_LAST_PROCESSED_BUCKET=rag_last_processed
+RAG_LAST_PROCESSED_TTL_DAYS=30
+RAG_LAST_PROCESSED_MAX_VALUE_SIZE=256
+```
+
+> Примечание: `TARGET_PROMPT_TOKENS` ограничивает общий prompt‑budget, а `AGENT_MAX_CONTEXT_TOKENS` жёстко капает окно модели на уровне агента.
+
+> Примечание: NATS KV bucket `rag_last_processed` создаётся автоматически через `getOrCreateKV` при старте, вручную создавать его не требуется.
+
 ## Примечания по структуре
 
 Документация группируется по тематическим подпапкам в `docs/`. При переносах обновляются ссылки в этом индексе, `docs/TODO.md` и `docs/project_map`.
