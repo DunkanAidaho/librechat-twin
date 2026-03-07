@@ -104,15 +104,24 @@ const computeDynamicSendTimeout = (text, baseTimeoutMs) => {
 
 const createProgressTracker = () => {
   let lastProgressAt = Date.now();
+  let started = false;
   return {
     bump: () => {
       lastProgressAt = Date.now();
     },
+    markStarted: () => {
+      started = true;
+      lastProgressAt = Date.now();
+    },
     getLast: () => lastProgressAt,
+    isStarted: () => started,
   };
 };
 
-const withProgressTimeout = (promise, { timeoutMs, progress, pollMs = 5000 }) => {
+const withProgressTimeout = (
+  promise,
+  { timeoutMs, progress, pollMs = 5000, streamIdleTimeoutMs = 900000 },
+) => {
   if (!timeoutMs || timeoutMs <= 0) {
     return promise;
   }
@@ -123,11 +132,19 @@ const withProgressTimeout = (promise, { timeoutMs, progress, pollMs = 5000 }) =>
         return;
       }
       const lastAt = typeof progress?.getLast === 'function' ? progress.getLast() : Date.now();
+      const started = typeof progress?.isStarted === 'function' ? progress.isStarted() : false;
       const idleMs = Date.now() - lastAt;
-      if (idleMs >= timeoutMs) {
+      const effectiveTimeoutMs = started
+        ? Math.max(timeoutMs, streamIdleTimeoutMs)
+        : timeoutMs;
+      if (idleMs >= effectiveTimeoutMs) {
         finished = true;
         clearInterval(timer);
-        reject(new Error(`Operation timed out after ${timeoutMs} ms (idle ${idleMs} ms)`));
+        reject(
+          new Error(
+            `Operation timed out after ${effectiveTimeoutMs} ms (idle ${idleMs} ms)`,
+          ),
+        );
       }
     }, pollMs);
     promise
@@ -1075,7 +1092,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
       );
       const wrappedOnStart = (...args) => {
         streamStarted = true;
-        progressTracker.bump();
+        progressTracker.markStarted();
         if (typeof onStart === 'function') {
           onStart(...args);
         }
@@ -1367,7 +1384,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
     const { abortController, onStart } = createAbortController(req, dres, getAbortData, getReqData);
     const wrappedOnStart = (...args) => {
       streamStarted = true;
-      progressTracker.bump();
+      progressTracker.markStarted();
       if (typeof onStart === 'function') {
         onStart(...args);
       }
