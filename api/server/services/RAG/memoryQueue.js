@@ -266,7 +266,16 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
 
   // Get batching configuration
   const memoryConfig = configService.getSection('memory');
-  const batchSize = Math.max(1, memoryConfig.queue?.enqueueBatchSize ?? 25);
+  const configuredBatchSize = Math.max(1, memoryConfig.queue?.enqueueBatchSize ?? 25);
+  const minBatchSize = Math.max(1, memoryConfig.queue?.enqueueBatchMin ?? 5);
+  const maxBatchSize = Math.max(minBatchSize, memoryConfig.queue?.enqueueBatchMax ?? configuredBatchSize);
+  const adaptiveState = {
+    batchSize: Math.min(configuredBatchSize, maxBatchSize),
+    minBatchSize,
+    maxBatchSize,
+    backoffMs: Math.max(500, Number(memoryConfig.queue?.backoffMaxMs ?? 5000)),
+    backoffUntil: 0,
+  };
   const maxTotalMs = memoryConfig.queue?.enqueueMaxTotalMs ?? 60000;
   const failOpen = memoryConfig.queue?.failOpen ?? true;
   const isDropped = meta.reason === 'history_window_drop';
@@ -277,7 +286,7 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
     setImmediate(async () => {
       const asyncStart = Date.now();
       try {
-        await enqueueMemoryTasksSync(client, tasks, meta, batchSize);
+        await enqueueMemoryTasksSync(client, tasks, meta, adaptiveState.batchSize, null, null, adaptiveState);
         logger.info(
           'memoryQueue.async_completed',
           buildContext(meta, {
@@ -318,9 +327,10 @@ async function enqueueMemoryTasks(tasks = [], meta = {}) {
       client,
       tasks,
       meta,
-      batchSize,
+      adaptiveState.batchSize,
       progress,
       cancellation,
+      adaptiveState,
     );
     const result = await Promise.race([enqueuePromise, timeoutPromise]);
 
@@ -373,6 +383,7 @@ async function enqueueMemoryTasksSync(
   batchSize,
   progress = null,
   cancellation = null,
+  adaptive = null,
 ) {
   const batches = chunk(tasks, batchSize);
   let enqueuedTotal = 0;
@@ -413,9 +424,30 @@ async function enqueueMemoryTasksSync(
 
       try {
         const batchStart = Date.now();
+        if (adaptive?.backoffUntil && Date.now() < adaptive.backoffUntil) {
+          await new Promise((resolve) => setTimeout(resolve, Math.max(0, adaptive.backoffUntil - Date.now())));
+        }
+
         const { enqueued, errors } = await enqueueBatch(client, batch, meta);
         enqueuedTotal += enqueued;
         allErrors.push(...errors);
+
+        const shouldBackoff = errors.some(
+          (err) => /payload_oversize|503|timeout|tempor/i.test(String(err?.message || err)),
+        );
+        if (shouldBackoff && adaptive) {
+          adaptive.batchSize = Math.max(adaptive.minBatchSize, Math.floor(adaptive.batchSize / 2));
+          adaptive.backoffUntil = Date.now() + adaptive.backoffMs;
+          logger.warn(
+            'memoryQueue.backoff_applied',
+            buildContext(meta, {
+              batchSize: adaptive.batchSize,
+              backoffMs: adaptive.backoffMs,
+            }),
+          );
+        } else if (adaptive && errors.length === 0 && adaptive.batchSize < adaptive.maxBatchSize) {
+          adaptive.batchSize = Math.min(adaptive.maxBatchSize, adaptive.batchSize + 1);
+        }
 
         if (progress) {
           progress.enqueued = enqueuedTotal;

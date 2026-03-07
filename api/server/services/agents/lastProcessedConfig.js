@@ -27,6 +27,9 @@ function resolveLastProcessedConfig({ env = process.env } = {}) {
     logger.warn('[lastProcessedConfig] Bucket не может быть пустой строкой, используется дефолт');
   }
   const maxValueSize = parsePositiveInt(env.RAG_LAST_PROCESSED_MAX_VALUE_SIZE, 256);
+  const minPutIntervalMs = parsePositiveInt(env.RAG_LAST_PROCESSED_MIN_PUT_MS, 3000);
+  const minPutDeltaMs = parsePositiveInt(env.RAG_LAST_PROCESSED_MIN_DELTA_MS, 2000);
+  const backoffMaxMs = parsePositiveInt(env.RAG_LAST_PROCESSED_BACKOFF_MAX_MS, 5000);
   logger.info(
     `[lastProcessedConfig] Конфигурация KV: bucket=${bucket}, ttlMs=${ttlMs}, maxValueSize=${maxValueSize} (источник: ${env.RAG_LAST_PROCESSED_MAX_VALUE_SIZE ? 'ENV' : 'default'})`,
   );
@@ -34,6 +37,9 @@ function resolveLastProcessedConfig({ env = process.env } = {}) {
     bucket,
     ttlMs,
     maxValueSize,
+    minPutIntervalMs,
+    minPutDeltaMs,
+    backoffMaxMs,
   };
 }
 

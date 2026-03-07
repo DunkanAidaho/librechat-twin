@@ -40,6 +40,11 @@ class NatsKvLastProcessed {
     this.kv = null;
     this.initializing = null;
     this.cache = new LRU({ max: 1000, ttl: 30_000 });
+    this.lastPutAt = 0;
+    this.lastPutValue = 0;
+    this.pendingPut = null;
+    this.pendingTimer = null;
+    this.backoffUntil = 0;
   }
 
   getConfig() {
@@ -48,6 +53,100 @@ class NatsKvLastProcessed {
 
   getBucketConfig() {
     return this.getConfig();
+  }
+
+  getThrottleConfig() {
+    const cfg = this.getConfig();
+    return {
+      minPutIntervalMs: Math.max(Number(cfg.minPutIntervalMs ?? 3000), 0),
+      minPutDeltaMs: Math.max(Number(cfg.minPutDeltaMs ?? 2000), 0),
+      backoffMaxMs: Math.max(Number(cfg.backoffMaxMs ?? 5000), 0),
+    };
+  }
+
+  applyBackoff(error) {
+    const { backoffMaxMs } = this.getThrottleConfig();
+    if (!backoffMaxMs) {
+      return;
+    }
+    const now = Date.now();
+    const base = 200;
+    const jitter = Math.floor(Math.random() * 200);
+    const nextDelay = Math.min(backoffMaxMs, Math.max(base, this.backoffUntil - now + base) + jitter);
+    this.backoffUntil = now + nextDelay;
+    logger.warn(
+      `[nats.last_processed] KV put backoff ${nextDelay}ms (error=${error?.message || error})`,
+    );
+  }
+
+  schedulePut(conversationId, timestamp) {
+    const { minPutIntervalMs } = this.getThrottleConfig();
+    this.pendingPut = { conversationId, timestamp };
+    if (this.pendingTimer) {
+      return;
+    }
+    const now = Date.now();
+    const delay = Math.max(minPutIntervalMs - (now - this.lastPutAt), 0);
+    this.pendingTimer = setTimeout(async () => {
+      this.pendingTimer = null;
+      const pending = this.pendingPut;
+      this.pendingPut = null;
+      if (!pending) return;
+      await this.performPut(pending.conversationId, pending.timestamp, true);
+    }, delay);
+  }
+
+  async performPut(conversationId, timestamp, isDeferred = false) {
+    const now = Date.now();
+    if (now < this.backoffUntil) {
+      if (!isDeferred) {
+        this.schedulePut(conversationId, timestamp);
+      }
+      return false;
+    }
+
+    const kv = await this.ensureKv();
+    if (!kv) {
+      incNatsKvError('put', 'kv_unavailable');
+      return false;
+    }
+
+    const key = `dialog.${conversationId}`;
+    logger.debug(`[nats.last_processed] KV put key=${key} deferred=${isDeferred}`);
+    const start = Date.now();
+
+    try {
+      await withTimeout(
+        kv.put(key, encoder.encode(String(timestamp))),
+        DEFAULT_TIMEOUT_MS,
+        'KV put',
+      );
+      observeNatsKvLatency('put', Date.now() - start);
+      incLastProcessedPut('ok');
+      this.cache.set(conversationId, timestamp);
+      this.lastPutAt = Date.now();
+      this.lastPutValue = timestamp;
+      this.backoffUntil = 0;
+      return true;
+    } catch (error) {
+      observeNatsKvLatency('put', Date.now() - start);
+      if (error?.name === 'AbortError') {
+        incNatsKvError('put', 'timeout');
+        logger.warn(`[withTimeout] Операция прервана по таймауту: KV put`);
+      } else {
+        incNatsKvError('put', error?.name || 'unknown');
+        logger.error(
+          `[nats.last_processed] KV put failed (key=${key}): ${error.message}`,
+        );
+      }
+      if (typeof this.cache.delete === 'function') {
+        this.cache.delete(conversationId);
+      } else if (typeof this.cache.del === 'function') {
+        this.cache.del(conversationId);
+      }
+      this.applyBackoff(error);
+      return false;
+    }
   }
 
   async ensureKv() {
@@ -184,39 +283,28 @@ class NatsKvLastProcessed {
       return false;
     }
 
-    const kv = await this.ensureKv();
-    if (!kv) {
-      incNatsKvError('put', 'kv_unavailable');
+    const { minPutIntervalMs, minPutDeltaMs } = this.getThrottleConfig();
+    const now = Date.now();
+    const sinceLast = now - this.lastPutAt;
+    const delta = Math.abs(timestamp - this.lastPutValue);
+
+    if (minPutIntervalMs && sinceLast < minPutIntervalMs) {
+      logger.debug(
+        `[nats.last_processed] KV put skipped (rate_limit) delta=${delta}ms interval=${sinceLast}ms`,
+      );
+      this.schedulePut(conversationId, timestamp);
       return false;
     }
 
-    const key = `dialog.${conversationId}`;
-    logger.debug(`[nats.last_processed] KV put key=${key}`);
-    const start = Date.now();
-    try {
-      await withTimeout(
-        kv.put(key, encoder.encode(String(timestamp))),
-        DEFAULT_TIMEOUT_MS,
-        'KV put',
+    if (minPutDeltaMs && delta < minPutDeltaMs) {
+      logger.debug(
+        `[nats.last_processed] KV put skipped (delta) delta=${delta}ms minDelta=${minPutDeltaMs}ms`,
       );
-      observeNatsKvLatency('put', Date.now() - start);
-      incLastProcessedPut('ok');
-      this.cache.set(conversationId, timestamp);
-      return true;
-    } catch (error) {
-      observeNatsKvLatency('put', Date.now() - start);
-      if (error?.name === 'AbortError') {
-        incNatsKvError('put', 'timeout');
-        logger.warn(`[withTimeout] Операция прервана по таймауту: KV put`);
-      } else {
-        incNatsKvError('put', error?.name || 'unknown');
-        logger.error(
-          `[nats.last_processed] KV put failed (key=${key}): ${error.message}`,
-        );
-      }
-      this.cache.delete(conversationId);
+      this.schedulePut(conversationId, timestamp);
       return false;
     }
+
+    return await this.performPut(conversationId, timestamp);
   }
 }
 
