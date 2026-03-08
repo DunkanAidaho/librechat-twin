@@ -128,6 +128,19 @@ class InstructionsBuilder {
       .join('\n')
       .trim();
 
+    try {
+      logger.info('[InstructionsBuilder] systemContent.parts', {
+        toolContextLength: typeof toolContext === 'string' ? toolContext.length : 0,
+        instructionsLength: instructionsForLangChain?.content?.length ?? 0,
+        additionalLength: typeof additionalInstructions === 'string' ? additionalInstructions.length : 0,
+        totalLength: systemContent?.length ?? 0,
+      });
+    } catch (error) {
+      logger.warn('[InstructionsBuilder] systemContent.parts log failed', {
+        error: error?.message || error,
+      });
+    }
+
     if (!systemContent) {
       return null;
     }
@@ -169,8 +182,7 @@ ${ragContext.global.trim()}
       const entityParts = [`### Entity: ${entity.name}`];
 
       const graphBlock = Array.isArray(entity.graphContext) && entity.graphContext.length
-        ? entity.graphContext.join('
-').trim()
+        ? entity.graphContext.join('\\n').trim()
         : typeof entity.graphSummary === 'string'
           ? entity.graphSummary.trim()
           : '';
@@ -181,9 +193,7 @@ ${graphBlock}`);
       }
 
       const vectorBlock = Array.isArray(entity.vectorContext) && entity.vectorContext.length
-        ? entity.vectorContext.join('
-
-').trim()
+        ? entity.vectorContext.join('\\n\\n').trim()
         : typeof entity.vectorSummary === 'string'
           ? entity.vectorSummary.trim()
           : '';
@@ -193,8 +203,7 @@ ${graphBlock}`);
 ${vectorBlock}`);
       }
 
-      const entitySection = entityParts.join('
-').trim();
+      const entitySection = entityParts.join('\\n').trim();
       if (!entitySection || entitySection === `### Entity: ${entity.name}`) {
         continue;
       }
@@ -213,9 +222,7 @@ ${vectorBlock}`);
       sections.push(entitySection);
     }
 
-    return sections.filter(Boolean).join('
-
-').trim();
+    return sections.filter(Boolean).join('\\n\\n').trim();
   }
 
 

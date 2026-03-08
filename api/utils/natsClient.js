@@ -185,21 +185,15 @@ async function ensureKvStream(manager, bucketName) {
   } catch (error) {
     const message = error?.message || '';
     if (error?.code === '404' || /not found/i.test(message)) {
-      logger.info(`[natsClient] KV stream not found (stream=${stream}, bucket=${bucketName})`);
       return null;
     }
-    logger.warn(
-      `[natsClient] KV stream info failed (stream=${stream}, bucket=${bucketName}, code=${error?.code || 'n/a'}): ${message}`,
-    );
     throw error;
   }
 }
 
 async function createKvStream(manager, bucketName, options = {}) {
   const { stream, subject } = resolveKvNames(bucketName);
-  logger.info(
-    `[natsClient] creating KV stream ${stream} (bucket=${bucketName}, subject=${subject}, ttlMs=${options.ttl ?? 0}, history=${options.history ?? 1}, maxValueSize=${options.maxValueSize ?? 1024})`,
-  );
+  logger.info(`[natsClient] creating KV stream ${stream}`);
   await manager.streams.add({
     name: stream,
     subjects: [subject],
@@ -236,21 +230,14 @@ async function getOrCreateKV(name, options = {}) {
 
   let streamInfo = await ensureKvStream(manager, bucket);
   if (!streamInfo) {
-    try {
-      streamInfo = await createKvStream(manager, bucket, {
-        storage,
-        ttl: ttlMs,
-        history,
-        maxValueSize,
-        maxBucketSize,
-        replicaCount: replicas,
-      });
-    } catch (error) {
-      logger.error(
-        `[natsClient] Failed to create KV stream (bucket=${bucket}, stream=KV_${bucket}, code=${error?.code || 'n/a'}): ${error?.message || error}`,
-      );
-      throw error;
-    }
+    streamInfo = await createKvStream(manager, bucket, {
+      storage,
+      ttl: ttlMs,
+      history,
+      maxValueSize,
+      maxBucketSize,
+      replicaCount: replicas,
+    });
   }
 
   if (!streamInfo) {

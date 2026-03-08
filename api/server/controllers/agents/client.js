@@ -1353,14 +1353,27 @@ class AgentClient extends BaseClient {
             instructionsForLangChain = agent.instructions;
         }
 
+        const rawToolContext = typeof systemMessage === 'string' ? systemMessage : '';
+        const rawInstructions = instructionsForLangChain?.content ?? '';
+        const rawAdditional = i !== 0 ? agent.additional_instructions ?? '' : '';
+
         let systemContent = [
-          systemMessage,
-          instructionsForLangChain?.content ?? '',
-          i !== 0 ? agent.additional_instructions ?? '' : '',
+          rawToolContext,
+          rawInstructions,
+          rawAdditional,
         ]
           .filter(Boolean)
           .join('\n')
           .trim();
+
+        logger.info('[AgentClient][systemContent.parts]', {
+          conversationId: this.conversationId,
+          agentId: agent.id,
+          toolContextLength: rawToolContext.length,
+          instructionsLength: rawInstructions.length,
+          additionalLength: rawAdditional.length,
+          totalLength: systemContent.length,
+        });
 
         if (!systemContent || systemContent.length === 0) {
           systemContent = DEFAULT_SYSTEM_PROMPT;

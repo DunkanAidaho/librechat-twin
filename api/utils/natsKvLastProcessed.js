@@ -112,9 +112,7 @@ class NatsKvLastProcessed {
     }
 
     const key = `dialog.${conversationId}`;
-    logger.debug(
-      `[nats.last_processed] KV put key=${key} bucket=${this.getBucketConfig().bucket} deferred=${isDeferred} ts=${timestamp}`,
-    );
+    logger.debug(`[nats.last_processed] KV put key=${key} deferred=${isDeferred}`);
     const start = Date.now();
 
     try {
@@ -132,15 +130,13 @@ class NatsKvLastProcessed {
       return true;
     } catch (error) {
       observeNatsKvLatency('put', Date.now() - start);
-      const code = error?.code || error?.status || error?.statusCode || 'n/a';
-      const message = error?.message || error;
       if (error?.name === 'AbortError') {
         incNatsKvError('put', 'timeout');
         logger.warn(`[withTimeout] Операция прервана по таймауту: KV put`);
       } else {
         incNatsKvError('put', error?.name || 'unknown');
         logger.error(
-          `[nats.last_processed] KV put failed (key=${key}, bucket=${this.getBucketConfig().bucket}, code=${code}): ${message}`,
+          `[nats.last_processed] KV put failed (key=${key}): ${error.message}`,
         );
       }
       if (typeof this.cache.delete === 'function') {
@@ -173,9 +169,6 @@ class NatsKvLastProcessed {
       try {
         for (let attempt = 1; attempt <= 3; attempt += 1) {
           try {
-            logger.info(
-              `[nats.last_processed] KV init attempt ${attempt} (bucket=${bucket}, ttlMs=${ttlMs}, maxValueSize=${maxValueSize})`,
-            );
             const kv = await withTimeout(
               getOrCreateKV(bucket, {
                 ttl: ttlMs,
@@ -193,7 +186,7 @@ class NatsKvLastProcessed {
             return kv;
           } catch (error) {
             logger.warn(
-              `[nats.last_processed] Попытка ${attempt} инициализации KV не удалась (bucket=${bucket}, code=${error?.code || 'n/a'}): ${error.message}`,
+              `[nats.last_processed] Попытка ${attempt} инициализации KV не удалась: ${error.message}`,
             );
             if (attempt === 3) {
               throw error;
