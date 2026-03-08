@@ -1078,6 +1078,13 @@ class AgentClient extends BaseClient {
       .filter((section) => typeof section === 'string' && section.trim().length)
       .join('\n\n');
 
+    logger.info('[DIAG-PROMPT] combinedSystemContent.parts', {
+      conversationId: this.conversationId,
+      ragSectionsLength: ragSections?.length ?? 0,
+      systemContentLength: systemContent?.length ?? 0,
+      combinedLength: combinedSystemContent.length,
+    });
+
     instructions = normalizeInstructionsPayload(
       combinedSystemContent,
       () => this.getEncoding(),
