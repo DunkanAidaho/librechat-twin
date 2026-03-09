@@ -89,6 +89,7 @@ const OCR_CONTEXT_FOOTER = '[/OCR_CONTEXT]';
 const RAG_SECTIONS_HEADER = '[RAG_SECTIONS]';
 const RAG_SECTIONS_FOOTER = '[/RAG_SECTIONS]';
 const RAG_BLOCK_FOOTER = '---\n\n';
+const MAP_SUMMARY_GUARD_RATIO = configService.getNumber('rag.guard.mapSummaryRatio', 1.35);
 
 const replaceAugmentedBlock = (systemContent = '', augmentedBlock = '') => {
   const safeBlock = typeof augmentedBlock === 'string' ? augmentedBlock : '';

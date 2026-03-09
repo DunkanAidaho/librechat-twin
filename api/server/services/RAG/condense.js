@@ -45,7 +45,7 @@ const SUMMARY_SYSTEM_PROMPT =
   'Ты — аккуратный компрессор текста для LibreChat. Соблюдай формат инструкции и не добавляй лишних пояснений.';
 const MAP_SUMMARY_MIN_TOKENS = 200;
 const MAP_SUMMARY_MAX_TOKENS = 2048;
-const MAP_SUMMARY_GUARD_RATIO = 1.1;
+const MAP_SUMMARY_GUARD_RATIO = configService.getNumber('rag.guard.mapSummaryRatio', 1.35);
 const MAP_SHORT_CHUNK_THRESHOLD = 500;
 const CHAR_TO_TOKEN_APPROX = 4;
 const MAP_LENGTH_RATIO_MIN = 0.1;
