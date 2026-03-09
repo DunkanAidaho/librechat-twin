@@ -71,14 +71,29 @@ class SummaryCacheStore {
     if (!kv) {
       return null;
     }
+    const key = this.buildKey(conversationId, messageId);
+    let entry;
     try {
-      const key = this.buildKey(conversationId, messageId);
-      const entry = await withTimeout(kv.get(key), DEFAULT_TIMEOUT_MS, 'KV get');
-      if (!entry?.value) {
-        return null;
-      }
-      const decompressed = zlib.gunzipSync(entry.value);
-      const payload = JSON.parse(decompressed.toString('utf8'));
+      entry = await withTimeout(kv.get(key), DEFAULT_TIMEOUT_MS, 'KV get');
+    } catch (error) {
+      logger.warn('[summaryCache] KV get failed', {
+        conversationId,
+        messageId,
+        error: error?.message,
+      });
+      return null;
+    }
+    if (!entry?.value) {
+      return null;
+    }
+    try {
+      const buf = Buffer.isBuffer(entry.value)
+        ? entry.value
+        : Buffer.from(entry.value);
+      const decoded = (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b)
+        ? zlib.gunzipSync(buf)
+        : buf;
+      const payload = JSON.parse(decoded.toString('utf8'));
       if (!payload?.summaryText) {
         return null;
       }
@@ -87,7 +102,14 @@ class SummaryCacheStore {
         originalLength: payload.originalLength,
       };
     } catch (error) {
-      logger.warn(`[summaryCache] KV get failed: ${error.message}`);
+      logger.warn('[summaryCache] KV entry invalid, deleting', {
+        conversationId,
+        messageId,
+        error: error?.message,
+      });
+      try {
+        await kv.delete(key);
+      } catch {}
       return null;
     }
   }
