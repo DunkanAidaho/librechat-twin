@@ -1,5 +1,6 @@
 // /opt/open-webui/client.js - Финальная версия с исправленной логикой индексации и RAG через tools-gateway
 require('events').EventEmitter.defaultMaxListeners = 100;
+const { createHash } = require('crypto');
 const { getLogger } = require('~/utils/logger');
 const { buildContext } = require('~/utils/logContext');
 const configService = require('~/server/services/Config/ConfigService');
@@ -53,6 +54,8 @@ const {
   setDeferredContext,
   getDeferredContext,
   clearDeferredContext,
+  replaceRagBlock,
+  POLICY_INTRO,
 } = require('~/server/services/RAG/RagContextManager');
 const { HistoryTrimmer } = require('~/server/services/agents/historyTrimmer');
 const { queueGateway } = require('~/server/services/agents/queue');
@@ -78,6 +81,103 @@ const {
   makeIngestKey,
 } = require('~/server/utils/messageUtils');
 const TokenCounter = require('~/server/services/tokens/TokenCounter');
+
+const AUGMENTED_CONTEXT_HEADER = '[ATTACHMENTS_CONTEXT]';
+const AUGMENTED_CONTEXT_FOOTER = '[/ATTACHMENTS_CONTEXT]';
+const OCR_CONTEXT_HEADER = '[OCR_CONTEXT]';
+const OCR_CONTEXT_FOOTER = '[/OCR_CONTEXT]';
+const RAG_SECTIONS_HEADER = '[RAG_SECTIONS]';
+const RAG_SECTIONS_FOOTER = '[/RAG_SECTIONS]';
+const RAG_BLOCK_FOOTER = '---\n\n';
+
+const replaceAugmentedBlock = (systemContent = '', augmentedBlock = '') => {
+  const safeBlock = typeof augmentedBlock === 'string' ? augmentedBlock : '';
+  if (!safeBlock.trim()) {
+    return systemContent || '';
+  }
+  const wrapped = `${AUGMENTED_CONTEXT_HEADER}\n${safeBlock}\n${AUGMENTED_CONTEXT_FOOTER}\n`;
+  if (typeof systemContent !== 'string' || !systemContent.trim()) {
+    return wrapped + (systemContent || '');
+  }
+  const start = systemContent.indexOf(AUGMENTED_CONTEXT_HEADER);
+  const end = systemContent.indexOf(AUGMENTED_CONTEXT_FOOTER);
+  if (start !== -1 && end !== -1 && end > start) {
+    const before = systemContent.slice(0, start);
+    const after = systemContent.slice(end + AUGMENTED_CONTEXT_FOOTER.length);
+    return `${before}${wrapped}${after}`;
+  }
+  return `${wrapped}${systemContent}`;
+};
+
+const replaceOcrBlock = (systemContent = '', ocrBlock = '') => {
+  const safeBlock = typeof ocrBlock === 'string' ? ocrBlock : '';
+  if (!safeBlock.trim()) {
+    return systemContent || '';
+  }
+  const wrapped = `${OCR_CONTEXT_HEADER}\n${safeBlock}\n${OCR_CONTEXT_FOOTER}\n`;
+  if (typeof systemContent !== 'string' || !systemContent.trim()) {
+    return wrapped + (systemContent || '');
+  }
+  const start = systemContent.indexOf(OCR_CONTEXT_HEADER);
+  const end = systemContent.indexOf(OCR_CONTEXT_FOOTER);
+  if (start !== -1 && end !== -1 && end > start) {
+    const before = systemContent.slice(0, start);
+    const after = systemContent.slice(end + OCR_CONTEXT_FOOTER.length);
+    return `${before}${wrapped}${after}`;
+  }
+  return `${wrapped}${systemContent}`;
+};
+
+const replaceRagSectionsBlock = (systemContent = '', ragSectionsBlock = '') => {
+  const safeBlock = typeof ragSectionsBlock === 'string' ? ragSectionsBlock : '';
+  const safeSystem = typeof systemContent === 'string' ? systemContent : (systemContent ?? '');
+  const trimmedBlock = safeBlock.trim();
+  const start = safeSystem.indexOf(RAG_SECTIONS_HEADER);
+  const end = safeSystem.indexOf(RAG_SECTIONS_FOOTER);
+  const hasExistingBlock = start !== -1 && end !== -1 && end > start;
+
+  if (!trimmedBlock.length) {
+    if (!hasExistingBlock) {
+      return safeSystem || '';
+    }
+    const before = safeSystem.slice(0, start);
+    const after = safeSystem.slice(end + RAG_SECTIONS_FOOTER.length);
+    return `${before}${after}`;
+  }
+
+  const wrapped = `${RAG_SECTIONS_HEADER}\n${safeBlock}\n${RAG_SECTIONS_FOOTER}\n`;
+
+  if (!safeSystem.trim()) {
+    return wrapped;
+  }
+
+  if (hasExistingBlock) {
+    const before = safeSystem.slice(0, start);
+    const after = safeSystem.slice(end + RAG_SECTIONS_FOOTER.length);
+    return `${before}${wrapped}${after}`;
+  }
+
+  return `${wrapped}${safeSystem}`;
+};
+
+const extractRagBlock = (content = '') => {
+  if (typeof content !== 'string' || !content.trim()) {
+    return '';
+  }
+  const introSnippet = typeof POLICY_INTRO === 'string' ? POLICY_INTRO.slice(0, 16).trim() : '';
+  if (!introSnippet) {
+    return '';
+  }
+  const introIndex = content.indexOf(introSnippet);
+  if (introIndex === -1) {
+    return '';
+  }
+  const footerIndex = content.indexOf(RAG_BLOCK_FOOTER, introIndex);
+  if (footerIndex === -1) {
+    return '';
+  }
+  return content.slice(introIndex, footerIndex + RAG_BLOCK_FOOTER.length);
+};
 
 /** @type {Map<string, { expiresAt: number, payload: object }>} */
 
@@ -414,6 +514,71 @@ class AgentClient extends BaseClient {
   ) {
     const runtimeCfg = runtimeMemoryConfig.getMemoryConfig();
     let pendingIngest = null;
+
+    if (opts?.isRegenerate && parentMessageId && this.options?.req) {
+      try {
+        const { deleteMessagesSince } = require('~/models/Message');
+        const result = await deleteMessagesSince(this.options.req, {
+          messageId: parentMessageId,
+          conversationId: this.conversationId,
+        });
+        const removedCount = typeof result === 'number'
+          ? result
+          : Number(result?.deletedCount ?? result?.n ?? result?.acknowledged ? result?.deletedCount : 0) || 0;
+        if (removedCount > 0) {
+          logger.info('[AgentClient][regen.deleteMessagesSince]', {
+            conversationId: this.conversationId,
+            parentMessageId,
+            removedCount,
+          });
+        }
+      } catch (deleteError) {
+        logger.error('[AgentClient][regen.deleteMessagesSince.error]', {
+          conversationId: this.conversationId,
+          parentMessageId,
+          message: deleteError?.message,
+          stack: deleteError?.stack,
+        });
+      }
+      try {
+        if (this.options.req.agentConfigs?.delete(this.agent_id)) {
+          logger.debug('[AgentClient][regen.agentConfigs.cleared]', {
+            conversationId: this.conversationId,
+            agentId: this.agent_id,
+          });
+        }
+      } catch (agentCfgError) {
+        logger.warn('[AgentClient][regen.agentConfigs.error]', {
+          conversationId: this.conversationId,
+          agentId: this.agent_id,
+          message: agentCfgError?.message,
+        });
+      }
+
+      const pruneMessagesAfterParent = () => {
+        if (!Array.isArray(messages) || !messages.length) {
+          return messages;
+        }
+        const parentIdx = messages.findIndex((msg) => msg?.messageId === parentMessageId);
+        if (parentIdx === -1) {
+          return messages;
+        }
+        const allowed = parentIdx + 1;
+        const pruned = messages.slice(0, allowed);
+        const removed = messages.length - pruned.length;
+        if (removed > 0) {
+          logger.info('[AgentClient][regen.local_prune]', {
+            conversationId: this.conversationId,
+            parentMessageId,
+            removed,
+          });
+        }
+        return pruned;
+      };
+
+      messages = pruneMessagesAfterParent();
+    }
+
     let orderedMessages = this.constructor.getMessagesForConversation({
       messages,
       parentMessageId,
@@ -533,6 +698,37 @@ class AgentClient extends BaseClient {
       .join('\n')
       .trim();
 
+    const blockRegistry = {
+      rag: null,
+      augmented: null,
+      ocr: null,
+      ragSections: null,
+    };
+
+    const blockMarkers = {
+      augmented: { header: AUGMENTED_CONTEXT_HEADER, footer: AUGMENTED_CONTEXT_FOOTER },
+      ocr: { header: OCR_CONTEXT_HEADER, footer: OCR_CONTEXT_FOOTER },
+      ragSections: { header: RAG_SECTIONS_HEADER, footer: RAG_SECTIONS_FOOTER },
+    };
+
+    const registerBlock = (type, payload = '') => {
+      const text = typeof payload === 'string' ? payload.trim() : '';
+      const hash = text.length ? createHash('sha256').update(text).digest('hex') : null;
+      blockRegistry[type] = hash;
+      return hash;
+    };
+
+    const syncBlockRegistryWithContent = (content = '') => {
+      const safeContent = typeof content === 'string' ? content : '';
+      Object.entries(blockMarkers).forEach(([type, markers]) => {
+        const hasHeader = safeContent.includes(markers.header);
+        const hasFooter = safeContent.includes(markers.footer);
+        if (!hasHeader || !hasFooter) {
+          blockRegistry[type] = null;
+        }
+      });
+    };
+
     if (orderedMessages.length === 0 && systemContent.length === 0) {
         systemContent = DEFAULT_SYSTEM_PROMPT;
         logger.debug('[AgentClient] Applied default system prompt for new chat');
@@ -567,7 +763,7 @@ class AgentClient extends BaseClient {
     let historyTokenBudget = 0;
     const headroom = Number(historyCompressionCfg?.contextHeadroom) || 0;
     const ragTokens = Number(this.options?.req?.ragContextTokens) || 0;
-    const instructionsTokensEstimate = tokenize(systemContent);
+    let instructionsTokensEstimate = tokenize(systemContent);
     const maxContextTokens = budget?.safeBudget ||
       this.maxContextTokens ||
       Number(runtimeCfg?.tokenLimits?.maxPromptTokens) ||
@@ -575,15 +771,54 @@ class AgentClient extends BaseClient {
       Number(historyCfg?.tokenBudget) ||
       0;
 
-    if (historyCompressionCfg?.enabled) {
-    const historyBudgetRaw = Math.max(
-      (budget?.budgets?.history ?? maxContextTokens) - Math.max(ragTokens, 0),
-      0,
-    );
-      const safetyFactor = Number(runtimeCfg?.history?.safetyFactor ?? 0.65);
-      historyTokenBudget = Math.floor(historyBudgetRaw * safetyFactor);
+    const measureInstructionsTokens = (label = 'initial', referenceContent = systemContent) => {
+      const reference = typeof referenceContent === 'string' ? referenceContent : (referenceContent ?? '');
+      instructionsTokensEstimate = tokenize(reference);
+      try {
+        logger.info('[context.instructions.tokens]', {
+          conversationId: this.conversationId,
+          label,
+          instructionsTokens: instructionsTokensEstimate,
+          ragTokens,
+        });
+      } catch {}
+      if (this.options?.req) {
+        this.options.req.instructionsTokens = instructionsTokensEstimate;
+      }
+      return instructionsTokensEstimate;
+    };
 
-      const availableBudget = historyTokenBudget - headroom;
+    const rebalanceHistoryBudget = (label = 'initial', referenceContent = systemContent) => {
+      const safeBudget = Number(budget?.safeBudget) || maxContextTokens;
+      const historyCeiling = Number.isFinite(budget?.budgets?.history)
+        ? Math.min(Number(budget?.budgets?.history), safeBudget)
+        : safeBudget;
+      const instructionsTokens = measureInstructionsTokens(label, referenceContent);
+      const ragAllowance = Math.max(ragTokens, 0);
+      const baseHistoryBudget = Math.max(historyCeiling - instructionsTokens - ragAllowance, 0);
+      const rawSafetyFactor = Number(runtimeCfg?.history?.safetyFactor ?? 0.65);
+      const safetyFactor = Number.isFinite(rawSafetyFactor)
+        ? Math.min(Math.max(rawSafetyFactor, 0), 1)
+        : 0.65;
+      historyTokenBudget = Math.floor(baseHistoryBudget * safetyFactor);
+      logger.info('[context.budget.rebalance]', {
+        conversationId: this.conversationId,
+        label,
+        safeBudget,
+        historyCeiling,
+        ragAllowance,
+        instructionsTokens,
+        historyTokenBudget,
+        safetyFactor,
+        headroom,
+      });
+      return historyTokenBudget;
+    };
+
+    rebalanceHistoryBudget('pre_history_manager');
+
+    if (historyCompressionCfg?.enabled) {
+      const availableBudget = Math.max(historyTokenBudget - headroom, 0);
 
       if (availableBudget > 0) {
         historyTrimmer = new HistoryTrimmer({
@@ -775,6 +1010,7 @@ class AgentClient extends BaseClient {
         : { globalContext: systemContent, entities: [], passesUsed: 0, queueStatus: {} };
 
       systemContent = multiStepResult.globalContext || systemContent;
+      rebalanceHistoryBudget('post_multistep_global', systemContent);
       const deferred = getDeferredContext(req);
       if (deferred && deferred.vectorText?.length) {
         await this.applyDeferredCondensation({
@@ -786,6 +1022,7 @@ class AgentClient extends BaseClient {
           systemContentRef: () => systemContent,
           updateSystemContent: (next) => {
             systemContent = next;
+            rebalanceHistoryBudget('post_deferred_apply_rag', systemContent);
           },
           deferredContext: deferred,
         });
@@ -891,7 +1128,22 @@ class AgentClient extends BaseClient {
       }
 
       if (ragResult && typeof ragResult === 'object') {
-        systemContent = ragResult.patchedSystemContent ?? systemContent;
+        const patchedSystemContent = ragResult.patchedSystemContent ?? systemContent;
+        if (typeof patchedSystemContent === 'string') {
+          const ragBlockText = extractRagBlock(patchedSystemContent) || patchedSystemContent;
+          const ragHash = createHash('sha256').update(ragBlockText).digest('hex');
+          if (ragHash !== blockRegistry.rag) {
+            systemContent = patchedSystemContent;
+            syncBlockRegistryWithContent(systemContent);
+            blockRegistry.rag = ragHash;
+            rebalanceHistoryBudget('post_rag_patch', systemContent);
+          } else {
+            logger.debug('[AgentClient][rag.skip_duplicate]', {
+              conversationId: this.conversationId,
+              ragHash,
+            });
+          }
+        }
         const contextLengthCandidate = Number(ragResult.contextLength);
         ragContextLength = Number.isFinite(contextLengthCandidate) ? contextLengthCandidate : 0;
         ragCacheStatus = ragResult.cacheStatus ?? ragCacheStatus;
@@ -952,6 +1204,8 @@ class AgentClient extends BaseClient {
           systemContentRef: () => systemContent,
           updateSystemContent: (next) => {
             systemContent = next;
+            syncBlockRegistryWithContent(systemContent);
+            rebalanceHistoryBudget('post_deferred_apply_condense', systemContent);
           },
           deferredContext: deferred,
         });
@@ -1013,7 +1267,31 @@ class AgentClient extends BaseClient {
             : formattedMessage.content.unshift({ type: 'text', text: message.ocr });
         }
       } else if (message.ocr && i === orderedMessages.length - 1) {
-        systemContent = [systemContent, message.ocr].join('\n');
+        const maxOcrChars = Number(runtimeCfg?.limits?.promptPerMsgMax) > 0
+          ? Number(runtimeCfg?.limits?.promptPerMsgMax)
+          : 120000;
+        let sanitizedOcr = message.ocr.trim();
+        if (sanitizedOcr.length > maxOcrChars) {
+          sanitizedOcr = sanitizedOcr.slice(0, maxOcrChars);
+          logger.warn('[AgentClient][ocr.truncated]', {
+            conversationId: this.conversationId,
+            originalLength: message.ocr.length,
+            truncatedLength: sanitizedOcr.length,
+            maxOcrChars,
+          });
+        }
+        const ocrHash = createHash('sha256').update(sanitizedOcr).digest('hex');
+        if (ocrHash !== blockRegistry.ocr) {
+          systemContent = replaceOcrBlock(systemContent, sanitizedOcr);
+          syncBlockRegistryWithContent(systemContent);
+          blockRegistry.ocr = ocrHash;
+          rebalanceHistoryBudget('post_ocr_block', systemContent);
+        } else {
+          logger.info('[AgentClient][ocr.skip_duplicate]', {
+            conversationId: this.conversationId,
+            length: sanitizedOcr.length,
+          });
+        }
       }
 
       const needsTokenCount =
@@ -1064,7 +1342,44 @@ class AgentClient extends BaseClient {
 
     if (this.contextHandlers) {
       this.augmentedPrompt = await this.contextHandlers.createContext();
-      systemContent = this.augmentedPrompt + systemContent;
+      const augmentedRegistry = this.options?.req?.augmentedPromptRegistry || new Map();
+      if (this.options?.req && !this.options.req.augmentedPromptRegistry) {
+        this.options.req.augmentedPromptRegistry = augmentedRegistry;
+      }
+      if (typeof this.augmentedPrompt === 'string' && this.augmentedPrompt.trim()) {
+        const maxAugmentedChars = Number(runtimeCfg?.limits?.promptPerMsgMax) > 0
+          ? Number(runtimeCfg?.limits?.promptPerMsgMax)
+          : 120000;
+        let trimmedAugmented = this.augmentedPrompt.trim();
+        if (trimmedAugmented.length > maxAugmentedChars) {
+          trimmedAugmented = trimmedAugmented.slice(0, maxAugmentedChars);
+          logger.warn('[AgentClient][augmentedPrompt.truncated]', {
+            conversationId: this.conversationId,
+            originalLength: this.augmentedPrompt.length,
+            truncatedLength: trimmedAugmented.length,
+            maxAugmentedChars,
+          });
+        }
+        const augmentedHash = createHash('sha256').update(trimmedAugmented).digest('hex');
+        const registryHash = augmentedRegistry.get(this.conversationId);
+        if (augmentedHash !== blockRegistry.augmented || augmentedHash !== registryHash) {
+          systemContent = replaceAugmentedBlock(systemContent, trimmedAugmented);
+          syncBlockRegistryWithContent(systemContent);
+          blockRegistry.augmented = augmentedHash;
+          augmentedRegistry.set(this.conversationId, augmentedHash);
+          rebalanceHistoryBudget('post_augmented_block', systemContent);
+          logger.info('[AgentClient][augmentedPrompt.applied]', {
+            conversationId: this.conversationId,
+            length: trimmedAugmented.length,
+          });
+        } else {
+          logger.info('[AgentClient][augmentedPrompt.skip_duplicate]', {
+            conversationId: this.conversationId,
+            length: trimmedAugmented.length,
+          });
+        }
+      }
+      this.contextHandlers = null;
     }
 
     const ragSections = this.options?.req?.ragMultiStep?.ragContext
@@ -1074,15 +1389,48 @@ class AgentClient extends BaseClient {
         })
       : '';
 
-    const combinedSystemContent = [ragSections, systemContent]
-      .filter((section) => typeof section === 'string' && section.trim().length)
-      .join('\n\n');
+    let combinedSystemContent = systemContent;
+
+    if (typeof ragSections === 'string' && ragSections.trim()) {
+      const ragSectionsHash = createHash('sha256').update(ragSections).digest('hex');
+      if (ragSectionsHash !== blockRegistry.ragSections) {
+        logger.info('[AgentClient][ragSections.applied]', {
+          conversationId: this.conversationId,
+          ragSectionsLength: ragSections.length,
+        });
+      } else {
+        logger.debug('[AgentClient][ragSections.skip_duplicate]', {
+          conversationId: this.conversationId,
+          ragSectionsHash,
+        });
+      }
+
+      combinedSystemContent = replaceRagSectionsBlock(systemContent, ragSections);
+      syncBlockRegistryWithContent(combinedSystemContent);
+      blockRegistry.ragSections = ragSectionsHash;
+      rebalanceHistoryBudget('post_rag_sections', combinedSystemContent);
+    } else {
+      const withoutRagSections = replaceRagSectionsBlock(systemContent, '');
+      if (withoutRagSections !== systemContent) {
+        combinedSystemContent = withoutRagSections;
+        syncBlockRegistryWithContent(combinedSystemContent);
+        rebalanceHistoryBudget('post_rag_sections_cleanup', combinedSystemContent);
+      } else {
+        combinedSystemContent = systemContent;
+      }
+      blockRegistry.ragSections = null;
+    }
+
+    const combinedSystemHash = createHash('sha256')
+      .update(combinedSystemContent || '')
+      .digest('hex');
 
     logger.info('[DIAG-PROMPT] combinedSystemContent.parts', {
       conversationId: this.conversationId,
       ragSectionsLength: ragSections?.length ?? 0,
       systemContentLength: systemContent?.length ?? 0,
       combinedLength: combinedSystemContent.length,
+      combinedHash: combinedSystemHash,
     });
 
     instructions = normalizeInstructionsPayload(
@@ -1373,6 +1721,8 @@ class AgentClient extends BaseClient {
           .join('\n')
           .trim();
 
+        const systemContentHash = createHash('sha256').update(systemContent).digest('hex');
+
         logger.info('[AgentClient][systemContent.parts]', {
           conversationId: this.conversationId,
           agentId: agent.id,
@@ -1380,6 +1730,7 @@ class AgentClient extends BaseClient {
           instructionsLength: rawInstructions.length,
           additionalLength: rawAdditional.length,
           totalLength: systemContent.length,
+          systemContentHash,
         });
 
         if (!systemContent || systemContent.length === 0) {
