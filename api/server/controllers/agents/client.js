@@ -56,6 +56,7 @@ const {
   clearDeferredContext,
   replaceRagBlock,
   POLICY_INTRO,
+  buildRagBlock,
 } = require('~/server/services/RAG/RagContextManager');
 const { HistoryTrimmer } = require('~/server/services/agents/historyTrimmer');
 const { queueGateway } = require('~/server/services/agents/queue');

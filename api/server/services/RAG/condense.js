@@ -173,9 +173,10 @@ function mapPrompt(userQuery, graphExtra, chunkLength) {
   const basePrompt = `Ты сжимаешь текст. Сохраняй только факты из входа.
 Правила:
 1. ${lengthRule}
-2. Никаких новых сведений или рассуждений вне входного текста.
-3. Без заголовков, пояснений и мета-комментариев — только результат.
-4. Если вход уже краткий или структурированный, верни его как есть.
+2. ЖЁСТКО соблюдай лимит длины: не больше указанного числа символов.
+3. Никаких новых сведений или рассуждений вне входного текста.
+4. Без заголовков, пояснений, нумерации и мета-комментариев — только результат.
+5. Если вход уже краткий или структурированный, верни его как есть.
 Запрос пользователя: ${userQuery || '(нет)'}
 Всегда отвечай на языке исходного текста.`;
   const extras = [];
@@ -192,9 +193,13 @@ function mapPrompt(userQuery, graphExtra, chunkLength) {
 }
 
 function reducePrompt(userQuery, budget, graphExtra) {
-  const basePrompt = `Объедини частичные выжимки в единую до ~${budget} символов.
-Тот же формат как выше. Запрос: ${userQuery || '(нет)'}
-Не выдумывай, только из входных выжимок.`;
+  const basePrompt = `Объедини частичные выжимки в единую.
+Правила:
+1. ЖЁСТКО не превышай ${budget} символов (это абсолютный лимит).
+2. Без заголовков, пояснений, нумерации и мета-комментариев — только результат.
+3. Никаких новых сведений или рассуждений вне входных выжимок.
+Запрос: ${userQuery || '(нет)'}
+Всегда отвечай на языке исходного текста.`;
   const extras = [];
 
   if (graphExtra && graphExtra.hint) {
@@ -714,6 +719,17 @@ async function condenseContext({
           }
 
           const prompt = `${mapPrompt(userQuery, graphExtra, chunkLength)}\n\n=== Текст чанка ===\n${chunk}`;
+          if (DEBUG_CONDENSE) {
+            logger.info(
+              'rag.condense.map_prompt',
+              buildContext(chunkContext, {
+                systemPrompt: SUMMARY_SYSTEM_PROMPT,
+                userPrompt: prompt,
+                chunkLength,
+                budgetChars,
+              }),
+            );
+          }
           const cacheKey = cacheKeyChunk(
             chainSignature,
             budgetChars,
@@ -931,6 +947,17 @@ async function condenseContext({
     }
 
     const reducePromptText = `${reducePrompt(userQuery, budgetChars, graphExtra)}\n\n=== Частичные выжимки ===\n${joined}`;
+    if (DEBUG_CONDENSE) {
+      logger.info(
+        'rag.condense.reduce_prompt',
+        buildContext(requestContext, {
+          systemPrompt: SUMMARY_SYSTEM_PROMPT,
+          userPrompt: reducePromptText,
+          joinedLength: joined.length,
+          budgetChars,
+        }),
+      );
+    }
     let { text: finalSummary, providerLabel: reduceProviderLabel } = await summarizeWithChain({
       chain: providerChain,
       prompt: reducePromptText,
@@ -967,7 +994,21 @@ async function condenseContext({
 
     let guard = 0;
     while (summaryText && summaryText.length > budgetChars && guard < 2) {
-      const guardPrompt = `Сожми ещё до ~${budgetChars} символов, сохранив ключевые факты и числа.\n\n=== Текст ===\n${summaryText}`;
+      const guardPrompt = `Сожми ещё и ЖЁСТКО не превышай ${budgetChars} символов.
+Без заголовков, пояснений, нумерации и мета-комментариев — только результат.
+Сохрани ключевые факты и числа.\n\n=== Текст ===\n${summaryText}`;
+      if (DEBUG_CONDENSE) {
+        logger.info(
+          'rag.condense.guard_prompt',
+          buildContext(requestContext, {
+            systemPrompt: SUMMARY_SYSTEM_PROMPT,
+            userPrompt: guardPrompt,
+            inputLength: summaryText.length,
+            budgetChars,
+            attempt: guard + 1,
+          }),
+        );
+      }
       logger.warn(
         'rag.condense.reduce_guard_start',
         buildContext(requestContext, {
