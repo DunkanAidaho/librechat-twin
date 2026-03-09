@@ -246,11 +246,13 @@ class MessageHistoryManager {
           normalizedText.length >= 20 &&
           userId
         ) {
+          const originalLength = normalizedText.length;
           let summaryText = null;
+          let appliedSummary = null;
           if (typeof condenseContext === 'function') {
             const summaryLogContext = this.getLogContext(conversationId, userId, {
               messageId: m?.messageId,
-              textLength: len,
+              textLength: originalLength,
             });
             try {
               const isTechnical = /```|\b(error|stack|trace|exception|warn|log)\b/i.test(normalizedText);
@@ -281,10 +283,37 @@ class MessageHistoryManager {
                   );
                 }
                 summaryText = summaryText?.text || summaryText;
+                const resolvedSummary = summaryText?.text || summaryText;
+                summaryText = resolvedSummary;
                 this.logger.info(
                   'rag.history.summary_done',
                   Object.assign({}, summaryLogContext, {
-                    summaryLength: summaryText?.length || 0,
+                    originalLength,
+                    summaryLength: resolvedSummary?.length || 0,
+                  }),
+                );
+              }
+
+              const trimmedSummary = typeof summaryText === 'string' ? summaryText.trim() : '';
+              if (trimmedSummary) {
+                appliedSummary = trimmedSummary;
+                m.text = trimmedSummary;
+                m.content = [{ type: 'text', text: trimmedSummary }];
+                m.isMemoryStored = true;
+                const ratio = originalLength > 0 ? Number((trimmedSummary.length / originalLength).toFixed(3)) : 0;
+                this.logger.debug(
+                  'rag.history.summary_applied',
+                  Object.assign({}, summaryLogContext, {
+                    originalLength,
+                    summaryLength: trimmedSummary.length,
+                    ratio,
+                  }),
+                );
+              } else {
+                this.logger.warn(
+                  'rag.history.summary_empty',
+                  Object.assign({}, summaryLogContext, {
+                    originalLength,
                   }),
                 );
               }
@@ -326,10 +355,11 @@ class MessageHistoryManager {
             }
             const stableId =
               m.messageId || `hist-${idx}-${this.hashPayload(normalizedText).slice(0, 12)}`;
+            const contentPayload = appliedSummary || normalizedText;
             const taskPayload = {
               message_id: stableId,
-              content: normalizedText,
-              summary: summaryText || undefined,
+              content: contentPayload,
+              summary: appliedSummary ? undefined : summaryText || undefined,
               content_dates: extractContentDates(normalizedText),
               conversation_id: conversationId,
               message_index: idx,
@@ -338,11 +368,6 @@ class MessageHistoryManager {
               role: m?.isCreatedByUser ? 'user' : 'assistant',
               user_id: userId,
             };
-            if (summaryText && summaryText.length > 0) {
-              m.text = summaryText;
-              m.content = [{ type: 'text', text: summaryText }];
-              m.isMemoryStored = true;
-            }
             this.ingestedHistory.add(dedupeKey);
             toIngest.push(taskPayload);
             this.logger.info(
