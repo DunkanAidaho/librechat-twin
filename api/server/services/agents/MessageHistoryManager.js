@@ -227,6 +227,10 @@ class MessageHistoryManager {
         const shouldShrinkAssistant =
           !m?.isCreatedByUser && (len > assistLongToRag || looksHTML || hasThink);
 
+        if (!(shouldShrinkUser || shouldShrinkAssistant) || !normalizedText || normalizedText.length < 20) {
+          skippedByShort += 1;
+        }
+
         if (
           (shouldShrinkUser || shouldShrinkAssistant) &&
           conversationId &&
@@ -448,9 +452,6 @@ class MessageHistoryManager {
             err: { message: error?.message, stack: error?.stack },
           }),
         );
-      }
-      if (!(shouldShrinkUser || shouldShrinkAssistant) || !normalizedText || normalizedText.length < 20) {
-        skippedByShort += 1;
       }
     }
 
