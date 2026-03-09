@@ -19,6 +19,20 @@ const STOPWORDS = new Set([
 ]);
 const RELATION_HINT_REGEX = /(между|связ(ь|и)|отношени[яе]|контакт[ы]?)/i;
 const ACK_REGEX = /^(ok|okay|ack|принято|ага|понял|да|✅|👌)/i;
+const MONTHS_RU = new Map([
+  ['январ', 0],
+  ['феврал', 1],
+  ['март', 2],
+  ['апрел', 3],
+  ['май', 4],
+  ['июн', 5],
+  ['июл', 6],
+  ['август', 7],
+  ['сентябр', 8],
+  ['октябр', 9],
+  ['ноябр', 10],
+  ['декабр', 11],
+]);
 function normalizeText({ message, context }) {
   const toText = (entry) => {
     if (!entry) return '';
@@ -93,6 +107,71 @@ function extractEntities(text = '') {
   }));
 }
 
+function parseDateLike(raw = '') {
+  if (!raw) return null;
+  const normalized = raw.trim().toLowerCase();
+  const numeric = normalized.match(/^(\d{1,2})[.\-/](\d{1,2})(?:[.\-/](\d{2,4}))?$/);
+  if (numeric) {
+    const day = Number(numeric[1]);
+    const month = Number(numeric[2]) - 1;
+    let year = numeric[3] ? Number(numeric[3]) : null;
+    if (year && year < 100) {
+      year += 2000;
+    }
+    if (!year) {
+      year = new Date().getFullYear();
+    }
+    const date = new Date(year, month, day);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const wordy = normalized.match(/^(\d{1,2})\s+([a-zа-яё]+)(?:\s+(\d{4}))?$/i);
+  if (wordy) {
+    const day = Number(wordy[1]);
+    const monthRaw = wordy[2].toLowerCase();
+    const month = [...MONTHS_RU.entries()]
+      .find(([prefix]) => monthRaw.startsWith(prefix))?.[1];
+    if (month == null) return null;
+    const year = wordy[3] ? Number(wordy[3]) : new Date().getFullYear();
+    const date = new Date(year, month, day);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  return null;
+}
+
+function extractTemporalRange(text = '') {
+  if (!text || typeof text !== 'string') {
+    return null;
+  }
+  const patterns = [
+    /с\s+(\d{1,2}[.\-/]\d{1,2}(?:[.\-/]\d{2,4})?)\s+по\s+(\d{1,2}[.\-/]\d{1,2}(?:[.\-/]\d{2,4})?)/i,
+    /за\s+(?:период|интервал)\s+(\d{1,2}[.\-/]\d{1,2}(?:[.\-/]\d{2,4})?)\s*[-–—]\s*(\d{1,2}[.\-/]\d{1,2}(?:[.\-/]\d{2,4})?)/i,
+    /(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4})\s*[-–—]\s*(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4})/,
+    /с\s+(\d{1,2}\s+[a-zа-яё]+(?:\s+\d{4})?)\s+по\s+(\d{1,2}\s+[a-zа-яё]+(?:\s+\d{4})?)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const fromRaw = match[1];
+      const toRaw = match[2];
+      const from = parseDateLike(fromRaw);
+      const to = parseDateLike(toRaw);
+      if (from && to) {
+        return {
+          from: fromRaw,
+          to: toRaw,
+          fromDate: from,
+          toDate: to,
+        };
+      }
+      return { from: fromRaw, to: toRaw };
+    }
+  }
+  return null;
+}
+
 function extractEntitiesFromText(text = '', maxEntities = 3) {
   return extractEntities(text)
     .filter((entity) => entity?.name)
@@ -122,7 +201,20 @@ async function runAnalysis({ message, context, signal }) {
 
   const { messageText: text, contextText } = normalizeText({ message, context });
 
-  const entities = extractEntities(text).map((entity) => ({
+  const temporalRange = extractTemporalRange(text);
+  const temporalEntities = temporalRange
+    ? [
+        {
+          name: `новости ${temporalRange.from}-${temporalRange.to}`,
+          confidence: 0.85,
+          type: 'temporal_range',
+          hints: ['timeline', 'date_filter'],
+          meta: { from: temporalRange.from, to: temporalRange.to },
+        },
+      ]
+    : [];
+
+  const entities = [...temporalEntities, ...extractEntities(text)].map((entity) => ({
     ...entity,
     hints: buildHints(text, contextText),
   }));
@@ -131,6 +223,7 @@ async function runAnalysis({ message, context, signal }) {
 
   return {
     entities,
+    temporalRange,
     needsFollowUps,
   };
 }
@@ -171,6 +264,9 @@ async function analyzeIntent({
           type: entity.type,
           hints: entity.hints,
         })),
+        temporalRange: result.temporalRange
+          ? { from: result.temporalRange.from, to: result.temporalRange.to }
+          : null,
         needsFollowUps: result.needsFollowUps,
       }),
     );

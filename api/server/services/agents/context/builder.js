@@ -127,6 +127,10 @@ async function buildContext({
         .filter(Boolean)
         .slice(0, runtimeCfg?.multiStepRag?.maxEntities || 3)
     : [];
+  const temporalRange = req?.intentAnalysis?.temporalRange;
+  const temporalHint = temporalRange?.from && temporalRange?.to
+    ? `период ${temporalRange.from}-${temporalRange.to}`
+    : '';
   const intentHints = Array.isArray(req?.intentAnalysis?.entities)
     ? req.intentAnalysis.entities
         .flatMap((entity) => (Array.isArray(entity?.hints) ? entity.hints : []))
@@ -264,13 +268,15 @@ async function buildContext({
 
   metrics.graphLines = graphContextLines.length;
   let ragSearchQuery = normalizedQuery;
-  if (intentEntities.length) {
+  if (intentEntities.length || temporalHint) {
     const hints = intentHints.length ? ` (hints: ${[...new Set(intentHints)].join(', ')})` : '';
-    ragSearchQuery = `${normalizedQuery}\n\nEntities: ${intentEntities.join(', ')}${hints}`;
+    const temporalLine = temporalHint ? `\nTemporal: ${temporalHint}` : '';
+    ragSearchQuery = `${normalizedQuery}\n\nEntities: ${intentEntities.join(', ')}${hints}${temporalLine}`;
     logger?.debug?.('[rag.context.intent.entities]', {
       conversationId,
       entities: intentEntities,
       hints: [...new Set(intentHints)],
+      temporalRange: temporalRange ? { from: temporalRange.from, to: temporalRange.to } : null,
     });
   }
   if (graphQueryHint) {

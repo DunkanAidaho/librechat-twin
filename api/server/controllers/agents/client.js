@@ -650,7 +650,7 @@ class AgentClient extends BaseClient {
       lastIds: orderedMessages.slice(-3).map(m => m && m.messageId).join(',')
     }); } catch {}
 
-    const computeImportanceScore = (message = {}) => {
+    const computeImportanceScore = (message = {}, intent = null) => {
       const text =
         typeof message.text === 'string'
           ? message.text
@@ -679,6 +679,25 @@ class AgentClient extends BaseClient {
         Number(message?.metadata?.likes ?? message?.metadata?.rating ?? 0) || 0;
       if (interactions > 0) {
         score += Math.min(0.2, interactions * 0.05);
+      }
+
+      if (intent?.temporalRange?.from && intent?.temporalRange?.to) {
+        const temporalText = `${intent.temporalRange.from}-${intent.temporalRange.to}`.toLowerCase();
+        if (lowered.includes(intent.temporalRange.from.toLowerCase()) ||
+            lowered.includes(intent.temporalRange.to.toLowerCase()) ||
+            lowered.includes(temporalText)) {
+          score += 0.6;
+        }
+      }
+
+      if (Array.isArray(intent?.entities) && intent.entities.length) {
+        const entityMatches = intent.entities
+          .map((entity) => String(entity?.name || '').toLowerCase())
+          .filter(Boolean)
+          .filter((name) => lowered.includes(name)).length;
+        if (entityMatches) {
+          score += Math.min(0.3, entityMatches * 0.1);
+        }
       }
 
       return Math.max(0, Math.min(1, score));
@@ -819,6 +838,18 @@ class AgentClient extends BaseClient {
 
     rebalanceHistoryBudget('pre_history_manager');
 
+    const intentAnalysis = runtimeCfg?.multiStepRag?.enabled
+      ? await analyzeIntent({
+          message: orderedMessages[orderedMessages.length - 1],
+          context: orderedMessages.slice(-8),
+          signal: this.options?.req?.abortController?.signal,
+          timeoutMs: runtimeCfg.multiStepRag?.intentTimeoutMs || 2000,
+        })
+      : { entities: [], needsFollowUps: false };
+    if (this.options?.req) {
+      this.options.req.intentAnalysis = intentAnalysis;
+    }
+
     if (historyCompressionCfg?.enabled) {
       const availableBudget = Math.max(historyTokenBudget - headroom, 0);
 
@@ -829,8 +860,9 @@ class AgentClient extends BaseClient {
           layer1Ratio: historyCompressionCfg.layer1Ratio,
           layer2Ratio: historyCompressionCfg.layer2Ratio,
           contextHeadroom: headroom,
-          importanceScorer: computeImportanceScore,
+          importanceScorer: (message) => computeImportanceScore(message, this.options?.req?.intentAnalysis),
           compressor: new MessageCompressorBridge({ reduction: historyCompressionCfg.layer2Ratio ?? 0.25 }),
+          loggerInstance: logger,
         });
         logger.info('[contextCompression.enabled]', {
           conversationId: this.conversationId,
@@ -910,18 +942,6 @@ class AgentClient extends BaseClient {
         message: error?.message,
         stack: error?.stack,
       });
-    }
-
-    const intentAnalysis = runtimeCfg?.multiStepRag?.enabled
-      ? await analyzeIntent({
-          message: orderedMessages[orderedMessages.length - 1],
-          context: orderedMessages.slice(-8),
-          signal: this.options?.req?.abortController?.signal,
-          timeoutMs: runtimeCfg.multiStepRag?.intentTimeoutMs || 2000,
-        })
-      : { entities: [], needsFollowUps: false };
-    if (this.options?.req) {
-      this.options.req.intentAnalysis = intentAnalysis;
     }
 
     let ragContextLength = 0;

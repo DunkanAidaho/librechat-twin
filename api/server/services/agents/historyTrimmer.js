@@ -40,6 +40,7 @@ class HistoryTrimmer {
     contextHeadroom = 1024,
     importanceScorer = null,
     compressor = null,
+    loggerInstance = null,
   } = {}) {
     this.tokenizerEncoding = tokenizerEncoding;
     this.keepLastN = keepLastN;
@@ -49,6 +50,7 @@ class HistoryTrimmer {
     this.contextHeadroom = contextHeadroom;
     this.importanceScorer = importanceScorer || ((msg) => msg?.importance ?? 0);
     this.compressor = compressor;
+    this.logger = loggerInstance || logger;
   }
 
   buildLayers(messages = []) {
@@ -86,16 +88,32 @@ class HistoryTrimmer {
       compressibleIndex += 1;
     });
 
-    const stableSortByImportance = (items) =>
-      items
-        .map((entry, idx) => ({ ...entry, stableOrder: idx, score: this.importanceScorer(entry.message) }))
+    const stableSortByImportance = (items) => {
+      const ranked = items
+        .map((entry, idx) => ({
+          ...entry,
+          stableOrder: idx,
+          score: this.importanceScorer(entry.message),
+        }))
         .sort((a, b) => {
           if (b.score === a.score) {
             return a.stableOrder - b.stableOrder;
           }
           return b.score - a.score;
-        })
-        .map(({ message, originalIndex }) => ({ message, originalIndex }));
+        });
+
+      if (this.logger?.debug && ranked.length) {
+        this.logger.debug('[historyTrimmer.score]', {
+          sample: ranked.slice(0, 5).map((entry) => ({
+            messageId: entry.message?.messageId,
+            score: entry.score,
+            originalIndex: entry.originalIndex,
+          })),
+        });
+      }
+
+      return ranked.map(({ message, originalIndex }) => ({ message, originalIndex }));
+    };
 
     return layers.map((layer) => stableSortByImportance(layer));
   }
