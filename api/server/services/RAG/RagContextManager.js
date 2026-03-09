@@ -11,7 +11,7 @@ const POLICY_INTRO =
 
 const GRAPH_TITLE = "### Graph context";
 const VECTOR_TITLE = "### Vector context";
-const BLOCK_FOOTER = "---\n\n";
+const BLOCK_FOOTER = "\n<!-- /RAG_CONTEXT_BLOCK -->\n";
 
 function coerceLines(lines) {
   if (!Array.isArray(lines)) {
@@ -36,11 +36,13 @@ function buildRagBlock({
   const trimmedVector = typeof vectorText === "string" ? vectorText.trim() : "";
   const vectorSection = trimmedVector ? `${VECTOR_TITLE}\n${trimmedVector}\n\n` : "";
 
-  let block = `${policyIntro}${graphSection}${vectorSection}${BLOCK_FOOTER}`;
-  if (Number.isFinite(maxChars) && maxChars > 0 && block.length > maxChars) {
-    block = `${block.slice(0, Math.max(0, maxChars - 1))}…`;
+  let content = `${policyIntro}${graphSection}${vectorSection}`;
+  if (Number.isFinite(maxChars) && maxChars > 0 && content.length > maxChars) {
+    content = `${content.slice(0, Math.max(0, maxChars - 1))}…`;
   }
-  return sanitizeInput(block);
+
+  const sanitizedContent = sanitizeInput(content);
+  return `${sanitizedContent}${BLOCK_FOOTER}`;
 }
 
 function replaceRagBlock(systemContent = "", newBlock = "", logger = null) {
