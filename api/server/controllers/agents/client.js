@@ -1484,6 +1484,21 @@ class AgentClient extends BaseClient {
       `[DIAG-PROMPT] Final instructions object created. Length: ${instructions.content.length}, Tokens: ${instructions.tokenCount}`,
     );
 
+    if (
+      this.clientName === EModelEndpoint.agents &&
+      typeof instructions?.content === 'string' &&
+      instructions.content.length
+    ) {
+      const patchedAgent = Object.assign({}, this.options?.agent, {
+        instructions: instructions.content,
+      });
+      this.options.agent = patchedAgent;
+      logger.debug('[AgentClient][instructions.patched]', {
+        conversationId: this.conversationId,
+        length: instructions.content.length,
+      });
+    }
+
     const tailCount = Math.min(2, formattedMessages.length);
     if (tailCount > 0) {
       const tail = formattedMessages.slice(-tailCount).map((message) => {

@@ -2,6 +2,7 @@ const axios = require('axios');
 const { Tokenizer } = require('@librechat/api');
 const { condenseContext: ragCondenseContext } = require('~/server/services/RAG/condense');
 const {
+  POLICY_INTRO,
   buildRagBlock,
   replaceRagBlock,
   getDeferredContext,
@@ -9,6 +10,7 @@ const {
 } = require('~/server/services/RAG/RagContextManager');
 const { buildContext } = require('./builder');
 const { normalizeSummarizationSnapshot } = require('./summarization');
+const { quickHash } = require('~/utils/hash');
 
 function sanitizeGraphContext(lines, config) {
   if (!Array.isArray(lines) || lines.length === 0) {
@@ -323,7 +325,38 @@ async function applyDeferredCondensation({
       vectorText,
     });
 
-    const nextSystemContent = replaceRagBlock(systemContentRef(), ragBlock);
+    const currentSystemContent = systemContentRef() || '';
+    const lengthBefore = currentSystemContent.length;
+    const hashBefore = quickHash(currentSystemContent);
+
+    const nextSystemContent = replaceRagBlock(currentSystemContent, ragBlock, logger);
+    const lengthAfter = nextSystemContent.length;
+    const hashAfter = quickHash(nextSystemContent);
+    const introSnippet = POLICY_INTRO.slice(0, 16).trim();
+    const duplicateDetected = introSnippet.length
+      ? nextSystemContent.indexOf(introSnippet) !== nextSystemContent.lastIndexOf(introSnippet)
+      : false;
+
+    logger?.debug?.('[applyDeferredCondensation.replace]', {
+      conversationId,
+      lengthBefore,
+      lengthAfter,
+      delta: lengthAfter - lengthBefore,
+      hashBefore: hashBefore.slice(0, 12),
+      hashAfter: hashAfter.slice(0, 12),
+      duplicateDetected,
+    });
+
+    if (duplicateDetected) {
+      logger?.error?.('[applyDeferredCondensation] duplicate_rag_block_detected', {
+        conversationId,
+        lengthBefore,
+        lengthAfter,
+        hashBefore: hashBefore.slice(0, 12),
+        hashAfter: hashAfter.slice(0, 12),
+      });
+    }
+
     updateSystemContent(nextSystemContent);
 
     const graphTokens = graphLines.length

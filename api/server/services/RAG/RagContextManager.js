@@ -1,6 +1,7 @@
 "use strict";
 
 const { sanitizeInput } = require("~/utils/security");
+const { quickHash } = require("~/utils/hash");
 
 const POLICY_INTRO =
   'Ниже предоставлен внутренний контекст для твоего сведения: граф знаний и выдержки из беседы. ' +
@@ -42,20 +43,36 @@ function buildRagBlock({
   return sanitizeInput(block);
 }
 
-function replaceRagBlock(systemContent = "", newBlock = "") {
+function replaceRagBlock(systemContent = "", newBlock = "", logger = null) {
   const safeBlock = sanitizeInput(newBlock);
-  if (typeof systemContent !== "string" || !systemContent.trim()) {
+  const safeSystem = typeof systemContent === "string" ? systemContent : "";
+
+  if (!safeSystem.trim()) {
     return safeBlock + (systemContent || "");
   }
 
   const introSnippet = POLICY_INTRO.slice(0, 16).trim();
-  const introIndex = systemContent.indexOf(introSnippet);
-  if (introIndex === -1) {
-    return safeBlock + systemContent;
+  const blockStart = safeSystem.indexOf(introSnippet);
+
+  if (blockStart === -1) {
+    return safeBlock + safeSystem;
   }
 
-  const suffix = systemContent.slice(introIndex).replace(/^[\s\S]*?---\n\n/, "");
-  return `${safeBlock}${suffix}`;
+  const blockEnd = safeSystem.indexOf(BLOCK_FOOTER, blockStart);
+
+  if (blockEnd === -1) {
+    logger?.warn?.("[replaceRagBlock] footer_missing", {
+      contentLength: safeSystem.length,
+      introIndex: blockStart,
+      hash: quickHash(safeSystem),
+    });
+    const before = safeSystem.slice(0, blockStart);
+    return `${before}${safeBlock}`;
+  }
+
+  const before = safeSystem.slice(0, blockStart);
+  const after = safeSystem.slice(blockEnd + BLOCK_FOOTER.length);
+  return `${before}${safeBlock}${after}`;
 }
 
 function setDeferredContext(req, context = null) {

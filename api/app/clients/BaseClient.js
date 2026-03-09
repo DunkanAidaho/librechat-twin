@@ -797,6 +797,10 @@ class BaseClient {
       return messages;
     }
 
+    if (this.clientName === EModelEndpoint.agents) {
+      return messages;
+    }
+
     if (!beforeLast) {
       return [instructions, ...messages];
     }
