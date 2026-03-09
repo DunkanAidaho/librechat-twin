@@ -11,6 +11,7 @@ const { ensureTokenCount } = require('~/server/services/agents/historyTrimmer');
 const { observeHistoryPassthrough, observeLiveWindow } = require('~/utils/ragMetrics');
 const ingestDeduplicator = require('~/server/services/Deduplication/ingestDeduplicator');
 const { NatsKvLastProcessed } = require('~/utils/natsKvLastProcessed');
+const { SummaryCacheStore } = require('~/server/services/RAG/summaryCacheStore');
 const crypto = require('crypto');
 
 /**
@@ -23,6 +24,7 @@ class MessageHistoryManager {
     this.memoryTaskTimeout = options.memoryTaskTimeout || 30000;
     this.logger = getLogger('rag.history');
     this.lastProcessedStore = options.lastProcessedStore || new NatsKvLastProcessed();
+    this.summaryCacheStore = options.summaryCacheStore || new SummaryCacheStore();
   }
 
   sliceLiveWindow({ orderedMessages = [], size = 8, minUserMessages = 1, minAssistantMessages = 1 }) {
@@ -176,7 +178,9 @@ class MessageHistoryManager {
     const liveWindowCfg = config?.history?.liveWindow || {};
     let heavyCount = 0;
     let lastProcessed = 0;
-    let skippedByTimestamp = 0;
+    let cacheHits = 0;
+    let condensed = 0;
+    let skippedByShort = 0;
     let skippedByDedupe = 0;
 
     if (conversationId) {
@@ -186,22 +190,6 @@ class MessageHistoryManager {
     for (let idx = 0; idx < orderedMessages.length; idx++) {
       const m = orderedMessages[idx];
       try {
-        if (lastProcessed > 0) {
-          const createdAt = m?.createdAt ? new Date(m.createdAt).getTime() : 0;
-          if (!createdAt && typeof m?.messageId === 'string') {
-            const idAsNumber = Number(m.messageId);
-            if (Number.isFinite(idAsNumber)) {
-              if (idAsNumber <= lastProcessed) {
-                skippedByTimestamp += 1;
-                continue;
-              }
-            }
-          }
-          if (createdAt && createdAt <= lastProcessed) {
-            skippedByTimestamp += 1;
-            continue;
-          }
-        }
         const rawText = extractMessageText(m, '[history->RAG]');
         const normalizedText = normalizeMemoryText(rawText);
         const len = normalizedText.length;
@@ -255,7 +243,31 @@ class MessageHistoryManager {
               textLength: originalLength,
             });
             try {
-              this.logger.info('rag.history.summary_start', summaryLogContext);
+              const cachedSummary = await this.summaryCacheStore.get(
+                conversationId,
+                m?.messageId,
+              );
+              if (cachedSummary?.summaryText) {
+                summaryText = cachedSummary.summaryText;
+                cacheHits += 1;
+                this.logger.debug(
+                  'rag.history.summary_cache_hit',
+                  Object.assign({}, summaryLogContext, {
+                    originalLength: cachedSummary.originalLength || originalLength,
+                    summaryLength: cachedSummary.summaryText.length,
+                  }),
+                );
+              } else {
+                this.logger.debug(
+                  'rag.history.summary_cache_miss',
+                  Object.assign({}, summaryLogContext, {
+                    textLength: originalLength,
+                  }),
+                );
+              }
+
+              if (!summaryText) {
+                this.logger.info('rag.history.summary_start', summaryLogContext);
               const budgetChars = Math.min(
                 8000,
                 Math.max(2000, Math.floor(normalizedText.length * 0.04)),
@@ -282,6 +294,8 @@ class MessageHistoryManager {
                 overlapChars,
                 graphContext: null,
               });
+                condensed += 1;
+              }
               if (summaryText && typeof summaryText === 'object') {
                 this.logger.info(
                   'rag.history.summary_provider',
@@ -311,6 +325,14 @@ class MessageHistoryManager {
               const trimmedSummary = typeof summaryText === 'string' ? summaryText.trim() : '';
               if (trimmedSummary) {
                 appliedSummary = trimmedSummary;
+                if (condensed > 0 && !cachedSummary?.summaryText) {
+                  await this.summaryCacheStore.set(
+                    conversationId,
+                    m?.messageId,
+                    trimmedSummary,
+                    originalLength,
+                  );
+                }
                 m.text = trimmedSummary;
                 m.content = [{ type: 'text', text: trimmedSummary }];
                 m.isMemoryStored = true;
@@ -426,8 +448,11 @@ class MessageHistoryManager {
             err: { message: error?.message, stack: error?.stack },
           }),
         );
+        }
+        if (!(shouldShrinkUser || shouldShrinkAssistant) || !normalizedText || normalizedText.length < 20) {
+          skippedByShort += 1;
+        }
       }
-    }
 
     if (heavyCount > 0) {
       this.logger.info(
@@ -438,15 +463,16 @@ class MessageHistoryManager {
       );
     }
 
-    if (skippedByTimestamp || skippedByDedupe) {
-      this.logger.info(
-        'rag.history.skip_summary',
-        this.getLogContext(conversationId, userId, {
-          skippedByTimestamp,
-          skippedByDedupe,
-        }),
-      );
-    }
+    this.logger.info(
+      'rag.history.summary_pass_done',
+      this.getLogContext(conversationId, userId, {
+        cacheHits,
+        condensed,
+        skipped: skippedByShort,
+        skippedByDedupe,
+        lastProcessed,
+      }),
+    );
 
     let finalMessages = orderedMessages;
     let droppedMessages = [];
@@ -624,10 +650,6 @@ class MessageHistoryManager {
         );
 
         if (result?.status === 'queued') {
-          await this.lastProcessedStore.updateLastProcessed(
-            conversationId,
-            Date.now(),
-          );
           return true;
         }
         return false;
