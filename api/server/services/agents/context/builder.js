@@ -569,35 +569,36 @@ async function buildContext({
   let sanitizedBlock = '';
   let safeVectorText = '';
 
+  const summarizationCfg = runtimeCfg?.summarization || {};
+  const summarizationDefaults = {
+    budgetChars: 12000,
+    chunkChars: 20000,
+    timeoutMs: 125000,
+  };
+  const budgetChars =
+    Number.isFinite(summarizationCfg?.budgetChars) && summarizationCfg.budgetChars > 0
+      ? summarizationCfg.budgetChars
+      : summarizationDefaults.budgetChars;
+  const chunkChars =
+    Number.isFinite(summarizationCfg?.chunkChars) && summarizationCfg.chunkChars > 0
+      ? summarizationCfg.chunkChars
+      : summarizationDefaults.chunkChars;
+  const baseTimeoutMs =
+    Number.isFinite(summarizationCfg?.timeoutMs) && summarizationCfg.timeoutMs > 0
+      ? summarizationCfg.timeoutMs
+      : summarizationDefaults.timeoutMs;
+  const dynamicBudgetChars = Number.isFinite(ragBudgetTokens)
+    ? Math.max(Math.floor(ragBudgetTokens * 4 * 0.35), 2000)
+    : budgetChars;
+  const dynamicChunkChars = Number.isFinite(ragBudgetTokens)
+    ? Math.max(Math.floor(ragBudgetTokens * 4 * 0.2), 2000)
+    : chunkChars;
+
   if (!hasGraph && !hasVector) {
     logger?.debug?.(
       `[rag.context.tokens] conversation=${conversationId} graphTokens=0 vectorTokens=0 contextTokens=0`,
     );
   } else {
-    const summarizationCfg = runtimeCfg?.summarization || {};
-    const defaults = {
-      budgetChars: 12000,
-      chunkChars: 20000,
-      timeoutMs: 125000,
-    };
-    const budgetChars =
-      Number.isFinite(summarizationCfg?.budgetChars) && summarizationCfg.budgetChars > 0
-        ? summarizationCfg.budgetChars
-        : defaults.budgetChars;
-    const chunkChars =
-      Number.isFinite(summarizationCfg?.chunkChars) && summarizationCfg.chunkChars > 0
-        ? summarizationCfg.chunkChars
-        : defaults.chunkChars;
-    const dynamicBudgetChars = Number.isFinite(ragBudgetTokens)
-      ? Math.max(Math.floor(ragBudgetTokens * 4 * 0.35), 2000)
-      : budgetChars;
-    const dynamicChunkChars = Number.isFinite(ragBudgetTokens)
-      ? Math.max(Math.floor(ragBudgetTokens * 4 * 0.2), 2000)
-      : chunkChars;
-    const baseTimeoutMs =
-      Number.isFinite(summarizationCfg?.timeoutMs) && summarizationCfg.timeoutMs > 0
-        ? summarizationCfg.timeoutMs
-        : defaults.timeoutMs;
 
     vectorText = vectorChunks.join('\n\n');
     rawVectorTextLength = vectorText.length;
@@ -757,30 +758,38 @@ async function buildContext({
   }
 
   if (multiStepEnabled && req) {
-    logger?.info?.('[rag.context.summarize.deferred]', {
-      conversationId,
-      graphLines: graphContextLines.length,
-      vectorChunks: vectorChunks.length,
-    });
-    setDeferredContext(req, {
-      policyIntro,
-      graphLines: graphContextLines,
-      graphQueryHint,
-      vectorText: safeVectorText,
-      vectorChunks,
-      summarizationConfig: {
-        budgetChars,
-        chunkChars,
-        provider: summarizationCfg.provider,
-        timeoutMs: baseTimeoutMs,
-        enabled: summarizationCfg.enabled !== false,
-      },
-      metrics: {
-        graphTokens: metrics.graphTokens,
-        vectorTokens: metrics.vectorTokens,
-        contextTokens: metrics.contextTokens,
-      },
-    });
+    if (hasGraph || hasVector) {
+      logger?.info?.('[rag.context.summarize.deferred]', {
+        conversationId,
+        graphLines: graphContextLines.length,
+        vectorChunks: vectorChunks.length,
+      });
+      setDeferredContext(req, {
+        policyIntro,
+        graphLines: graphContextLines,
+        graphQueryHint,
+        vectorText: safeVectorText,
+        vectorChunks,
+        summarizationConfig: {
+          budgetChars,
+          chunkChars,
+          provider: summarizationCfg.provider,
+          timeoutMs: baseTimeoutMs,
+          enabled: summarizationCfg.enabled !== false,
+        },
+        metrics: {
+          graphTokens: metrics.graphTokens,
+          vectorTokens: metrics.vectorTokens,
+          contextTokens: metrics.contextTokens,
+        },
+      });
+    } else {
+      logger?.debug?.('[rag.context.summarize.deferred_skipped]', {
+        conversationId,
+        multiStepEnabled,
+        reason: 'no_graph_or_vector_context',
+      });
+    }
   }
 
   logger?.info?.(
