@@ -1128,15 +1128,22 @@ class AgentClient extends BaseClient {
       }
 
       if (ragResult && typeof ragResult === 'object') {
-        const patchedSystemContent = ragResult.patchedSystemContent ?? systemContent;
-        if (typeof patchedSystemContent === 'string') {
-          const ragBlockText = extractRagBlock(patchedSystemContent) || patchedSystemContent;
-          const ragHash = createHash('sha256').update(ragBlockText).digest('hex');
+        const ragBlockCandidate = typeof ragResult.ragBlock === 'string'
+          ? ragResult.ragBlock
+          : ragResult.patchedSystemContent;
+
+        if (typeof ragBlockCandidate === 'string' && ragBlockCandidate.trim()) {
+          const ragHash = createHash('sha256').update(ragBlockCandidate).digest('hex');
           if (ragHash !== blockRegistry.rag) {
-            systemContent = patchedSystemContent;
+            systemContent = replaceRagBlock(systemContent, ragBlockCandidate);
             syncBlockRegistryWithContent(systemContent);
             blockRegistry.rag = ragHash;
             rebalanceHistoryBudget('post_rag_patch', systemContent);
+            logger.debug('[AgentClient][rag.applied]', {
+              conversationId: this.conversationId,
+              ragBlockLength: ragBlockCandidate.length,
+              systemContentLength: systemContent.length,
+            });
           } else {
             logger.debug('[AgentClient][rag.skip_duplicate]', {
               conversationId: this.conversationId,

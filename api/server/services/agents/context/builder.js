@@ -786,7 +786,7 @@ async function buildContext({
   }
 
   return {
-    patchedSystemContent: finalSystemContent,
+    ragBlock: finalSystemContent,
     contextLength,
     cacheStatus,
     metrics,

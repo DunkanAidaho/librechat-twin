@@ -252,7 +252,7 @@ class RagContextBuilder extends BaseService {
     const result = await runMultiStepRag({
       intentAnalysis,
       runtimeCfg,
-      baseContext,
+      baseContext: '',
       graphContext,
       conversationId: context.conversationId,
       userId: req?.user?.id,
@@ -273,9 +273,13 @@ class RagContextBuilder extends BaseService {
       }
     }
 
+    const ragBlock = typeof result.globalContext === 'string'
+      ? result.globalContext
+      : '';
+
     return {
-      patchedSystemContent: result.globalContext,
-      contextLength: result.globalContext.length,
+      ragBlock,
+      contextLength: ragBlock.length,
       cacheStatus: 'miss',
       metrics: {
         entityCount: result.entities?.length || 0,
@@ -307,8 +311,6 @@ class RagContextBuilder extends BaseService {
       vectorText: '' // TODO: добавить работу с vector store
     });
 
-    const patchedSystemContent = ragBlock + systemContent;
-
     if (this.metrics) {
       const contextTokens = this.tokenManager.getTokenCount(ragBlock);
       this.metrics.observeTokens({
@@ -319,7 +321,7 @@ class RagContextBuilder extends BaseService {
     }
 
     return {
-      patchedSystemContent,
+      ragBlock,
       contextLength: ragBlock.length,
       cacheStatus: 'miss',
       metrics: {
