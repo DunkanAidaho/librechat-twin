@@ -448,11 +448,11 @@ class MessageHistoryManager {
             err: { message: error?.message, stack: error?.stack },
           }),
         );
-        }
-        if (!(shouldShrinkUser || shouldShrinkAssistant) || !normalizedText || normalizedText.length < 20) {
-          skippedByShort += 1;
-        }
       }
+      if (!(shouldShrinkUser || shouldShrinkAssistant) || !normalizedText || normalizedText.length < 20) {
+        skippedByShort += 1;
+      }
+    }
 
     if (heavyCount > 0) {
       this.logger.info(
