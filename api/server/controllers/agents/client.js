@@ -850,6 +850,12 @@ class AgentClient extends BaseClient {
       this.options.req.intentAnalysis = intentAnalysis;
     }
 
+    logger.debug('[buildMessages.conversationId]', {
+      local: conversationId,
+      instance: this.conversationId,
+      match: conversationId === this.conversationId,
+    });
+
     if (historyCompressionCfg?.enabled) {
       const availableBudget = Math.max(historyTokenBudget - headroom, 0);
 
@@ -1015,6 +1021,11 @@ class AgentClient extends BaseClient {
         }
       };
 
+      logger.debug('[multiStep.conversationId]', {
+        local: conversationId,
+        instance: this.conversationId,
+      });
+
       multiStepResult = runtimeCfg?.multiStepRag?.enabled
         ? await runMultiStepRag({
             intentAnalysis,
@@ -1023,7 +1034,7 @@ class AgentClient extends BaseClient {
             graphContext: req?.graphContext,
             fetchGraphContext: fetchGraphLinesForEntity,
             enqueueMemoryTasks: queueGateway.enqueueMemory,
-            conversationId: this.conversationId,
+            conversationId,
             userId: requestUserId,
             endpoint: this.options?.endpoint,
             model: this.model,

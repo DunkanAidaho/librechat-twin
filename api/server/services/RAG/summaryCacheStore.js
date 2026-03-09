@@ -1,6 +1,7 @@
 'use strict';
 
 const { StringCodec } = require('nats');
+const zlib = require('zlib');
 const { getLogger } = require('~/utils/logger');
 const { getOrCreateKV, isEnabled: isNatsEnabled } = require('~/utils/natsClient');
 const { withTimeout } = require('~/utils/async');
@@ -9,7 +10,7 @@ const logger = getLogger('rag.summaryCache');
 const DEFAULT_TIMEOUT_MS = 2000;
 const KV_TTL_MS = 2_592_000_000; // 30 дней
 const KV_BUCKET = 'history_summary_cache';
-const KV_MAX_VALUE_SIZE = 32768;
+const KV_MAX_VALUE_SIZE = 524288;
 
 class SummaryCacheStore {
   constructor() {
@@ -76,8 +77,8 @@ class SummaryCacheStore {
       if (!entry?.value) {
         return null;
       }
-      const decoded = StringCodec().decode(entry.value);
-      const payload = JSON.parse(decoded);
+      const decompressed = zlib.gunzipSync(entry.value);
+      const payload = JSON.parse(decompressed.toString('utf8'));
       if (!payload?.summaryText) {
         return null;
       }
@@ -100,27 +101,22 @@ class SummaryCacheStore {
       return;
     }
     try {
-      let safeSummary = summaryText;
-      let payload = JSON.stringify({
-        summaryText: safeSummary,
+      const base = {
         originalLength: Number(originalLength) || summaryText.length,
         createdAt: Date.now(),
         version: 1,
-      });
-      if (Buffer.byteLength(payload, 'utf8') > KV_MAX_VALUE_SIZE) {
-        const maxChars = Math.max(1000, Math.floor(KV_MAX_VALUE_SIZE * 0.7));
-        safeSummary = safeSummary.slice(0, maxChars);
-        payload = JSON.stringify({
-          summaryText: safeSummary,
-          originalLength: Number(originalLength) || summaryText.length,
-          createdAt: Date.now(),
-          version: 1,
-          truncated: true,
+      };
+      const payload = JSON.stringify({ ...base, summaryText });
+      const compressed = zlib.gzipSync(Buffer.from(payload, 'utf8'));
+      if (compressed.length > KV_MAX_VALUE_SIZE) {
+        logger.warn('[summaryCache] Compressed payload exceeds KV max size; skipping cache', {
+          size: compressed.length,
+          max: KV_MAX_VALUE_SIZE,
         });
+        return;
       }
       const key = this.buildKey(conversationId, messageId);
-      const sc = StringCodec();
-      await withTimeout(kv.put(key, sc.encode(payload)), DEFAULT_TIMEOUT_MS, 'KV put');
+      await withTimeout(kv.put(key, compressed), DEFAULT_TIMEOUT_MS, 'KV put');
     } catch (error) {
       logger.warn(`[summaryCache] KV put failed: ${error.message}`);
     }
