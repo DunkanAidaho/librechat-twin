@@ -179,10 +179,16 @@ async function buildContext({
         req.ragContextTokens = cachedMetrics.contextTokens;
       }
       return {
-        patchedSystemContent: cached.systemContent,
+        ragBlock: cached.systemContent,
         contextLength: cached.contextLength,
         cacheStatus,
         metrics: cachedMetrics,
+        vectorChunks: cached.vectorChunks || [],
+        vectorText: cached.vectorText || '',
+        originalVectorText: cached.originalVectorText || '',
+        originalContextLength: cached.originalContextLength || cached.contextLength || 0,
+        graphLines: cached.graphLines || [],
+        policyIntro: cached.policyIntro || POLICY_INTRO,
       };
     }
 
@@ -768,12 +774,18 @@ async function buildContext({
   }
 
   if (runtimeCfg?.enableMemoryCache) {
-    ragCache.set(cacheKey, {
-      systemContent: finalSystemContent,
-      contextLength,
-      metrics,
-      expiresAt: now + ragCacheTtlMs,
-    });
+      ragCache.set(cacheKey, {
+        systemContent: finalSystemContent,
+        contextLength,
+        metrics,
+        vectorChunks,
+        vectorText,
+        originalVectorText: rawVectorTextLength > 0 ? vectorChunks.join('\n\n') : '',
+        originalContextLength: rawVectorTextLength,
+        graphLines: graphContextLines,
+        policyIntro,
+        expiresAt: now + ragCacheTtlMs,
+      });
     logger?.debug?.(
       `[rag.context.cache.store] conversation=${conversationId} cacheKey=${cacheKey} contextTokens=${metrics.contextTokens} graphTokens=${metrics.graphTokens} vectorTokens=${metrics.vectorTokens} queryTokens=${metrics.queryTokens}`,
     );
@@ -783,6 +795,14 @@ async function buildContext({
     req.ragCacheStatus = cacheStatus;
     req.ragMetrics = Object.assign({}, req.ragMetrics, metrics);
     req.ragContextTokens = metrics.contextTokens;
+    req.ragContextSnapshot = {
+      vectorChunks,
+      vectorText,
+      originalVectorText: rawVectorTextLength > 0 ? vectorChunks.join('\n\n') : '',
+      originalContextLength: rawVectorTextLength,
+      graphLines: graphContextLines,
+      policyIntro,
+    };
   }
 
   return {
@@ -790,6 +810,12 @@ async function buildContext({
     contextLength,
     cacheStatus,
     metrics,
+    vectorChunks,
+    vectorText,
+    originalVectorText: rawVectorTextLength > 0 ? vectorChunks.join('\n\n') : '',
+    originalContextLength: rawVectorTextLength,
+    graphLines: graphContextLines,
+    policyIntro,
   };
 }
 

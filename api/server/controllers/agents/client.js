@@ -1132,16 +1132,50 @@ class AgentClient extends BaseClient {
           ? ragResult.ragBlock
           : ragResult.patchedSystemContent;
 
+        const ragOriginalContextLength = Number(ragResult.originalContextLength) || 0;
+        const ragSummaryLength = typeof ragBlockCandidate === 'string' ? ragBlockCandidate.length : 0;
+        const shouldFallbackRagBlock =
+          ragOriginalContextLength > 0 &&
+          ragSummaryLength > ragOriginalContextLength * MAP_SUMMARY_GUARD_RATIO;
+
         if (typeof ragBlockCandidate === 'string' && ragBlockCandidate.trim()) {
+          let effectiveRagBlock = ragBlockCandidate;
+          if (shouldFallbackRagBlock) {
+            logger.warn('[AgentClient][rag.guard_exceeded]', {
+              conversationId: this.conversationId,
+              summaryLength: ragSummaryLength,
+              originalLength: ragOriginalContextLength,
+              guardRatio: MAP_SUMMARY_GUARD_RATIO,
+            });
+
+            const fallbackVectorText = Array.isArray(ragResult?.vectorChunks)
+              ? ragResult.vectorChunks.join('\n\n').trim()
+              : typeof ragResult?.vectorText === 'string'
+                ? ragResult.vectorText.trim()
+                : '';
+
+            const fallbackGraphLines = Array.isArray(ragResult?.graphLines) ? ragResult.graphLines : [];
+            const fallbackPolicyIntro = typeof ragResult?.policyIntro === 'string' ? ragResult.policyIntro : '';
+
+            if (fallbackVectorText || fallbackGraphLines.length || fallbackPolicyIntro) {
+              effectiveRagBlock = buildRagBlock({
+                policyIntro: fallbackPolicyIntro,
+                graphLines: fallbackGraphLines,
+                vectorText: fallbackVectorText || ragBlockCandidate,
+              });
+            } else {
+              effectiveRagBlock = ragBlockCandidate.slice(0, ragOriginalContextLength || ragSummaryLength);
+            }
+          }
           const ragHash = createHash('sha256').update(ragBlockCandidate).digest('hex');
           if (ragHash !== blockRegistry.rag) {
-            systemContent = replaceRagBlock(systemContent, ragBlockCandidate);
+            systemContent = replaceRagBlock(systemContent, effectiveRagBlock);
             syncBlockRegistryWithContent(systemContent);
             blockRegistry.rag = ragHash;
             rebalanceHistoryBudget('post_rag_patch', systemContent);
             logger.debug('[AgentClient][rag.applied]', {
               conversationId: this.conversationId,
-              ragBlockLength: ragBlockCandidate.length,
+              ragBlockLength: effectiveRagBlock.length,
               systemContentLength: systemContent.length,
             });
           } else {

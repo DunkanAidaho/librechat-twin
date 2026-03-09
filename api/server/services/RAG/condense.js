@@ -43,6 +43,27 @@ const GRAPH_CONTEXT_INCLUDE_IN_SUMMARY = Boolean(ragContextConfig.includeGraphIn
 const CONDENSE_TIMEOUT_MS = condenseConfig.timeoutMs || 125000;
 const SUMMARY_SYSTEM_PROMPT =
   'Ты — аккуратный компрессор текста для LibreChat. Соблюдай формат инструкции и не добавляй лишних пояснений.';
+const MAP_SUMMARY_MIN_TOKENS = 200;
+const MAP_SUMMARY_MAX_TOKENS = 2048;
+const MAP_SUMMARY_GUARD_RATIO = 1.1;
+const MAP_SHORT_CHUNK_THRESHOLD = 500;
+const CHAR_TO_TOKEN_APPROX = 4;
+const MAP_LENGTH_RATIO_MIN = 0.1;
+const MAP_LENGTH_RATIO_MAX = 0.3;
+const MAP_LENGTH_RATIO_BASE_CHARS = 500;
+const MAP_LENGTH_MIN_CHARS = 400;
+
+const estimateTokensFromChars = (chars) => {
+  if (!Number.isFinite(chars) || chars <= 0) {
+    return MAP_SUMMARY_MIN_TOKENS;
+  }
+  return Math.max(1, Math.ceil(chars / CHAR_TO_TOKEN_APPROX));
+};
+
+const resolveMapMaxTokens = (chunkLength) => {
+  const estimated = estimateTokensFromChars(chunkLength);
+  return Math.max(MAP_SUMMARY_MIN_TOKENS, Math.min(estimated, MAP_SUMMARY_MAX_TOKENS));
+};
 
 function resolveFirstNonEmpty(...values) {
   for (const value of values) {
@@ -134,15 +155,29 @@ function splitIntoChunks(text, target = 12000, hardMax = 15000, overlap = 0) {
   return parts;
 }
 
-function mapPrompt(userQuery, graphExtra) {
-  const basePrompt = `Ты — аккуратный компрессор текста. Сделай максимально полную, но компактную выжимку без потерь смыслов, цифр, дат, имён.
-Формат:
-- Краткое содержание (2–4 предложения)
-- Ключевые факты (буллеты, с числами/датами)
-- Термины/обозначения
-- Если релевантно запросу пользователя, отметь релевантные фрагменты.
+function formatLengthRule(chunkLength) {
+  if (!Number.isFinite(chunkLength) || chunkLength <= 0) {
+    return 'Если длина входа неизвестна, сделай строгую выжимку < 400 символов.';
+  }
+  if (chunkLength < MAP_SHORT_CHUNK_THRESHOLD) {
+    return `Если вход короче ${MAP_SHORT_CHUNK_THRESHOLD} символов — верни его как есть, максимум очисти пробелы.`;
+  }
+  const ratioBase = MAP_LENGTH_RATIO_BASE_CHARS / chunkLength;
+  const ratio = Math.min(MAP_LENGTH_RATIO_MAX, Math.max(MAP_LENGTH_RATIO_MIN, ratioBase));
+  const targetChars = Math.max(MAP_LENGTH_MIN_CHARS, Math.floor(chunkLength * ratio));
+  return `Выход не длиннее ${targetChars} символов (~${Math.ceil(targetChars / CHAR_TO_TOKEN_APPROX)} токенов). Если нужно, ужимай список фактов.`;
+}
+
+function mapPrompt(userQuery, graphExtra, chunkLength) {
+  const lengthRule = formatLengthRule(chunkLength);
+  const basePrompt = `Ты сжимаешь текст. Сохраняй только факты из входа.
+Правила:
+1. ${lengthRule}
+2. Никаких новых сведений или рассуждений вне входного текста.
+3. Без заголовков, пояснений и мета-комментариев — только результат.
+4. Если вход уже краткий или структурированный, верни его как есть.
 Запрос пользователя: ${userQuery || '(нет)'}
-Не фантазируй. Язык исходного текста.`;
+Всегда отвечай на языке исходного текста.`;
   const extras = [];
 
   if (graphExtra && graphExtra.hint) {
@@ -177,8 +212,10 @@ function sha1(s) {
   return crypto.createHash('md5').update(s).digest('hex');
 }
 
-function cacheKeyChunk(chainSignature, budget, userQuery, chunk, graphExtra) {
-  return `mr:sum:v4:${sha1(`${chainSignature}|${budget}|${mapPrompt(userQuery, graphExtra)}|${chunk}`)}`;
+function cacheKeyChunk(chainSignature, budget, userQuery, chunk, graphExtra, chunkLength) {
+  return `mr:sum:v4:${sha1(
+    `${chainSignature}|${budget}|${chunkLength}|${mapPrompt(userQuery, graphExtra, chunkLength)}|${chunk}`,
+  )}`;
 }
 function cacheKeyReduce(chainSignature, budget, userQuery, joined, graphExtra) {
   return `mr:red:v4:${sha1(`${chainSignature}|${budget}|${reducePrompt(userQuery, budget, graphExtra)}|${joined}`)}`;
@@ -391,7 +428,7 @@ function resolveSummarizerProviders({ includeLocalFallback = true } = {}) {
   };
 }
 
-async function callOpenRouter(descriptor, prompt) {
+async function callOpenRouter(descriptor, prompt, { maxTokens } = {}) {
   const payload = {
     model: descriptor.model,
     messages: [
@@ -400,6 +437,7 @@ async function callOpenRouter(descriptor, prompt) {
     ],
     stream: false,
     temperature: 0.2,
+    max_tokens: maxTokens,
   };
 
   const headers = {
@@ -431,7 +469,7 @@ async function callOpenRouter(descriptor, prompt) {
   return String(content).trim();
 }
 
-async function callOllama(descriptor, prompt) {
+async function callOllama(descriptor, prompt, { maxTokens } = {}) {
   const payload = {
     model: descriptor.model,
     messages: [
@@ -441,6 +479,7 @@ async function callOllama(descriptor, prompt) {
     stream: false,
     options: {
       temperature: 0.2,
+      num_predict: maxTokens,
     },
   };
 
@@ -460,12 +499,12 @@ async function callOllama(descriptor, prompt) {
   return String(content).trim();
 }
 
-async function summarizeWithDescriptor(descriptor, { prompt, originalText, budgetChars }) {
+async function summarizeWithDescriptor(descriptor, { prompt, originalText, budgetChars, maxTokens }) {
   switch (descriptor.provider) {
     case 'openrouter':
-      return callOpenRouter(descriptor, prompt);
+      return callOpenRouter(descriptor, prompt, { maxTokens });
     case 'ollama':
-      return callOllama(descriptor, prompt);
+      return callOllama(descriptor, prompt, { maxTokens });
     case 'local':
       return localFallback(originalText, budgetChars);
     case 'none':
@@ -475,10 +514,23 @@ async function summarizeWithDescriptor(descriptor, { prompt, originalText, budge
   }
 }
 
-async function summarizeWithChain({ chain, prompt, originalText, budgetChars, stage, requestContext }) {
+async function summarizeWithChain({
+  chain,
+  prompt,
+  originalText,
+  budgetChars,
+  stage,
+  requestContext,
+  maxTokens,
+}) {
   for (const descriptor of chain) {
     try {
-      const result = await summarizeWithDescriptor(descriptor, { prompt, originalText, budgetChars });
+      const result = await summarizeWithDescriptor(descriptor, {
+        prompt,
+        originalText,
+        budgetChars,
+        maxTokens,
+      });
       if (typeof result === 'string' && result.trim().length > 0) {
         return { text: result.trim(), providerLabel: descriptor.label };
       }
@@ -642,13 +694,34 @@ async function condenseContext({
             return null;
           }
           const chunkNumber = index + 1;
+          const chunkLength = chunk.length;
           const chunkContext = buildContext(requestContext, {
             chunkIndex: chunkNumber,
             chunkTotal: chunks.length,
-            chunkLength: chunk.length,
+            chunkLength,
           });
-          const prompt = `${mapPrompt(userQuery, graphExtra)}\n\n=== Текст чанка ===\n${chunk}`;
-          const cacheKey = cacheKeyChunk(chainSignature, budgetChars, userQuery, chunk, graphExtra);
+
+          if (chunkLength > 0 && chunkLength < MAP_SHORT_CHUNK_THRESHOLD) {
+            logger.info(
+              'rag.condense.chunk_short_passthrough',
+              buildContext(chunkContext, {
+                chunkLength,
+                threshold: MAP_SHORT_CHUNK_THRESHOLD,
+              }),
+            );
+            processedCount += 1;
+            return chunk;
+          }
+
+          const prompt = `${mapPrompt(userQuery, graphExtra, chunkLength)}\n\n=== Текст чанка ===\n${chunk}`;
+          const cacheKey = cacheKeyChunk(
+            chainSignature,
+            budgetChars,
+            userQuery,
+            chunk,
+            graphExtra,
+            chunkLength,
+          );
 
           logger.info('rag.condense.chunk_start', chunkContext);
 
@@ -680,6 +753,7 @@ async function condenseContext({
           }
 
           const chunkStartTime = Date.now();
+          const mapMaxTokens = resolveMapMaxTokens(chunkLength);
           const { text, providerLabel } = await summarizeWithChain({
             chain: providerChain,
             prompt,
@@ -687,6 +761,7 @@ async function condenseContext({
             budgetChars,
             stage: `map:${chunkNumber}/${chunks.length}`,
             requestContext: chunkContext,
+            maxTokens: mapMaxTokens,
           });
 
           let summaryText = typeof text === 'string' ? text.trim() : '';
@@ -703,6 +778,19 @@ async function condenseContext({
               }),
             );
           } else {
+            const guardThreshold = Math.ceil(Math.max(chunkLength, chunkLength * MAP_SUMMARY_GUARD_RATIO));
+            if (chunkLength > 0 && summaryText.length > guardThreshold) {
+              logger.warn(
+                'rag.condense.chunk_guard_exceeded',
+                buildContext(chunkContext, {
+                  chunkLength,
+                  summaryLength: summaryText.length,
+                  guardThreshold,
+                }),
+              );
+              summaryText = chunk;
+              summaryProvider = 'guard:passthrough';
+            }
             logger.info(
               'rag.condense.chunk_done',
               buildContext(chunkContext, {
