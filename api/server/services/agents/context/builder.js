@@ -702,8 +702,10 @@ async function buildContext({
       );
     }
 
-  if (vectorText.length) {
-    metrics.vectorTokens = Tokenizer.getTokenCount(vectorText, encoding);
+  const safeVectorText = typeof vectorText === 'string' ? vectorText : '';
+
+  if (safeVectorText.length) {
+    metrics.vectorTokens = Tokenizer.getTokenCount(safeVectorText, encoding);
 
       if (metrics.vectorTokens) {
         observeSegmentTokens?.({
