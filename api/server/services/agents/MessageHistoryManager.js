@@ -260,7 +260,10 @@ class MessageHistoryManager {
                 chain: condenseChain || [],
                 prompt: `Сделай краткую выжимку 50-200 слов.\n\n=== Текст ===\n${normalizedText}`,
                 originalText: normalizedText,
-                budgetChars: 1200,
+                budgetChars: Math.min(
+                  8000,
+                  Math.max(2000, Math.floor(normalizedText.length * 0.04)),
+                ),
                 stage: 'ingest:summary',
                 requestContext: {
                   conversationId,
