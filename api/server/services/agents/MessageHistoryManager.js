@@ -256,20 +256,31 @@ class MessageHistoryManager {
             });
             try {
               this.logger.info('rag.history.summary_start', summaryLogContext);
+              const budgetChars = Math.min(
+                8000,
+                Math.max(2000, Math.floor(normalizedText.length * 0.04)),
+              );
+              const chunkChars = 28000;
+              const timeoutMs = 120000;
+              const overlapChars = 200;
+              this.logger.debug(
+                'rag.history.condense_params',
+                Object.assign({}, summaryLogContext, {
+                  textLength: normalizedText.length,
+                  budgetChars,
+                  chunkChars,
+                  timeoutMs,
+                  overlapChars,
+                }),
+              );
               summaryText = await condenseContext({
-                chain: condenseChain || [],
-                prompt: `Сделай краткую выжимку 50-200 слов.\n\n=== Текст ===\n${normalizedText}`,
-                originalText: normalizedText,
-                budgetChars: Math.min(
-                  8000,
-                  Math.max(2000, Math.floor(normalizedText.length * 0.04)),
-                ),
-                stage: 'ingest:summary',
-                requestContext: {
-                  conversationId,
-                  userId,
-                  messageId: m?.messageId,
-                },
+                contextText: normalizedText,
+                userQuery: '',
+                budgetChars,
+                chunkChars,
+                timeoutMs,
+                overlapChars,
+                graphContext: null,
               });
               if (summaryText && typeof summaryText === 'object') {
                 this.logger.info(
@@ -282,6 +293,13 @@ class MessageHistoryManager {
               summaryText = summaryText?.text || summaryText;
               const resolvedSummary = summaryText?.text || summaryText;
               summaryText = resolvedSummary;
+              this.logger.debug(
+                'rag.history.condense_result',
+                Object.assign({}, summaryLogContext, {
+                  summaryLength: resolvedSummary?.length || 0,
+                  isEmpty: !(resolvedSummary && resolvedSummary.length > 0),
+                }),
+              );
               this.logger.info(
                 'rag.history.summary_done',
                 Object.assign({}, summaryLogContext, {
