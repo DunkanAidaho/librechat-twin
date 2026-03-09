@@ -8,6 +8,7 @@ const {
   clearDeferredContext,
 } = require('~/server/services/RAG/RagContextManager');
 const { buildContext } = require('./builder');
+const { normalizeSummarizationSnapshot } = require('./summarization');
 
 function sanitizeGraphContext(lines, config) {
   if (!Array.isArray(lines) || lines.length === 0) {
@@ -239,30 +240,10 @@ async function applyDeferredCondensation({
     const policyIntro = snapshot.policyIntro;
     const graphLines = Array.isArray(snapshot.graphLines) ? snapshot.graphLines : [];
     const graphQueryHint = snapshot.graphQueryHint;
-    const summarizationDefaults = { budgetChars: 12000, chunkChars: 20000, timeoutMs: 125000 };
-    const summarizationConfig = Object.assign({}, summarizationDefaults, {
-      budgetChars:
-        Number.isFinite(snapshot?.summarizationConfig?.budgetChars) &&
-        snapshot.summarizationConfig.budgetChars > 0
-          ? snapshot.summarizationConfig.budgetChars
-          : summarizationDefaults.budgetChars,
-      chunkChars:
-        Number.isFinite(snapshot?.summarizationConfig?.chunkChars) &&
-        snapshot.summarizationConfig.chunkChars > 0
-          ? snapshot.summarizationConfig.chunkChars
-          : summarizationDefaults.chunkChars,
-      timeoutMs:
-        Number.isFinite(snapshot?.summarizationConfig?.timeoutMs) &&
-        snapshot.summarizationConfig.timeoutMs > 0
-          ? snapshot.summarizationConfig.timeoutMs
-          : summarizationDefaults.timeoutMs,
-      provider: snapshot?.summarizationConfig?.provider,
-      enabled: snapshot?.summarizationConfig?.enabled !== false,
-    });
+    const summarizationConfig = normalizeSummarizationSnapshot(snapshot?.summarizationConfig);
 
     logger?.info?.('[rag.context.deferred.summarize.config]', {
       conversationId,
-      defaults: summarizationDefaults,
       snapshotConfig: snapshot?.summarizationConfig,
       resolvedConfig: {
         budgetChars: summarizationConfig.budgetChars,

@@ -186,7 +186,7 @@ function calculateAdaptiveTimeout(contextLength, baseTimeoutMs) {
   const extraChunks = Math.ceil((contextLength - BASE_CONTEXT_SIZE) / BASE_CONTEXT_SIZE);
   const additionalTimeout = extraChunks * 20000;
 
-  const MAX_TIMEOUT = 300000;
+  const MAX_TIMEOUT = 600000;
   const adaptiveTimeout = Math.min(baseTimeoutMs + additionalTimeout, MAX_TIMEOUT);
 
   return adaptiveTimeout;

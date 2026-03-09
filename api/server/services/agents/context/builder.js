@@ -9,6 +9,10 @@ const {
   ragCondenseContext,
   Tokenizer,
 } = require('./helpers');
+const {
+  resolveSummarizationConfig,
+  buildSummarizationSnapshot,
+} = require('./summarization');
 const { extractEntitiesFromText } = require('~/server/services/RAG/intentAnalyzer');
 const { buildRagBlock, setDeferredContext } = require('~/server/services/RAG/RagContextManager');
 const { sanitizeInput } = require('~/utils/security');
@@ -282,6 +286,22 @@ async function buildContext({
     });
   }
   ragSearchQuery = condensedQuery;
+
+  const summarizationConfig = resolveSummarizationConfig({
+    summarizationCfg: runtimeCfg?.summarization || {},
+    ragBudgetTokens,
+  });
+
+  logger?.debug?.('[rag.context.summarization.config]', {
+    conversationId,
+    baseBudgetChars: summarizationConfig.baseBudgetChars,
+    baseChunkChars: summarizationConfig.baseChunkChars,
+    baseTimeoutMs: summarizationConfig.baseTimeoutMs,
+    dynamicBudgetChars: summarizationConfig.dynamicBudgetChars,
+    dynamicChunkChars: summarizationConfig.dynamicChunkChars,
+    provider: summarizationConfig.provider,
+    enabled: summarizationConfig.enabled,
+  });
 
   let vectorChunks = [];
   let recentChunks = [];
@@ -569,30 +589,11 @@ async function buildContext({
   let sanitizedBlock = '';
   let safeVectorText = '';
 
-  const summarizationCfg = runtimeCfg?.summarization || {};
-  const summarizationDefaults = {
-    budgetChars: 12000,
-    chunkChars: 20000,
-    timeoutMs: 125000,
-  };
-  const budgetChars =
-    Number.isFinite(summarizationCfg?.budgetChars) && summarizationCfg.budgetChars > 0
-      ? summarizationCfg.budgetChars
-      : summarizationDefaults.budgetChars;
-  const chunkChars =
-    Number.isFinite(summarizationCfg?.chunkChars) && summarizationCfg.chunkChars > 0
-      ? summarizationCfg.chunkChars
-      : summarizationDefaults.chunkChars;
-  const baseTimeoutMs =
-    Number.isFinite(summarizationCfg?.timeoutMs) && summarizationCfg.timeoutMs > 0
-      ? summarizationCfg.timeoutMs
-      : summarizationDefaults.timeoutMs;
-  const dynamicBudgetChars = Number.isFinite(ragBudgetTokens)
-    ? Math.max(Math.floor(ragBudgetTokens * 4 * 0.35), 2000)
-    : budgetChars;
-  const dynamicChunkChars = Number.isFinite(ragBudgetTokens)
-    ? Math.max(Math.floor(ragBudgetTokens * 4 * 0.2), 2000)
-    : chunkChars;
+  const budgetChars = summarizationConfig.baseBudgetChars;
+  const chunkChars = summarizationConfig.baseChunkChars;
+  const baseTimeoutMs = summarizationConfig.baseTimeoutMs;
+  const dynamicBudgetChars = summarizationConfig.dynamicBudgetChars;
+  const dynamicChunkChars = summarizationConfig.dynamicChunkChars;
 
   if (!hasGraph && !hasVector) {
     logger?.debug?.(
@@ -604,7 +605,7 @@ async function buildContext({
     rawVectorTextLength = vectorText.length;
     const shouldSummarize =
       !multiStepEnabled &&
-      summarizationCfg.enabled !== false &&
+      summarizationConfig.enabled &&
       vectorText.length > dynamicBudgetChars;
 
     if (shouldSummarize) {
@@ -637,7 +638,7 @@ async function buildContext({
             summarizationConfig: {
               budgetChars: dynamicBudgetChars,
               chunkChars: dynamicChunkChars,
-              provider: summarizationCfg.provider,
+              provider: summarizationConfig.provider,
               timeoutMs: adaptiveTimeoutMs,
             },
           }),
@@ -656,7 +657,7 @@ async function buildContext({
           const fallbackLength = Math.min(vectorText.length, budgetChars);
           vectorText = vectorText.slice(0, fallbackLength);
           logger?.warn?.(
-            `[rag.context.vector.summarize.fallback] Using truncated text (${fallbackLength} chars) due to timeout`,
+           `[rag.context.vector.summarize.fallback] Using truncated text (${fallbackLength} chars) due to timeout`,
           );
         }
       }
@@ -770,13 +771,7 @@ async function buildContext({
         graphQueryHint,
         vectorText: safeVectorText,
         vectorChunks,
-        summarizationConfig: {
-          budgetChars,
-          chunkChars,
-          provider: summarizationCfg.provider,
-          timeoutMs: baseTimeoutMs,
-          enabled: summarizationCfg.enabled !== false,
-        },
+        summarizationConfig: buildSummarizationSnapshot(summarizationConfig),
         metrics: {
           graphTokens: metrics.graphTokens,
           vectorTokens: metrics.vectorTokens,
