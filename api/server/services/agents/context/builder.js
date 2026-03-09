@@ -567,6 +567,7 @@ async function buildContext({
   let vectorText = '';
   let rawVectorTextLength = 0;
   let sanitizedBlock = '';
+  let safeVectorText = '';
 
   if (!hasGraph && !hasVector) {
     logger?.debug?.(
@@ -681,55 +682,63 @@ async function buildContext({
 
     finalSystemContent = sanitizedBlock + systemContent;
     contextLength = sanitizedBlock.length;
+  }
+
+  safeVectorText = typeof vectorText === 'string' ? vectorText : '';
+  logger?.debug?.('[rag.context.safeVector]', {
+    conversationId,
+    hasGraph,
+    hasVector,
+    vectorInitialized: typeof vectorText === 'string',
+    vectorLength: safeVectorText.length,
+  });
 
   if (hasGraph) {
     const graphText = graphContextLines.join('\n');
     metrics.graphTokens = graphText ? Tokenizer.getTokenCount(graphText, encoding) : 0;
 
-      if (metrics.graphTokens) {
-        observeSegmentTokens?.({
-          segment: 'rag_graph',
-          tokens: metrics.graphTokens,
-          endpoint: endpointOption?.endpoint,
-          model: endpointOption?.model,
-        });
-        setContextLength?.({
-          segment: 'rag_graph',
-          length: graphText.length,
-          endpoint: endpointOption?.endpoint,
-          model: endpointOption?.model,
-        });
-      }
-
-      logger?.info?.(
-        `[rag.context.graph.stats] conversation=${conversationId} lines=${graphContextLines.length} tokens=${metrics.graphTokens}`,
-      );
+    if (metrics.graphTokens) {
+      observeSegmentTokens?.({
+        segment: 'rag_graph',
+        tokens: metrics.graphTokens,
+        endpoint: endpointOption?.endpoint,
+        model: endpointOption?.model,
+      });
+      setContextLength?.({
+        segment: 'rag_graph',
+        length: graphText.length,
+        endpoint: endpointOption?.endpoint,
+        model: endpointOption?.model,
+      });
     }
 
-  const safeVectorText = typeof vectorText === 'string' ? vectorText : '';
+    logger?.info?.(
+      `[rag.context.graph.stats] conversation=${conversationId} lines=${graphContextLines.length} tokens=${metrics.graphTokens}`,
+    );
+  }
 
   if (safeVectorText.length) {
     metrics.vectorTokens = Tokenizer.getTokenCount(safeVectorText, encoding);
 
-      if (metrics.vectorTokens) {
-        observeSegmentTokens?.({
-          segment: 'rag_vector',
-          tokens: metrics.vectorTokens,
-          endpoint: endpointOption?.endpoint,
-          model: endpointOption?.model,
-        });
-        setContextLength?.({
-          segment: 'rag_vector',
+    if (metrics.vectorTokens) {
+      observeSegmentTokens?.({
+        segment: 'rag_vector',
+        tokens: metrics.vectorTokens,
+        endpoint: endpointOption?.endpoint,
+        model: endpointOption?.model,
+      });
+      setContextLength?.({
+        segment: 'rag_vector',
         length: safeVectorText.length,
         endpoint: endpointOption?.endpoint,
         model: endpointOption?.model,
       });
-      }
-
-      logger?.info?.(
-        `[rag.context.vector.stats] conversation=${conversationId} chunks=${metrics.vectorChunks} tokens=${metrics.vectorTokens}`,
-      );
     }
+
+    logger?.info?.(
+      `[rag.context.vector.stats] conversation=${conversationId} chunks=${metrics.vectorChunks} tokens=${metrics.vectorTokens}`,
+    );
+  }
 
   metrics.contextTokens = sanitizedBlock
     ? Tokenizer.getTokenCount(sanitizedBlock, encoding)
@@ -747,37 +756,36 @@ async function buildContext({
     }
   }
 
-    if (multiStepEnabled && req) {
-      logger?.info?.('[rag.context.summarize.deferred]', {
-        conversationId,
-        graphLines: graphContextLines.length,
-        vectorChunks: vectorChunks.length,
-      });
-      setDeferredContext(req, {
-        policyIntro,
-        graphLines: graphContextLines,
-        graphQueryHint,
-        vectorText: safeVectorText,
-        vectorChunks,
-        summarizationConfig: {
-          budgetChars,
-          chunkChars,
-          provider: summarizationCfg.provider,
-          timeoutMs: baseTimeoutMs,
-          enabled: summarizationCfg.enabled !== false,
-        },
-        metrics: {
-          graphTokens: metrics.graphTokens,
-          vectorTokens: metrics.vectorTokens,
-          contextTokens: metrics.contextTokens,
-        },
-      });
-    }
-
-    logger?.info?.(
-      `[rag.context.tokens] conversation=${conversationId} graphTokens=${metrics.graphTokens} vectorTokens=${metrics.vectorTokens} contextTokens=${metrics.contextTokens}`,
-    );
+  if (multiStepEnabled && req) {
+    logger?.info?.('[rag.context.summarize.deferred]', {
+      conversationId,
+      graphLines: graphContextLines.length,
+      vectorChunks: vectorChunks.length,
+    });
+    setDeferredContext(req, {
+      policyIntro,
+      graphLines: graphContextLines,
+      graphQueryHint,
+      vectorText: safeVectorText,
+      vectorChunks,
+      summarizationConfig: {
+        budgetChars,
+        chunkChars,
+        provider: summarizationCfg.provider,
+        timeoutMs: baseTimeoutMs,
+        enabled: summarizationCfg.enabled !== false,
+      },
+      metrics: {
+        graphTokens: metrics.graphTokens,
+        vectorTokens: metrics.vectorTokens,
+        contextTokens: metrics.contextTokens,
+      },
+    });
   }
+
+  logger?.info?.(
+    `[rag.context.tokens] conversation=${conversationId} graphTokens=${metrics.graphTokens} vectorTokens=${metrics.vectorTokens} contextTokens=${metrics.contextTokens}`,
+  );
 
   if (runtimeCfg?.enableMemoryCache) {
       ragCache.set(cacheKey, {
