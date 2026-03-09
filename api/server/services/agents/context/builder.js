@@ -716,10 +716,10 @@ async function buildContext({
         });
         setContextLength?.({
           segment: 'rag_vector',
-          length: vectorText.length,
-          endpoint: endpointOption?.endpoint,
-          model: endpointOption?.model,
-        });
+        length: safeVectorText.length,
+        endpoint: endpointOption?.endpoint,
+        model: endpointOption?.model,
+      });
       }
 
       logger?.info?.(
@@ -753,7 +753,7 @@ async function buildContext({
         policyIntro,
         graphLines: graphContextLines,
         graphQueryHint,
-        vectorText,
+        vectorText: safeVectorText,
         vectorChunks,
         summarizationConfig: {
           budgetChars,
@@ -799,7 +799,7 @@ async function buildContext({
     req.ragContextTokens = metrics.contextTokens;
     req.ragContextSnapshot = {
       vectorChunks,
-      vectorText,
+      vectorText: safeVectorText,
       originalVectorText: rawVectorTextLength > 0 ? vectorChunks.join('\n\n') : '',
       originalContextLength: rawVectorTextLength,
       graphLines: graphContextLines,
