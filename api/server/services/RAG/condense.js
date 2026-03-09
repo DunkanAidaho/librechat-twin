@@ -582,11 +582,17 @@ async function condenseContext({
     return '';
   }
   const t0 = Date.now();
+  if (req?.progressTracker?.bump) {
+    req.progressTracker.bump();
+  }
   const requestContext = buildContext(req || {}, {
     endpoint: endpointOption?.endpoint,
     model: endpointOption?.model,
   });
   try {
+    if (req?.progressTracker?.bump) {
+      req.progressTracker.bump();
+    }
     // ИСПРАВЛЕНО: Передаем timeoutMs в resolveSummarizerProviders
     const effectiveTimeout = timeoutMs || CONDENSE_TIMEOUT_MS;
     
@@ -596,6 +602,9 @@ async function condenseContext({
       timeoutMs: effectiveTimeout,
       contextLength: contextText?.length || 0,
     }));
+    if (req?.progressTracker?.bump) {
+      req.progressTracker.bump();
+    }
     
     const { chain: providerChain, warnings, signature: chainSignature } = resolveSummarizerProviders();
     logger.info('rag.condense.chain', buildContext(requestContext, {
@@ -686,6 +695,9 @@ async function condenseContext({
     const summaries = await Promise.all(
       chunks.map((chunk, index) =>
         limit(async () => {
+          if (req?.progressTracker?.bump) {
+            req.progressTracker.bump();
+          }
           if (Date.now() > mapDeadline) {
             logger.warn(
               'rag.condense.chunk_skipped',
@@ -714,6 +726,9 @@ async function condenseContext({
                 threshold: MAP_SHORT_CHUNK_THRESHOLD,
               }),
             );
+            if (req?.progressTracker?.bump) {
+              req.progressTracker.bump();
+            }
             processedCount += 1;
             return chunk;
           }
@@ -740,6 +755,9 @@ async function condenseContext({
           );
 
           logger.info('rag.condense.chunk_start', chunkContext);
+          if (req?.progressTracker?.bump) {
+            req.progressTracker.bump();
+          }
 
           if (r && CACHE_TTL > 0) {
             try {
@@ -779,6 +797,9 @@ async function condenseContext({
             requestContext: chunkContext,
             maxTokens: mapMaxTokens,
           });
+          if (req?.progressTracker?.bump) {
+            req.progressTracker.bump();
+          }
 
           let summaryText = typeof text === 'string' ? text.trim() : '';
           let summaryProvider = providerLabel || 'unknown';
@@ -874,6 +895,9 @@ async function condenseContext({
           reason: 'processed_ratio_below_threshold',
         }),
       );
+      if (req?.progressTracker?.bump) {
+        req.progressTracker.bump();
+      }
       return localFallback(contextText, budgetChars);
     }
 
@@ -947,6 +971,9 @@ async function condenseContext({
     }
 
     const reducePromptText = `${reducePrompt(userQuery, budgetChars, graphExtra)}\n\n=== Частичные выжимки ===\n${joined}`;
+    if (req?.progressTracker?.bump) {
+      req.progressTracker.bump();
+    }
     if (DEBUG_CONDENSE) {
       logger.info(
         'rag.condense.reduce_prompt',
@@ -966,6 +993,9 @@ async function condenseContext({
       stage: 'reduce:initial',
       requestContext,
     });
+    if (req?.progressTracker?.bump) {
+      req.progressTracker.bump();
+    }
 
     let summaryText = typeof finalSummary === 'string' ? finalSummary.trim() : '';
     let summaryProvider = reduceProviderLabel || 'unknown';
@@ -997,6 +1027,9 @@ async function condenseContext({
       const guardPrompt = `Сожми ещё и ЖЁСТКО не превышай ${budgetChars} символов.
 Без заголовков, пояснений, нумерации и мета-комментариев — только результат.
 Сохрани ключевые факты и числа.\n\n=== Текст ===\n${summaryText}`;
+      if (req?.progressTracker?.bump) {
+        req.progressTracker.bump();
+      }
       if (DEBUG_CONDENSE) {
         logger.info(
           'rag.condense.guard_prompt',
@@ -1024,6 +1057,9 @@ async function condenseContext({
         stage: `reduce:guard:${guard + 1}`,
         requestContext,
       });
+      if (req?.progressTracker?.bump) {
+        req.progressTracker.bump();
+      }
 
       const candidate = typeof guardText === 'string' ? guardText.trim() : '';
       if (!candidate) {

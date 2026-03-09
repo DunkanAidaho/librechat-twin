@@ -1084,6 +1084,9 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
 
       let streamStarted = false;
       const progressTracker = createProgressTracker();
+      if (req) {
+        req.progressTracker = progressTracker;
+      }
       const { abortController, onStart } = createAbortController(
         req,
         res,
