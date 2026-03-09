@@ -255,44 +255,37 @@ class MessageHistoryManager {
               textLength: originalLength,
             });
             try {
-              const isTechnical = /```|\b(error|stack|trace|exception|warn|log)\b/i.test(normalizedText);
-              if (isTechnical) {
-                summaryText = `Фрагмент кода/лога по теме ${
-                  (normalizedText.match(/\b[A-Za-zА-Яа-я0-9_\-]{4,}\b/g) || [])[0] || 'unknown'
-                }`;
-              } else {
-                this.logger.info('rag.history.summary_start', summaryLogContext);
-                summaryText = await condenseContext({
-                  chain: condenseChain || [],
-                  prompt: `Сделай краткую выжимку 50-200 слов.\n\n=== Текст ===\n${normalizedText}`,
-                  originalText: normalizedText,
-                  budgetChars: 1200,
-                  stage: 'ingest:summary',
-                  requestContext: {
-                    conversationId,
-                    userId,
-                    messageId: m?.messageId,
-                  },
-                });
-                if (summaryText && typeof summaryText === 'object') {
-                  this.logger.info(
-                    'rag.history.summary_provider',
-                    Object.assign({}, summaryLogContext, {
-                      provider: summaryText?.providerLabel || summaryText?.provider || 'unknown',
-                    }),
-                  );
-                }
-                summaryText = summaryText?.text || summaryText;
-                const resolvedSummary = summaryText?.text || summaryText;
-                summaryText = resolvedSummary;
+              this.logger.info('rag.history.summary_start', summaryLogContext);
+              summaryText = await condenseContext({
+                chain: condenseChain || [],
+                prompt: `Сделай краткую выжимку 50-200 слов.\n\n=== Текст ===\n${normalizedText}`,
+                originalText: normalizedText,
+                budgetChars: 1200,
+                stage: 'ingest:summary',
+                requestContext: {
+                  conversationId,
+                  userId,
+                  messageId: m?.messageId,
+                },
+              });
+              if (summaryText && typeof summaryText === 'object') {
                 this.logger.info(
-                  'rag.history.summary_done',
+                  'rag.history.summary_provider',
                   Object.assign({}, summaryLogContext, {
-                    originalLength,
-                    summaryLength: resolvedSummary?.length || 0,
+                    provider: summaryText?.providerLabel || summaryText?.provider || 'unknown',
                   }),
                 );
               }
+              summaryText = summaryText?.text || summaryText;
+              const resolvedSummary = summaryText?.text || summaryText;
+              summaryText = resolvedSummary;
+              this.logger.info(
+                'rag.history.summary_done',
+                Object.assign({}, summaryLogContext, {
+                  originalLength,
+                  summaryLength: resolvedSummary?.length || 0,
+                }),
+              );
 
               const trimmedSummary = typeof summaryText === 'string' ? summaryText.trim() : '';
               if (trimmedSummary) {
