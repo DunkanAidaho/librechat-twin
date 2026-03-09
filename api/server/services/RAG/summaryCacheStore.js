@@ -9,7 +9,7 @@ const logger = getLogger('rag.summaryCache');
 const DEFAULT_TIMEOUT_MS = 2000;
 const KV_TTL_MS = 2_592_000_000; // 30 дней
 const KV_BUCKET = 'history_summary_cache';
-const KV_MAX_VALUE_SIZE = 4096;
+const KV_MAX_VALUE_SIZE = 32768;
 
 class SummaryCacheStore {
   constructor() {
@@ -100,12 +100,24 @@ class SummaryCacheStore {
       return;
     }
     try {
-      const payload = JSON.stringify({
-        summaryText,
+      let safeSummary = summaryText;
+      let payload = JSON.stringify({
+        summaryText: safeSummary,
         originalLength: Number(originalLength) || summaryText.length,
         createdAt: Date.now(),
         version: 1,
       });
+      if (Buffer.byteLength(payload, 'utf8') > KV_MAX_VALUE_SIZE) {
+        const maxChars = Math.max(1000, Math.floor(KV_MAX_VALUE_SIZE * 0.7));
+        safeSummary = safeSummary.slice(0, maxChars);
+        payload = JSON.stringify({
+          summaryText: safeSummary,
+          originalLength: Number(originalLength) || summaryText.length,
+          createdAt: Date.now(),
+          version: 1,
+          truncated: true,
+        });
+      }
       const key = this.buildKey(conversationId, messageId);
       const sc = StringCodec();
       await withTimeout(kv.put(key, sc.encode(payload)), DEFAULT_TIMEOUT_MS, 'KV put');
