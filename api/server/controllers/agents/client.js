@@ -1202,6 +1202,15 @@ class AgentClient extends BaseClient {
           }
           const ragHash = createHash('sha256').update(ragBlockCandidate).digest('hex');
           if (ragHash !== blockRegistry.rag) {
+            logger.debug('[diag.systemContent.pre_first_replace]', {
+              conversationId: this.conversationId,
+              systemContentLength: systemContent.length,
+              containsBlockFooter: systemContent.includes('\n<!-- /RAG_CONTEXT_BLOCK -->\n'),
+              containsPolicyIntroSnippet: systemContent.includes('Ниже предоставлен'),
+              effectiveRagBlockLength: effectiveRagBlock?.length,
+              effectiveRagBlockEndsWithFooter: effectiveRagBlock?.endsWith('\n<!-- /RAG_CONTEXT_BLOCK -->\n'),
+              effectiveRagBlockContainsFooter: effectiveRagBlock?.includes('\n<!-- /RAG_CONTEXT_BLOCK -->\n'),
+            });
             systemContent = replaceRagBlock(systemContent, effectiveRagBlock);
             syncBlockRegistryWithContent(systemContent);
             blockRegistry.rag = ragHash;
