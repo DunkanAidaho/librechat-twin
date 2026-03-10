@@ -408,6 +408,20 @@ class MessageHistoryManager {
               role: m?.isCreatedByUser ? 'user' : 'assistant',
               user_id: userId,
             };
+            this.logger.info(
+              '[DEBUG content_dates]',
+              Object.assign(
+                {},
+                this.getLogContext(conversationId, userId, {
+                  messageId: taskPayload.message_id,
+                  normalizedTextLength: normalizedText.length,
+                  normalizedTextPreview: normalizedText.slice(0, 100),
+                }),
+                {
+                  content_dates: taskPayload.content_dates,
+                },
+              ),
+            );
             this.ingestedHistory.add(dedupeKey);
             toIngest.push(taskPayload);
             this.logger.info(

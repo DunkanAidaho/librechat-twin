@@ -121,21 +121,20 @@ async function buildContext({
     req.ragUserQuery = normalizedQuery;
     req.ragCondenseQuery = multiStepEnabled ? '' : normalizedQuery;
   }
-  const intentEntities = Array.isArray(req?.intentAnalysis?.entities)
+  const rawIntentEntities = Array.isArray(req?.intentAnalysis?.entities)
     ? req.intentAnalysis.entities
-        .map((entity) => entity?.name)
-        .filter(Boolean)
-        .slice(0, runtimeCfg?.multiStepRag?.maxEntities || 3)
     : [];
+  const intentEntities = rawIntentEntities
+    .map((entity) => entity?.name ?? entity)
+    .filter(Boolean)
+    .slice(0, runtimeCfg?.multiStepRag?.maxEntities || 3);
   const temporalRange = req?.intentAnalysis?.temporalRange;
   const temporalHint = temporalRange?.from && temporalRange?.to
     ? `период ${temporalRange.from}-${temporalRange.to}`
     : '';
-  const intentHints = Array.isArray(req?.intentAnalysis?.entities)
-    ? req.intentAnalysis.entities
-        .flatMap((entity) => (Array.isArray(entity?.hints) ? entity.hints : []))
-        .filter(Boolean)
-    : [];
+  const intentHints = rawIntentEntities
+    .flatMap((entity) => (Array.isArray(entity?.hints) ? entity.hints : []))
+    .filter(Boolean);
   const queryTokenCount = Tokenizer?.getTokenCount
     ? Tokenizer.getTokenCount(normalizedQuery, encoding)
     : normalizedQuery.length;
@@ -267,20 +266,40 @@ async function buildContext({
   let rawGraphLinesCount = 0;
 
   metrics.graphLines = graphContextLines.length;
-  let ragSearchQuery = normalizedQuery;
+  const temporalRewriteEnabled = Boolean(temporalRange?.from && temporalRange?.to);
+  const filteredTemporalEntities = rawIntentEntities
+    .filter((entity) => !['temporal_range', 'date', 'period'].includes(entity?.type))
+    .map((entity) => entity?.name ?? entity)
+    .filter(Boolean);
+  const contentQuerySource = filteredTemporalEntities.length
+    ? filteredTemporalEntities
+    : intentEntities.length
+      ? intentEntities
+      : ['события'];
+  const contentQuery = temporalRewriteEnabled
+    ? `${contentQuerySource.join(' ')} ${temporalRange.from} ${temporalRange.to}`.trim()
+    : normalizedQuery;
+  const baseQuery = temporalRewriteEnabled ? contentQuery : normalizedQuery;
+  let ragSearchQuery = baseQuery;
+  logger?.debug?.('[rag.context.query.rewrite]', {
+    conversationId,
+    queryRewritten: temporalRewriteEnabled,
+    contentQuery,
+  });
   if (intentEntities.length || temporalHint) {
     const hints = intentHints.length ? ` (hints: ${[...new Set(intentHints)].join(', ')})` : '';
     const temporalLine = temporalHint ? `\nTemporal: ${temporalHint}` : '';
-    ragSearchQuery = `${normalizedQuery}\n\nEntities: ${intentEntities.join(', ')}${hints}${temporalLine}`;
+    ragSearchQuery = `${baseQuery}\n\nEntities: ${intentEntities.join(', ')}${hints}${temporalLine}`;
     logger?.debug?.('[rag.context.intent.entities]', {
       conversationId,
       entities: intentEntities,
       hints: [...new Set(intentHints)],
       temporalRange: temporalRange ? { from: temporalRange.from, to: temporalRange.to } : null,
+      queryRewritten: temporalRewriteEnabled,
     });
   }
   if (graphQueryHint) {
-    ragSearchQuery = `${normalizedQuery}\n\nGraph hints: ${graphQueryHint}`;
+    ragSearchQuery = `${baseQuery}\n\nGraph hints: ${graphQueryHint}`;
   }
 
   const condensedQuery = condenseRagQuery(ragSearchQuery, queryMaxChars);
@@ -316,15 +335,30 @@ async function buildContext({
   if (toolsGatewayUrl) {
     try {
       const vectorTopKForSeeds = Math.min(vectorTopK, Math.max(1, Math.ceil(vectorTopK / 2)));
+      const seedPayload = {
+        query: ragSearchQuery,
+        top_k: vectorTopKForSeeds,
+        embedding_model: embeddingModel,
+        conversation_id: conversationId,
+        user_id: req?.user?.id,
+        ...(temporalRange?.from && temporalRange?.to
+          ? {
+              date_filter: {
+                from: temporalRange.from,
+                to: temporalRange.to,
+              },
+            }
+          : {}),
+      };
+      if (temporalRange?.from && temporalRange?.to) {
+        logger?.debug?.('[rag.context.vector.date_filter]', {
+          conversationId,
+          date_filter: seedPayload.date_filter,
+        });
+      }
       const response = await axios.post(
         `${toolsGatewayUrl}/rag/search`,
-        {
-          query: ragSearchQuery,
-          top_k: vectorTopKForSeeds,
-          embedding_model: embeddingModel,
-          conversation_id: conversationId,
-          user_id: req?.user?.id,
-        },
+        seedPayload,
         { timeout: toolsGatewayTimeout },
       );
 
@@ -374,6 +408,14 @@ async function buildContext({
         embedding_model: embeddingModel,
         conversation_id: conversationId,
         user_id: req?.user?.id,
+        ...(temporalRange?.from && temporalRange?.to
+          ? {
+              date_filter: {
+                from: temporalRange.from,
+                to: temporalRange.to,
+              },
+            }
+          : {}),
       };
       const searchStart = Date.now();
       const finalResponse = await axios.post(
@@ -400,6 +442,47 @@ async function buildContext({
         maxChunks: vectorMaxChunks,
         maxChars: vectorMaxChars,
       });
+
+      if (temporalRange?.from && temporalRange?.to) {
+        const parseDate = (value) => {
+          if (!value || typeof value !== 'string') return null;
+          const trimmed = value.trim();
+          if (!trimmed) return null;
+          const ddmmyyyy = /\b(\d{2})\.(\d{2})\.(\d{4})\b/g;
+          const yyyymmdd = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
+          const picks = [];
+          let match;
+          while ((match = ddmmyyyy.exec(trimmed))) {
+            picks.push(`${match[3]}-${match[2]}-${match[1]}`);
+          }
+          while ((match = yyyymmdd.exec(trimmed))) {
+            picks.push(`${match[1]}-${match[2]}-${match[3]}`);
+          }
+          return picks;
+        };
+        const start = new Date(`${temporalRange.from}T00:00:00Z`);
+        const end = new Date(`${temporalRange.to}T23:59:59Z`);
+        const inRange = (dateStr) => {
+          const date = new Date(`${dateStr}T00:00:00Z`);
+          return !Number.isNaN(date.getTime()) && date >= start && date <= end;
+        };
+        const filtered = vectorChunks.filter((chunk) => {
+          const dates =
+            parseDate(chunk?.metadata?.created_at) ||
+            parseDate(chunk?.content) ||
+            [];
+          if (!dates.length) return false;
+          return dates.some(inRange);
+        });
+        if (filtered.length) {
+          vectorChunks = filtered;
+        } else {
+          logger?.debug?.('[rag.context.vector.date_filter_fallback]', {
+            conversationId,
+            reason: 'no_chunks_in_range',
+          });
+        }
+      }
 
       logger?.debug?.(
         `[rag.context.vector.raw] conversation=${conversationId} rawResults=${finalChunks.length} sanitizedChunks=${vectorChunks.length} topK=${finalTopK}`,
