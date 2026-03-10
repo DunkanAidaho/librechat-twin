@@ -167,7 +167,6 @@ async function buildContext({
   };
 
   let contextLength = 0;
-  let finalSystemContent = systemContent;
   const now = Date.now();
   let cacheStatus = 'skipped';
 
@@ -762,16 +761,7 @@ async function buildContext({
     });
 
     sanitizedBlock = ragBlock;
-    try {
-      sanitizedBlock = sanitizeInput(ragBlock);
-    } catch (error) {
-      logger?.error?.('[rag.context.sanitize.error]', {
-        message: error?.message,
-        stack: error?.stack,
-      });
-    }
 
-    finalSystemContent = sanitizedBlock + systemContent;
     contextLength = sanitizedBlock.length;
   }
 
@@ -882,7 +872,7 @@ async function buildContext({
 
   if (runtimeCfg?.enableMemoryCache) {
       ragCache.set(cacheKey, {
-        systemContent: finalSystemContent,
+        systemContent: sanitizedBlock,
         contextLength,
         metrics,
         vectorChunks,
@@ -913,7 +903,7 @@ async function buildContext({
   }
 
   return {
-    ragBlock: finalSystemContent,
+    ragBlock: sanitizedBlock,
     contextLength,
     cacheStatus,
     metrics,
