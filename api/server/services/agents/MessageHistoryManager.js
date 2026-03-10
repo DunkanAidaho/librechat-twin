@@ -408,6 +408,7 @@ class MessageHistoryManager {
               role: m?.isCreatedByUser ? 'user' : 'assistant',
               user_id: userId,
             };
+            // TEMP: content_dates diagnostics (remove after investigation)
             this.logger.info(
               '[DEBUG content_dates]',
               Object.assign(
