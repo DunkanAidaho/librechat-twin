@@ -7,7 +7,7 @@ const { getOrCreateKV, isEnabled: isNatsEnabled } = require('~/utils/natsClient'
 const { withTimeout } = require('~/utils/async');
 
 const logger = getLogger('rag.summaryCache');
-const DEFAULT_TIMEOUT_MS = 2000;
+const DEFAULT_TIMEOUT_MS = 10000;
 const KV_TTL_MS = 2_592_000_000; // 30 дней
 const KV_BUCKET = 'history_summary_cache';
 const KV_MAX_VALUE_SIZE = 524288;

@@ -1313,7 +1313,13 @@ class BaseClient {
       (this.clientName === EModelEndpoint.agents ||
         isParamEndpoint(this.options.endpoint, this.options.endpointType))
     ) {
-      responseMessage.text = '';
+      responseMessage.text = Array.isArray(completion)
+        ? completion
+          .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+          .map((part) => part.text)
+          .join('\n')
+          .trim()
+        : '';
 
       if (!opts.editedContent || this.currentMessages.length === 0) {
         responseMessage.content = completion;
