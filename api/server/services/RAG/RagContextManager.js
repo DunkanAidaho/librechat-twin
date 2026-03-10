@@ -57,7 +57,10 @@ function replaceRagBlock(systemContent = "", newBlock = "", logger = null) {
   const blockStart = safeSystem.indexOf(introSnippet);
 
   if (blockStart === -1) {
-    return safeBlock + safeSystem;
+    if (safeSystem.trim()) {
+      return `${safeBlock}\n${safeSystem}`;
+    }
+    return safeBlock;
   }
 
   const blockEnd = safeSystem.indexOf(BLOCK_FOOTER, blockStart);

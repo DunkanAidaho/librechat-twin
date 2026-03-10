@@ -1810,14 +1810,13 @@ class AgentClient extends BaseClient {
         const rawInstructions = instructionsForLangChain?.content ?? '';
         const rawAdditional = i !== 0 ? agent.additional_instructions ?? '' : '';
 
-        let systemContent = [
-          rawToolContext,
-          rawInstructions,
-          rawAdditional,
-        ]
-          .filter(Boolean)
-          .join('\n')
-          .trim();
+        let systemContent = rawInstructions;
+        if (rawToolContext && !systemContent.includes(rawToolContext)) {
+          systemContent = [rawToolContext, systemContent].filter(Boolean).join('\n').trim();
+        }
+        if (rawAdditional && !systemContent.includes(rawAdditional)) {
+          systemContent = [systemContent, rawAdditional].filter(Boolean).join('\n').trim();
+        }
 
         const systemContentHash = createHash('sha256').update(systemContent).digest('hex');
 
