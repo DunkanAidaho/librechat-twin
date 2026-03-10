@@ -326,6 +326,13 @@ async function applyDeferredCondensation({
     });
 
     const currentSystemContent = systemContentRef() || '';
+    logger?.debug?.('[diag.deferred.replaceRagBlock.input]', {
+      currentSystemContentLength: currentSystemContent.length,
+      containsBlockFooter: currentSystemContent.includes('\n<!-- /RAG_CONTEXT_BLOCK -->\n'),
+      containsPolicyIntroSnippet: currentSystemContent.includes('Ниже предоставлен'),
+      ragBlockEndsWithFooter: ragBlock.endsWith('\n<!-- /RAG_CONTEXT_BLOCK -->\n'),
+      ragBlockLength: ragBlock.length,
+    });
     const lengthBefore = currentSystemContent.length;
     const hashBefore = quickHash(currentSystemContent);
 
