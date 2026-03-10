@@ -46,13 +46,7 @@ function buildRagBlock({
 }
 
 function replaceRagBlock(systemContent = "", newBlock = "", logger = null) {
-  const safeBlock = sanitizeInput(newBlock);
-  logger?.debug?.('[diag.replaceRagBlock.sanitize]', {
-    newBlockEndsWithFooter: newBlock?.endsWith('\n<!-- /RAG_CONTEXT_BLOCK -->\n'),
-    safeBlockEndsWithFooter: safeBlock?.endsWith('\n<!-- /RAG_CONTEXT_BLOCK -->\n'),
-    newBlockLength: newBlock?.length,
-    safeBlockLength: safeBlock?.length,
-  });
+  const safeBlock = typeof newBlock === "string" ? newBlock : "";
   const safeSystem = typeof systemContent === "string" ? systemContent : "";
 
   if (!safeSystem.trim()) {
