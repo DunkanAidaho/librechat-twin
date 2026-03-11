@@ -672,18 +672,35 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
     }
 
     if (assistantText) {
-      tasks.push({
-        type: 'add_turn',
-        payload: {
-          conversation_id: localConversationId,
-          message_id: localResponse?.messageId,
-          role: localResponse?.role || 'assistant',
-          content: assistantText,
-          user_id: userId,
-          created_at: assistantCreatedAt,
-        },
-      });
-      messageIdsToMark.push(localResponse?.messageId);
+      const isTechnical =
+        assistantText.includes('не могу') ||
+        assistantText.includes('нет новост') ||
+        assistantText.includes('жду блок') ||
+        assistantText.includes('пришлите новости') ||
+        assistantText.includes('загрузка контекста завершена') ||
+        assistantText.includes('в текущем диалоге нет') ||
+        assistantText.includes('[...truncated...]');
+
+      if (!isTechnical) {
+        tasks.push({
+          type: 'add_turn',
+          payload: {
+            conversation_id: localConversationId,
+            message_id: localResponse?.messageId,
+            role: localResponse?.role || 'assistant',
+            content: assistantText,
+            user_id: userId,
+            created_at: assistantCreatedAt,
+          },
+        });
+        messageIdsToMark.push(localResponse?.messageId);
+      } else {
+        logger.debug('[processConversationArtifacts] Пропуск индексации технического сообщения ассистента', {
+          conversationId: localConversationId,
+          messageId: localResponse?.messageId,
+          snippet: assistantText.slice(0, 100),
+        });
+      }
     }
 
     if (tasks.length > 0) {
