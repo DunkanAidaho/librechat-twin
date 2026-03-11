@@ -433,11 +433,15 @@ async function buildContext({
           : 0,
       });
 
-      const finalChunks = Array.isArray(finalResponse?.data?.results)
-        ? finalResponse.data.results.map((item) => item?.content ?? '').filter(Boolean)
+      const finalResults = Array.isArray(finalResponse?.data?.results)
+        ? finalResponse.data.results.filter(Boolean)
         : [];
 
-      vectorChunks = sanitizeVectorChunks(finalChunks, {
+      const finalContents = finalResults
+        .map((item) => item?.content ?? '')
+        .filter(Boolean);
+
+      vectorChunks = sanitizeVectorChunks(finalContents, {
         maxChunks: vectorMaxChunks,
         maxChars: vectorMaxChars,
       });
@@ -465,16 +469,33 @@ async function buildContext({
           const date = new Date(`${dateStr}T00:00:00Z`);
           return !Number.isNaN(date.getTime()) && date >= start && date <= end;
         };
-        const filtered = vectorChunks.filter((chunk) => {
+        const parseContentDates = (contentDates) => {
+          if (!Array.isArray(contentDates)) {
+            return [];
+          }
+          return contentDates
+            .map((date) => parseDate(String(date)))
+            .flat()
+            .filter(Boolean);
+        };
+
+        const filteredResults = finalResults.filter((chunk) => {
           const dates =
+            parseContentDates(chunk?.metadata?.content_dates) ||
             parseDate(chunk?.metadata?.created_at) ||
             parseDate(chunk?.content) ||
             [];
           if (!dates.length) return false;
           return dates.some(inRange);
         });
-        if (filtered.length) {
-          vectorChunks = filtered;
+        if (filteredResults.length) {
+          vectorChunks = sanitizeVectorChunks(
+            filteredResults.map((item) => item?.content ?? '').filter(Boolean),
+            {
+              maxChunks: vectorMaxChunks,
+              maxChars: vectorMaxChars,
+            },
+          );
         } else {
           logger?.debug?.('[rag.context.vector.date_filter_fallback]', {
             conversationId,
@@ -484,7 +505,7 @@ async function buildContext({
       }
 
       logger?.debug?.(
-        `[rag.context.vector.raw] conversation=${conversationId} rawResults=${finalChunks.length} sanitizedChunks=${vectorChunks.length} topK=${finalTopK}`,
+        `[rag.context.vector.raw] conversation=${conversationId} rawResults=${finalContents.length} sanitizedChunks=${vectorChunks.length} topK=${finalTopK}`,
       );
     } catch (error) {
       logger?.error?.('[rag.context.vector.error]', {
