@@ -1,5 +1,5 @@
 const DEFAULT_LIMITS = Object.freeze({
-  budgetChars: 12000,
+  budgetChars: 30000,
   chunkChars: 20000,
   timeoutMs: 125000,
   minBudgetChars: 2000,

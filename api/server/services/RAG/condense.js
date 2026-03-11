@@ -170,12 +170,12 @@ function formatLengthRule(chunkLength) {
 
 function mapPrompt(userQuery, graphExtra, chunkLength) {
   const lengthRule = formatLengthRule(chunkLength);
-  const basePrompt = `Ты сжимаешь текст. Сохраняй только факты из входа.
+  const basePrompt = `Ты сжимаешь текст, сохраняя ключевые факты, даты и детали.
 Правила:
 1. ${lengthRule}
-2. ЖЁСТКО соблюдай лимит длины: не больше указанного числа символов.
+2. Соблюдай лимит длины, но старайся сохранить максимум конкретики (имена, цифры, события).
 3. Никаких новых сведений или рассуждений вне входного текста.
-4. Без заголовков, пояснений, нумерации и мета-комментариев — только результат.
+4. Без заголовков, пояснений и мета-комментариев — только результат.
 5. Если вход уже краткий или структурированный, верни его как есть.
 Запрос пользователя: ${userQuery || '(нет)'}
 Всегда отвечай на языке исходного текста.`;
@@ -734,17 +734,15 @@ async function condenseContext({
           }
 
           const prompt = `${mapPrompt(userQuery, graphExtra, chunkLength)}\n\n=== Текст чанка ===\n${chunk}`;
-          if (DEBUG_CONDENSE) {
-            logger.info(
-              'rag.condense.map_prompt',
-              buildContext(chunkContext, {
-                systemPrompt: SUMMARY_SYSTEM_PROMPT,
-                userPrompt: prompt,
-                chunkLength,
-                budgetChars,
-              }),
-            );
-          }
+          logger.info(
+            'rag.condense.map_prompt',
+            buildContext(chunkContext, {
+              systemPrompt: SUMMARY_SYSTEM_PROMPT,
+              userPrompt: prompt,
+              chunkLength,
+              budgetChars,
+            }),
+          );
           const cacheKey = cacheKeyChunk(
             chainSignature,
             budgetChars,
@@ -834,6 +832,7 @@ async function condenseContext({
                 provider: summaryProvider,
                 length: summaryText.length,
                 durationMs: Date.now() - chunkStartTime,
+                summarySnippet: summaryText.slice(0, 200),
               }),
             );
           }

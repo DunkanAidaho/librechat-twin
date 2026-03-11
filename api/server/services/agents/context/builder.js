@@ -442,68 +442,26 @@ async function buildContext({
         .map((item) => item?.content ?? '')
         .filter(Boolean);
 
+      logger?.debug?.('[rag.context.vector.search.results]', {
+        conversationId,
+        count: finalResults.length,
+        contentsLength: finalContents.join('\n').length,
+        firstResultSnippet: finalContents[0]?.slice(0, 100),
+      });
+
       vectorChunks = sanitizeVectorChunks(finalContents, {
         maxChunks: vectorMaxChunks,
         maxChars: vectorMaxChars,
       });
 
-      if (temporalRange?.from && temporalRange?.to) {
-        const parseDate = (value) => {
-          if (!value || typeof value !== 'string') return null;
-          const trimmed = value.trim();
-          if (!trimmed) return null;
-          const ddmmyyyy = /\b(\d{2})\.(\d{2})\.(\d{4})\b/g;
-          const yyyymmdd = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
-          const picks = [];
-          let match;
-          while ((match = ddmmyyyy.exec(trimmed))) {
-            picks.push(`${match[3]}-${match[2]}-${match[1]}`);
-          }
-          while ((match = yyyymmdd.exec(trimmed))) {
-            picks.push(`${match[1]}-${match[2]}-${match[3]}`);
-          }
-          return picks;
-        };
-        const start = new Date(`${temporalRange.from}T00:00:00Z`);
-        const end = new Date(`${temporalRange.to}T23:59:59Z`);
-        const inRange = (dateStr) => {
-          const date = new Date(`${dateStr}T00:00:00Z`);
-          return !Number.isNaN(date.getTime()) && date >= start && date <= end;
-        };
-        const parseContentDates = (contentDates) => {
-          if (!Array.isArray(contentDates)) {
-            return [];
-          }
-          return contentDates
-            .map((date) => parseDate(String(date)))
-            .flat()
-            .filter(Boolean);
-        };
-
-        const filteredResults = finalResults.filter((chunk) => {
-          const dates =
-            parseContentDates(chunk?.metadata?.content_dates) ||
-            parseDate(chunk?.metadata?.created_at) ||
-            parseDate(chunk?.content) ||
-            [];
-          if (!dates.length) return false;
-          return dates.some(inRange);
-        });
-        if (filteredResults.length) {
-          vectorChunks = sanitizeVectorChunks(
-            filteredResults.map((item) => item?.content ?? '').filter(Boolean),
-            {
-              maxChunks: vectorMaxChunks,
-              maxChars: vectorMaxChars,
-            },
-          );
-        } else {
-          logger?.debug?.('[rag.context.vector.date_filter_fallback]', {
-            conversationId,
-            reason: 'no_chunks_in_range',
-          });
-        }
-      }
+      // Note: Redundant local date filtering removed.
+      // We trust tools-gateway/rag/search date_filter results.
+      // This prevents dropping relevant chunks due to JS-side date parsing mismatches.
+      logger?.info?.('[rag.context.vector.date_filter.skipped]', {
+        conversationId,
+        resultCount: finalResults.length,
+        hasTemporalRange: Boolean(temporalRange?.from && temporalRange?.to),
+      });
 
       logger?.debug?.(
         `[rag.context.vector.raw] conversation=${conversationId} rawResults=${finalContents.length} sanitizedChunks=${vectorChunks.length} topK=${finalTopK}`,
