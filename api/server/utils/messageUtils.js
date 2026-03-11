@@ -149,10 +149,27 @@ function extractContentDates(text = '') {
     /\b\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?\b/g,
   ];
   const matches = new Set();
+  const normalize = (value) => {
+    if (/^\d{2}\.\d{2}\.\d{4}$/.test(value)) {
+      const [day, month, year] = value.split('.');
+      return `${year}-${month}-${day}`;
+    }
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
+      const [day, month, year] = value.split('/');
+      return `${year}-${month}-${day}`;
+    }
+    if (/^\d{4}\.\d{2}\.\d{2}$/.test(value)) {
+      return value.replace(/\./g, '-');
+    }
+    if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(value)) {
+      return value.slice(0, 10);
+    }
+    return value;
+  };
   for (const pattern of patterns) {
     const found = text.match(pattern);
     if (found) {
-      found.forEach((value) => matches.add(value));
+      found.forEach((value) => matches.add(normalize(value)));
     }
   }
   return Array.from(matches);
