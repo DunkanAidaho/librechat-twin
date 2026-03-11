@@ -408,6 +408,9 @@ class MessageHistoryManager {
               role: m?.isCreatedByUser ? 'user' : 'assistant',
               user_id: userId,
             };
+            taskPayload.metadata = {
+              role: taskPayload.role,
+            };
             // TEMP: content_dates diagnostics (remove after investigation)
             this.logger.info(
               '[DEBUG content_dates]',

@@ -407,6 +407,7 @@ async function buildContext({
         embedding_model: embeddingModel,
         conversation_id: conversationId,
         user_id: req?.user?.id,
+        include_user: Boolean(req?.ragIncludeUserMessages),
         ...(temporalRange?.from && temporalRange?.to
           ? {
               date_filter: {
