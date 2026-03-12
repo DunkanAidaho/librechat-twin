@@ -344,8 +344,8 @@ async function buildContext({
         ...(temporalRange?.from && temporalRange?.to
           ? {
               date_filter: {
-                from_date: temporalRange.from,
-                to_date: temporalRange.to,
+                from: temporalRange.from,
+                to: temporalRange.to,
               },
             }
           : {}),
@@ -424,8 +424,8 @@ async function buildContext({
         ...(temporalRange?.from && temporalRange?.to
           ? {
               date_filter: {
-                from_date: temporalRange.from,
-                to_date: temporalRange.to,
+                from: temporalRange.from,
+                to: temporalRange.to,
               },
             }
           : {}),
@@ -703,9 +703,7 @@ async function buildContext({
   const hasVector = vectorChunks.length > 0;
   let policyIntro =
     'Ниже предоставлен внутренний контекст для твоего сведения: граф знаний и выдержки из беседы. ' +
-    'Используй эти данные для формирования точного и полного ответа. ' +
-    'Категорически запрещается цитировать или пересказывать этот контекст, особенно строки, содержащие "-->". ' +
-    'Эта информация предназначена только для твоего внутреннего анализа.\n\n';
+    'Используй эти данные для формирования точного и полного ответа.\n\n';
 
   if (conversationSummary) {
     policyIntro = `Краткое содержание беседы: ${conversationSummary}\n\n${policyIntro}`;
