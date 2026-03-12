@@ -351,6 +351,17 @@ async function buildContext({
           : {}),
         include_graph: true,
       };
+      logger?.info?.('[rag.context.vector.search.payload]', {
+        conversation_id: seedPayload.conversation_id,
+        user_id: seedPayload.user_id,
+        top_k: seedPayload.top_k,
+        embedding_model: seedPayload.embedding_model,
+        include_graph: seedPayload.include_graph,
+        include_user: seedPayload.include_user,
+        date_filter: seedPayload.date_filter,
+        payloadBytes: Buffer.byteLength(JSON.stringify(seedPayload || {}), 'utf8'),
+        phase: 'seed',
+      });
       if (temporalRange?.from && temporalRange?.to) {
         logger?.debug?.('[rag.context.vector.date_filter]', {
           conversationId,
@@ -420,6 +431,17 @@ async function buildContext({
           : {}),
         include_graph: true,
       };
+      logger?.info?.('[rag.context.vector.search.payload]', {
+        conversation_id: searchPayload.conversation_id,
+        user_id: searchPayload.user_id,
+        top_k: searchPayload.top_k,
+        embedding_model: searchPayload.embedding_model,
+        include_graph: searchPayload.include_graph,
+        include_user: searchPayload.include_user,
+        date_filter: searchPayload.date_filter,
+        payloadBytes: Buffer.byteLength(JSON.stringify(searchPayload || {}), 'utf8'),
+        phase: 'final',
+      });
       const searchStart = Date.now();
       const finalResponse = await axios.post(
         `${toolsGatewayUrl}/rag/search`,
