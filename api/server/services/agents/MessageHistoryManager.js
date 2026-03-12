@@ -165,13 +165,18 @@ class MessageHistoryManager {
     return (
       lower.includes('не могу') ||
       lower.includes('нет новост') ||
+      lower.includes('новостная лента отсутствует') ||
+      lower.includes('новостная лента в текущем контексте отсутствует') ||
+      lower.includes('в текущем контексте отсутствует новостная лента') ||
       lower.includes('жду блок') ||
       lower.includes('пришлите новости') ||
       lower.includes('загрузка контекста завершена') ||
       lower.includes('в текущем диалоге нет') ||
       lower.includes('[...truncated...]') ||
       lower.includes('извините, новостей не найдено') ||
-      lower.includes('информации не найдено')
+      lower.includes('информации не найдено') ||
+      lower.includes('не удалось найти') ||
+      lower.includes('не имею доступа')
     );
   }
 
@@ -209,14 +214,13 @@ class MessageHistoryManager {
       lastProcessed = await this.lastProcessedStore.getLastProcessed(conversationId);
     }
 
-    const filteredMessages = [];
+    let filteredMessages = [...orderedMessages];
     if (hasFreshContext) {
-      let removedCount = 0;
-      for (const m of orderedMessages) {
+      const originalCount = filteredMessages.length;
+      filteredMessages = filteredMessages.filter((m) => {
         if (m?.role === 'assistant' && !m?.isCreatedByUser) {
           const text = extractMessageText(m, '[history->cleanup]', { silent: true });
           if (this.isTechnicalRefusal(text)) {
-            removedCount++;
             this.logger.info(
               'rag.history.refusal_removed',
               this.getLogContext(conversationId, userId, {
@@ -224,23 +228,23 @@ class MessageHistoryManager {
                 snippet: text.slice(0, 100),
               }),
             );
-            continue;
+            return false;
           }
         }
-        filteredMessages.push(m);
-      }
+        return true;
+      });
+
+      const removedCount = originalCount - filteredMessages.length;
       if (removedCount > 0) {
         this.logger.info(
           'rag.history.cleanup_done',
           this.getLogContext(conversationId, userId, {
             removedCount,
-            originalCount: orderedMessages.length,
+            originalCount,
             newCount: filteredMessages.length,
           }),
         );
       }
-    } else {
-      filteredMessages.push(...orderedMessages);
     }
 
     for (let idx = 0; idx < filteredMessages.length; idx++) {

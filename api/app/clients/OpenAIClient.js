@@ -312,9 +312,14 @@ class OpenAIClient extends BaseClient {
   }
 
   getEncoding() {
-    return this.modelOptions?.model && /gpt-4[^-\s]/.test(this.modelOptions.model)
-      ? 'o200k_base'
-      : 'cl100k_base';
+    const model = this.modelOptions?.model;
+    if (!model) {
+      return 'cl100k_base';
+    }
+    if (/\b(o1|o3|gpt-4o)\b/i.test(model)) {
+      return 'o200k_base';
+    }
+    return 'cl100k_base';
   }
 
   /**

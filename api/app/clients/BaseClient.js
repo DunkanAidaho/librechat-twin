@@ -1035,7 +1035,7 @@ class BaseClient {
     payload = this.addInstructions(payload ?? formattedMessages, _instructions);
 
     const latestMessage = orderedWithInstructions[orderedWithInstructions.length - 1];
-    if (payload.length === 0 && !shouldSummarize && latestMessage) {
+    if (payload.length === 0 && !shouldSummarize && latestMessage && latestMessage.tokenCount > this.maxContextTokens) {
       this.logger.warn(
         'clients.base.prompt_exceeds_context.debug',
         this.buildLogContext({
@@ -1061,20 +1061,20 @@ class BaseClient {
       payload[0].content === _instructions.content
     ) {
       const combinedTokens = (tokenCount || 0) + 3;
-      this.logger.warn(
-        'clients.base.prompt_with_instructions_exceeds.debug',
-        this.buildLogContext({
-          orderedMessages: orderedMessages.length,
-          formattedMessages: formattedMessages.length,
-          orderedWithInstructions: orderedWithInstructions.length,
-          payloadLength: payload.length,
-          instructionsTokens: tokenCount,
-          latestMessageTokens: latestMessage?.tokenCount,
-          combinedTokens,
-          maxContextTokens: this.maxContextTokens,
-        }),
-      );
       if (combinedTokens > this.maxContextTokens) {
+        this.logger.warn(
+          'clients.base.prompt_with_instructions_exceeds.debug',
+          this.buildLogContext({
+            orderedMessages: orderedMessages.length,
+            formattedMessages: formattedMessages.length,
+            orderedWithInstructions: orderedWithInstructions.length,
+            payloadLength: payload.length,
+            instructionsTokens: tokenCount,
+            latestMessageTokens: latestMessage?.tokenCount,
+            combinedTokens,
+            maxContextTokens: this.maxContextTokens,
+          }),
+        );
         const info = `${combinedTokens} / ${this.maxContextTokens}`;
         const errorMessage = `{ "type": "${ErrorTypes.INPUT_LENGTH}", "info": "${info}" }`;
         this.logger.warn(
@@ -1086,17 +1086,6 @@ class BaseClient {
         );
         throw new Error(errorMessage);
       }
-
-      const info = `payload_empty_after_history_trim; latestMessageTokens=${latestMessage?.tokenCount || 0} / ${this.maxContextTokens}`;
-      const errorMessage = `{ "type": "${ErrorTypes.INPUT_LENGTH}", "info": "${info}" }`;
-      this.logger.warn(
-        'clients.base.payload_empty_after_history_trim',
-        this.buildLogContext({
-          latestMessageTokens: latestMessage?.tokenCount,
-          maxContextTokens: this.maxContextTokens,
-        }),
-      );
-      throw new Error(errorMessage);
     }
 
     if (usePrevSummary) {
