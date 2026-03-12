@@ -1106,11 +1106,34 @@ ${convo}
     const appConfig = this.options.req?.config;
     let error = null;
     const requestStart = Date.now();
+
+    const logPayload = (messages) => {
+      if (!Array.isArray(messages)) {
+        return [];
+      }
+      return messages.map((m) => {
+        const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '');
+        const hasRag =
+          content.includes('Ниже предоставлен внутренний контекст') ||
+          content.includes('<!-- /RAG_CONTEXT_BLOCK -->');
+        return {
+          role: m.role,
+          length: content.length,
+          hasRag,
+          preview:
+            content.length > 200
+              ? `${content.slice(0, 100)}...${content.slice(-100)}`
+              : content,
+        };
+      });
+    };
+
     this.logger.info(
       'clients.openai.request_start',
       this.buildClientContext({
         model: this.modelOptions?.model,
         stream: typeof onProgress === 'function',
+        payload: logPayload(payload),
       }),
     );
     let intermediateReply = [];

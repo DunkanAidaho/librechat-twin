@@ -155,6 +155,27 @@ class MessageHistoryManager {
   }
 
   /**
+   * Detects if an assistant message is a technical refusal/failure
+   * @param {string} text
+   * @returns {boolean}
+   */
+  isTechnicalRefusal(text) {
+    if (!text || typeof text !== 'string') return false;
+    const lower = text.toLowerCase();
+    return (
+      lower.includes('не могу') ||
+      lower.includes('нет новост') ||
+      lower.includes('жду блок') ||
+      lower.includes('пришлите новости') ||
+      lower.includes('загрузка контекста завершена') ||
+      lower.includes('в текущем диалоге нет') ||
+      lower.includes('[...truncated...]') ||
+      lower.includes('извините, новостей не найдено') ||
+      lower.includes('информации не найдено')
+    );
+  }
+
+  /**
    * Processes message history for shrinking and RAG ingestion
    * @param {Object} params
    * @returns {Promise<{toIngest: Array, modifiedMessages: Array}>}
@@ -171,6 +192,7 @@ class MessageHistoryManager {
     contextHeadroom = 0,
     condenseContext = null,
     condenseChain = [],
+    hasFreshContext = false,
   }) {
     const toIngest = [];
     const config = typeof this.config === 'function' ? this.config() : this.config;
@@ -187,8 +209,42 @@ class MessageHistoryManager {
       lastProcessed = await this.lastProcessedStore.getLastProcessed(conversationId);
     }
 
-    for (let idx = 0; idx < orderedMessages.length; idx++) {
-      const m = orderedMessages[idx];
+    const filteredMessages = [];
+    if (hasFreshContext) {
+      let removedCount = 0;
+      for (const m of orderedMessages) {
+        if (m?.role === 'assistant' && !m?.isCreatedByUser) {
+          const text = extractMessageText(m, '[history->cleanup]', { silent: true });
+          if (this.isTechnicalRefusal(text)) {
+            removedCount++;
+            this.logger.info(
+              'rag.history.refusal_removed',
+              this.getLogContext(conversationId, userId, {
+                messageId: m?.messageId,
+                snippet: text.slice(0, 100),
+              }),
+            );
+            continue;
+          }
+        }
+        filteredMessages.push(m);
+      }
+      if (removedCount > 0) {
+        this.logger.info(
+          'rag.history.cleanup_done',
+          this.getLogContext(conversationId, userId, {
+            removedCount,
+            originalCount: orderedMessages.length,
+            newCount: filteredMessages.length,
+          }),
+        );
+      }
+    } else {
+      filteredMessages.push(...orderedMessages);
+    }
+
+    for (let idx = 0; idx < filteredMessages.length; idx++) {
+      const m = filteredMessages[idx];
       try {
         const rawText = extractMessageText(m, '[history->RAG]');
         const normalizedText = normalizeMemoryText(rawText);
@@ -493,12 +549,12 @@ class MessageHistoryManager {
       }),
     );
 
-    let finalMessages = orderedMessages;
+    let finalMessages = filteredMessages;
     let droppedMessages = [];
 
     if (historyMode === 'live_window' && liveWindowCfg.size > 0) {
       const { keptMessages, droppedMessages: dropped } = this.sliceLiveWindow({
-        orderedMessages,
+        orderedMessages: filteredMessages,
         size: liveWindowCfg.size,
         minUserMessages: liveWindowCfg.minUserMessages,
         minAssistantMessages: liveWindowCfg.minAssistantMessages,

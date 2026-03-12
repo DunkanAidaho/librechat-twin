@@ -898,6 +898,12 @@ class AgentClient extends BaseClient {
         ...message,
         importance: computeImportanceScore(message),
       }));
+
+      const hasFreshContext = Boolean(
+        (this.options?.req?.ragContextTokens > 0) ||
+        (this.options?.req?.ragMultiStep?.ragContext?.entities?.length > 0)
+      );
+
       const {
         toIngest = [],
         modifiedMessages,
@@ -915,6 +921,7 @@ class AgentClient extends BaseClient {
         contextHeadroom: headroom,
         condenseContext: ragCondense,
         condenseChain: condenseConfig?.chain || [],
+        hasFreshContext,
       });
 
       orderedMessages = modifiedMessages;
