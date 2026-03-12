@@ -165,6 +165,7 @@ class MessageHistoryManager {
     return (
       lower.includes('не могу') ||
       lower.includes('нет новост') ||
+      lower.includes('новостей нет') ||
       lower.includes('новостная лента отсутствует') ||
       lower.includes('новостная лента в текущем контексте отсутствует') ||
       lower.includes('в текущем контексте отсутствует новостная лента') ||
@@ -175,6 +176,7 @@ class MessageHistoryManager {
       lower.includes('[...truncated...]') ||
       lower.includes('извините, новостей не найдено') ||
       lower.includes('информации не найдено') ||
+      lower.includes('информация отсутствует') ||
       lower.includes('не удалось найти') ||
       lower.includes('не имею доступа')
     );
@@ -215,7 +217,12 @@ class MessageHistoryManager {
     }
 
     let filteredMessages = [...orderedMessages];
-    if (hasFreshContext) {
+    const isNewsContext = hasFreshContext && (
+      (typeof trimmer?.promptPrefix === 'string' && trimmer.promptPrefix.includes('АКТУАЛЬНЫЕ НОВОСТИ')) ||
+      (typeof trimmer?.promptPrefix === 'string' && trimmer.promptPrefix.includes('новост'))
+    );
+
+    if (isNewsContext) {
       const originalCount = filteredMessages.length;
       filteredMessages = filteredMessages.filter((m) => {
         if (m?.role === 'assistant' && !m?.isCreatedByUser) {

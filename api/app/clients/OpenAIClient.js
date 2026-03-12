@@ -1141,6 +1141,18 @@ ${convo}
         payload: logPayload(payload),
       }),
     );
+
+    // DEBUG: Log first 2000 chars of system prompt
+    const systemMsg = payload.find(m => m.role === 'system');
+    if (systemMsg) {
+      const content = typeof systemMsg.content === 'string' ? systemMsg.content : JSON.stringify(systemMsg.content);
+      this.logger.info(
+        'clients.openai.system_prompt_debug',
+        this.buildClientContext({
+          systemPromptPreview: content.slice(0, 2000),
+        }),
+      );
+    }
     let intermediateReply = [];
     const errorCallback = (err) => (error = err);
     try {
