@@ -41,6 +41,7 @@ const { queueGateway } = require('~/server/services/agents/queue');
 const { LongTextGraphWorker } = require('~/server/services/Graph/LongTextWorker');
 LongTextGraphWorker.start({ sendProgressEvents: true });
 const { makeIngestKey } = require('~/server/utils/messageUtils');
+const { extractDates } = require('~/server/services/agents/utils');
 
 const featuresConfig = configService.getSection('features');
 const ragConfig = configService.getSection('rag');
@@ -666,6 +667,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
           content: userContent,
           user_id: userId,
           created_at: userCreatedAt,
+          content_dates: extractDates(userContent),
         },
       });
       messageIdsToMark.push(localUserMessage.messageId);
@@ -691,6 +693,7 @@ const AgentController = async (req, res, next, initializeClient, addTitle) => {
             content: assistantText,
             user_id: userId,
             created_at: assistantCreatedAt,
+            content_dates: extractDates(assistantText),
           },
         });
         messageIdsToMark.push(localResponse?.messageId);

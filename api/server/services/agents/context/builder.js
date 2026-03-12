@@ -263,6 +263,7 @@ async function buildContext({
   let graphContextLines = [];
   let graphQueryHint = '';
   let rawGraphLinesCount = 0;
+  let conversationSummary = '';
 
   metrics.graphLines = graphContextLines.length;
   const temporalRewriteEnabled = Boolean(temporalRange?.from && temporalRange?.to);
@@ -339,15 +340,16 @@ async function buildContext({
         top_k: vectorTopKForSeeds,
         embedding_model: embeddingModel,
         conversation_id: conversationId,
-        user_id: req?.user?.id,
+        user_id: req?.user?.id || req?.user?._id,
         ...(temporalRange?.from && temporalRange?.to
           ? {
               date_filter: {
-                from: temporalRange.from,
-                to: temporalRange.to,
+                from_date: temporalRange.from,
+                to_date: temporalRange.to,
               },
             }
           : {}),
+        include_graph: true,
       };
       if (temporalRange?.from && temporalRange?.to) {
         logger?.debug?.('[rag.context.vector.date_filter]', {
@@ -406,16 +408,17 @@ async function buildContext({
         top_k: finalTopK,
         embedding_model: embeddingModel,
         conversation_id: conversationId,
-        user_id: req?.user?.id,
+        user_id: req?.user?.id || req?.user?._id,
         include_user: Boolean(req?.ragIncludeUserMessages),
         ...(temporalRange?.from && temporalRange?.to
           ? {
               date_filter: {
-                from: temporalRange.from,
-                to: temporalRange.to,
+                from_date: temporalRange.from,
+                to_date: temporalRange.to,
               },
             }
           : {}),
+        include_graph: true,
       };
       const searchStart = Date.now();
       const finalResponse = await axios.post(
@@ -441,6 +444,29 @@ async function buildContext({
       const finalContents = finalResults
         .map((item) => item?.content ?? '')
         .filter(Boolean);
+
+      const graphContext = finalResponse?.data?.graph_context;
+      if (graphContext) {
+        if (graphContext.summary) {
+          conversationSummary = graphContext.summary;
+          logger?.info?.('[rag.context.graph.summary]', {
+            conversationId,
+            summaryLength: conversationSummary.length,
+          });
+        }
+        if (Array.isArray(graphContext.lines) && graphContext.lines.length > 0) {
+          const sanitizedLines = sanitizeGraphContext(graphContext.lines, {
+            maxLines: graphMaxLines,
+            maxLineChars: graphMaxLineChars,
+          });
+          graphContextLines.push(...sanitizedLines);
+          rawGraphLinesCount += graphContext.lines.length;
+          logger?.info?.('[rag.context.graph.lines_from_search]', {
+            conversationId,
+            linesCount: sanitizedLines.length,
+          });
+        }
+      }
 
       logger?.debug?.('[rag.context.vector.search.results]', {
         conversationId,
@@ -487,7 +513,7 @@ async function buildContext({
         const recentPayload = {
           conversation_id: conversationId,
           limit: recentTurns,
-          user_id: req?.user?.id,
+          user_id: req?.user?.id || req?.user?._id,
         };
         const recentStart = Date.now();
         const recentResp = await axios.post(
@@ -567,7 +593,7 @@ async function buildContext({
 
   metrics.vectorChunks = vectorChunks.length;
 
-  if (toolsGatewayUrl) {
+  if (toolsGatewayUrl && graphContextLines.length === 0) {
     try {
       const graphEntities = intentEntities.length
         ? intentEntities
@@ -630,6 +656,12 @@ async function buildContext({
         stack: error?.stack,
       });
     }
+  } else if (graphContextLines.length > 0) {
+    logger?.info?.('[rag.context.graph.skip_fetch]', {
+      conversationId,
+      reason: 'already_have_lines_from_search',
+      linesCount: graphContextLines.length,
+    });
   } else {
     logger?.debug?.('[rag.context.graph.skip]', {
       conversationId,
@@ -641,16 +673,21 @@ async function buildContext({
     req.graphContext = {
       lines: graphContextLines,
       queryHint: graphQueryHint,
+      summary: conversationSummary,
     };
   }
 
   const hasGraph = graphContextLines.length > 0;
   const hasVector = vectorChunks.length > 0;
-  const policyIntro =
+  let policyIntro =
     'Ниже предоставлен внутренний контекст для твоего сведения: граф знаний и выдержки из беседы. ' +
     'Используй эти данные для формирования точного и полного ответа. ' +
     'Категорически запрещается цитировать или пересказывать этот контекст, особенно строки, содержащие "-->". ' +
     'Эта информация предназначена только для твоего внутреннего анализа.\n\n';
+
+  if (conversationSummary) {
+    policyIntro = `Краткое содержание беседы: ${conversationSummary}\n\n${policyIntro}`;
+  }
 
   let vectorText = '';
   let rawVectorTextLength = 0;

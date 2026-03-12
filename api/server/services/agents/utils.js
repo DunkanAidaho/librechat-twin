@@ -148,7 +148,34 @@ function compressMessagesForRetry(messages, targetReduction = 0.5) {
   return compressed;
 }
 
+/**
+ * Extracts dates from text in DD.MM.YYYY or YYYY-MM-DD format.
+ * Returns array of ISO date strings (YYYY-MM-DD).
+ * @param {string} text
+ * @returns {string[]}
+ */
+function extractDates(text) {
+  if (!text || typeof text !== 'string') {
+    return [];
+  }
+
+  const ddmmyyyy = /\b(\d{2})\.(\d{2})\.(\d{4})\b/g;
+  const yyyymmdd = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
+  const results = new Set();
+
+  let match;
+  while ((match = ddmmyyyy.exec(text)) !== null) {
+    results.add(`${match[3]}-${match[2]}-${match[1]}`);
+  }
+  while ((match = yyyymmdd.exec(text)) !== null) {
+    results.add(`${match[1]}-${match[2]}-${match[3]}`);
+  }
+
+  return Array.from(results);
+}
+
 module.exports = {
   detectContextOverflow,
   compressMessagesForRetry,
+  extractDates,
 };

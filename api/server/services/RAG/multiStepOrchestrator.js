@@ -223,6 +223,8 @@ async function runMultiStepRag({
   }
 
   const initialGraphLines = Array.isArray(graphContext?.lines) ? graphContext.lines : [];
+  const initialSummary = graphContext?.summary || '';
+
   if (initialGraphLines.length) {
     for (const entity of entities) {
       const lines = initialGraphLines.filter((line) =>
@@ -255,6 +257,7 @@ async function runMultiStepRag({
       buildContext(baseLogContext, {
         passIndex,
         entities: entityStates.map((e) => e.name),
+        hasInitialSummary: Boolean(initialSummary),
       }),
     );
 
@@ -267,6 +270,24 @@ async function runMultiStepRag({
     }
 
     for (const entityState of entityStates) {
+      // Hybrid search for entity refinement
+      const hybridResult = await fetch(`${runtimeCfg?.toolsGateway?.url}/rag/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: entityState.name,
+          user_id: userId,
+          conversation_id: conversationId,
+          top_k: 3,
+          include_graph: true,
+          embedding_model: 'e5'
+        })
+      }).then(r => r.ok ? r.json() : null).catch(() => null);
+
+      if (hybridResult?.results?.some(r => r.metadata.match_type === 'keyword' || r.metadata.match_type === 'graph')) {
+        logger.info('rag.multiStep.early_refinement', { entity: entityState.name, match: 'exact' });
+      }
+
       const graphResult = await fetchGraph({
         fetchGraphContext:
           config.graph?.followUp === false ? null : fetchGraphContext,

@@ -302,13 +302,49 @@ class RagContextBuilder extends BaseService {
     endpointOption,
     context
   }) {
-    // Здесь должна быть логика построения обычного контекста
-    // Включая работу с vector store и т.д.
-    
+    const toolsGatewayUrl = runtimeCfg?.toolsGateway?.url;
+    const userId = req?.user?.id;
+    const conversationId = context.conversationId;
+
+    let vectorText = '';
+    let searchResults = [];
+
+    if (toolsGatewayUrl && userId) {
+      try {
+        const response = await fetch(`${toolsGatewayUrl}/rag/search`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: userQuery,
+            user_id: userId,
+            conversation_id: conversationId,
+            top_k: runtimeCfg?.vectorContext?.topK || 10,
+            include_graph: runtimeCfg?.useGraphContext || false,
+            embedding_model: runtimeCfg?.vectorContext?.model || 'e5'
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          searchResults = data.results || [];
+          vectorText = searchResults.map(r => r.content).join('\n\n');
+          
+          if (data.graph_context && !graphContext) {
+            graphContext = {
+              lines: data.graph_context.lines,
+              queryHint: data.graph_context.queryHint
+            };
+          }
+        }
+      } catch (error) {
+        this.log('error', '[rag.context.search.error]', { error: error.message });
+      }
+    }
+
     const ragBlock = buildRagBlock({
       policyIntro: 'RAG context:',
       graphLines: graphContext?.lines || [],
-      vectorText: '' // TODO: добавить работу с vector store
+      vectorText
     });
 
     if (this.metrics) {

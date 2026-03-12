@@ -1043,6 +1043,9 @@ class AgentClient extends BaseClient {
         : { globalContext: systemContent, entities: [], passesUsed: 0, queueStatus: {} };
 
       systemContent = multiStepResult.globalContext || systemContent;
+      if (req?.graphContext?.summary && !systemContent.includes(req.graphContext.summary)) {
+        systemContent = `Краткое содержание беседы: ${req.graphContext.summary}\n\n${systemContent}`;
+      }
       rebalanceHistoryBudget('post_multistep_global', systemContent);
       const deferred = getDeferredContext(req);
       if (deferred && deferred.vectorText?.length) {
