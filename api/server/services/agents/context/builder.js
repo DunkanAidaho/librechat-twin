@@ -335,12 +335,17 @@ async function buildContext({
   if (toolsGatewayUrl) {
     try {
       const vectorTopKForSeeds = Math.min(vectorTopK, Math.max(1, Math.ceil(vectorTopK / 2)));
+      const contentTypeFilter =
+        req?.body?.content_type || req?.body?.metadata?.content_type || req?.ragContentType;
+      const rolesFilter = ['user'];
       const seedPayload = {
         query: ragSearchQuery,
         top_k: vectorTopKForSeeds,
         embedding_model: embeddingModel,
         conversation_id: conversationId,
         user_id: req?.user?.id || req?.user?._id,
+        roles: rolesFilter,
+        ...(contentTypeFilter ? { content_type: contentTypeFilter } : {}),
         ...(temporalRange?.from && temporalRange?.to
           ? {
               date_filter: {
@@ -421,6 +426,8 @@ async function buildContext({
         conversation_id: conversationId,
         user_id: req?.user?.id || req?.user?._id,
         include_user: Boolean(req?.ragIncludeUserMessages),
+        roles: rolesFilter,
+        ...(contentTypeFilter ? { content_type: contentTypeFilter } : {}),
         ...(temporalRange?.from && temporalRange?.to
           ? {
               date_filter: {
