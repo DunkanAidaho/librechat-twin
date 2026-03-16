@@ -16,8 +16,16 @@ Dockerfile.librechat
 backup/
 node_modules/
 ui/
+garbage/
+telegraph_poster/
 backups/
-backend/
+backend/tools-gateway/services/__pycache__/
+backend/backups/
+backend/.git_disabled/
+backend/logs/
+backend/data/
+backend/db/
+backend/neo4j/
 logs/
 data/
 neo4j/
