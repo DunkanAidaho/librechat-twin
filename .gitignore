@@ -25,7 +25,7 @@ backend/.git_disabled/
 backend/logs/
 backend/data/
 backend/db/
-backend/neo4j/
+#backend/
 logs/
 data/
 neo4j/
